@@ -273,6 +273,10 @@ export function calculateStackedCloudOffsets(
     options: CalculateStackedCloudOffsetsOptions
 ): CloudOffsetInfo[] {
     const { expandableNodes, currentEdges, layoutSubflowNodesVertical } = options;
+    if (expandableNodes.length === 0) {
+        return [];
+    }
+
     const cloudPadding = EXPANDABLE_CLOUD_PADDING;
     const verticalGap = 80;
     const horizontalGap = EXPANDABLE_CLOUD_GAP;

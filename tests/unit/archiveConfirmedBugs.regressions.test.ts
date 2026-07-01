@@ -23,7 +23,7 @@ describe('confirmed bug regression anchors from archive/multiple_bugs.txt', () =
 
     it('#4 scopes dead-column SQL matching to the owning CTE body', () => {
         const source = readSource('src/webview/parser/hints/advancedIssues.ts');
-        expect(source).toContain('const fullNormalizedSql = sql.replace');
+        expect(source).toContain('const fullNormalizedSql = stripSqlComments(sql).replace');
         expect(source).toContain("const ctePattern = new RegExp(`\\\\b${escapeRegex(cteName)}\\\\b\\\\s+as\\\\s*\\\\(`, 'i');");
         expect(source).toContain('let depth = 1;');
         expect(source).toContain('normalizedSql = fullNormalizedSql.substring(bodyStart, bodyEnd).trim();');
@@ -48,7 +48,9 @@ describe('confirmed bug regression anchors from archive/multiple_bugs.txt', () =
     it('#9 uses full-line matching instead of the old 30-char prefix heuristic', () => {
         const source = readSource('src/webview/sqlParser.ts');
         expect(source).toContain('const matchPrefix = stmtFirstLine.trimEnd();');
-        expect(source).toContain('if (matchPrefix.length < 30 && stmtSecondLine && i + 1 < lines.length)');
+        expect(source).toContain('return normalizeStatementLineForMatch(sourceLine) === normalizeStatementLineForMatch(statementLine);');
+        expect(source).toContain('if (lineMatchesStatementLine(lines[i], matchPrefix)) {');
+        expect(source).not.toContain('matchPrefix.length < 30');
         expect(source).not.toContain('substring(0, Math.min(30');
     });
 

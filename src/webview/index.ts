@@ -1440,6 +1440,7 @@ async function visualize(sql: string): Promise<void> {
         updateBatchTabsUI();
         renderCurrentQuery();
         schedulePersistUiState();
+        hideGlobalLoading();
         return;
     }
 

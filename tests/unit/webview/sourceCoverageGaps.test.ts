@@ -48,4 +48,24 @@ describe('webview source coverage gaps', () => {
         expect(source).toContain('Node-level tooltip handlers remain attached in renderNode().');
         expect(source).not.toContain("document.addEventListener('mouseover'");
     });
+
+    it('keeps column lineage panel escaping, keyboard close, search, and highlight wiring', () => {
+        const source = readWebviewFile('features/columnLineage.ts');
+
+        expect(source).toContain('export function showColumnLineagePanelFeature');
+        expect(source).toContain('export function showLineagePathFeature');
+        expect(source).toContain('export function highlightLineageNodesFeature');
+        expect(source).toContain('export function highlightColumnSourcesFeature');
+        expect(source).toContain('escapeHtml(flow.outputColumn)');
+        expect(source).toContain('escapeHtml(firstStep.nodeName)');
+        expect(source).toContain('escapeHtml(firstStep.columnName)');
+        expect(source).toContain('escapeHtml(step.expression)');
+        expect(source).toContain("header.querySelector<HTMLButtonElement>('#column-lineage-panel-close')?.addEventListener('click'");
+        expect(source).toContain("if (e.key !== 'Escape')");
+        expect(source).toContain("item.setAttribute('data-column-name', flow.outputColumn.toLowerCase());");
+        expect(source).toContain("const items = columnList.querySelectorAll('[data-column-name]');");
+        expect(source).toContain('state.highlightedColumnSources = lineage.sources.map((source) => source.nodeId).filter(Boolean);');
+        expect(source).toContain('highlightPathToSelect(mainGroup, currentNodes, currentEdges, state.highlightedColumnSources, edgeColors.columnLineage);');
+        expect(source).not.toMatch(/onclick=/);
+    });
 });

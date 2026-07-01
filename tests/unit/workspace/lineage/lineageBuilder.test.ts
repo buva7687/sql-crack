@@ -2,10 +2,16 @@
  * LineageBuilder Tests
  *
  * Tests for building lineage graphs from workspace index data.
- * Uses jest.mock('fs') for CTE extraction; constructs mock WorkspaceIndex objects.
+ * Uses jest.mock('fs') for async SQL preloading; constructs mock WorkspaceIndex objects.
  */
 
-jest.mock('fs');
+jest.mock('fs', () => ({
+    existsSync: jest.fn(),
+    readFileSync: jest.fn(),
+    promises: {
+        readFile: jest.fn()
+    }
+}));
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -106,14 +112,6 @@ function makeFileAnalysis(
 describe('LineageBuilder', () => {
     beforeEach(() => {
         jest.resetAllMocks();
-        // Default: files don't exist (no CTE regex fallback from disk)
-        mockedFs.existsSync.mockReturnValue(false);
-        Object.defineProperty(mockedFs, 'promises', {
-            configurable: true,
-            value: {
-                readFile: jest.fn(),
-            },
-        });
     });
 
     describe('buildFromIndex', () => {
@@ -223,28 +221,24 @@ describe('LineageBuilder', () => {
             expect(builder.nodes.get('cte:recent_orders')!.type).toBe('cte');
         });
 
-        it('logs parser fallback when CTE AST parsing fails and regex extraction is used', () => {
+        it('logs parser fallback when CTE AST parsing fails and regex extraction is used', async () => {
             const debugSpy = jest.spyOn(logger, 'debug').mockImplementation(() => {});
-            mockedFs.existsSync.mockReturnValue(true);
-            mockedFs.readFileSync.mockReturnValue('WITH broken AS (SELECT FROM) SELECT *');
+            (mockedFs.promises.readFile as jest.Mock).mockResolvedValue('WITH broken AS (SELECT FROM) SELECT *');
 
             const fileAnalysis = makeFileAnalysis('broken.sql', [], [], []);
             const files = new Map([['broken.sql', fileAnalysis]]);
             const index = makeIndex([], files);
 
             const builder = new LineageBuilder();
-            builder.buildFromIndex(index);
+            await builder.buildFromIndexAsync(index);
 
             expect(debugSpy).toHaveBeenCalledWith(expect.stringContaining('using regex fallback'));
             debugSpy.mockRestore();
         });
 
-        it('logs warning when SQL read fails during CTE/alias extraction in edge building', () => {
+        it('logs warning when async SQL preload cannot provide SQL for CTE/alias extraction', async () => {
             const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => {});
-            mockedFs.existsSync.mockReturnValue(true);
-            mockedFs.readFileSync.mockImplementation(() => {
-                throw new Error('EACCES');
-            });
+            (mockedFs.promises.readFile as jest.Mock).mockRejectedValue(new Error('EACCES'));
 
             // queries present => skips earlier CTE-on-disk fallback pass and targets addFileEdges() path
             const fileAnalysis = makeFileAnalysis(
@@ -257,7 +251,7 @@ describe('LineageBuilder', () => {
             const index = makeIndex([], files);
 
             const builder = new LineageBuilder();
-            builder.buildFromIndex(index);
+            await builder.buildFromIndexAsync(index);
 
             expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('CTE/alias extraction (restricted.sql)'));
             warnSpy.mockRestore();
@@ -289,6 +283,20 @@ describe('LineageBuilder', () => {
             builder.buildFromIndex(index2);
             expect(builder.nodes.has('table:old_table')).toBe(false);
             expect(builder.nodes.has('table:new_table')).toBe(true);
+        });
+
+        it('does not synchronously read SQL files when SQL was not preloaded', () => {
+            mockedFs.readFileSync.mockImplementation(() => {
+                throw new Error('sync read should not be used');
+            });
+
+            const fileAnalysis = makeFileAnalysis('no_preload.sql', [], [], []);
+            const files = new Map([['no_preload.sql', fileAnalysis]]);
+            const index = makeIndex([], files);
+
+            const builder = new LineageBuilder();
+            expect(() => builder.buildFromIndex(index)).not.toThrow();
+            expect(mockedFs.readFileSync).not.toHaveBeenCalled();
         });
     });
 
@@ -368,6 +376,30 @@ describe('LineageBuilder', () => {
 
             // CTE reference should not create an external node or edge
             expect(builder.nodes.has('external:my_cte')).toBe(false);
+        });
+
+        it('resolves a view reference to the existing view node, not a stray external node', () => {
+            // A view feeds an INSERT in the same statement. The edge source must
+            // resolve to the real `view:` node; checking only `table:` would
+            // create an `external:` node and orphan the view in the graph.
+            const viewDef = makeDef('customer_view', 'view', [], { filePath: 'views.sql' });
+            const targetDef = makeDef('customer_report', 'table', [], { filePath: 'pipeline.sql' });
+            const refs = [
+                makeRef('customer_view', 'select', { filePath: 'pipeline.sql', statementIndex: 0 }),
+                makeRef('customer_report', 'insert', { filePath: 'pipeline.sql', statementIndex: 0 })
+            ];
+            const fa = makeFileAnalysis('pipeline.sql', [targetDef], refs);
+            const files = new Map([['pipeline.sql', fa]]);
+            const index = makeIndex([viewDef, targetDef], files);
+
+            const builder = new LineageBuilder({ includeExternal: true, includeColumns: false });
+            builder.buildFromIndex(index);
+
+            expect(builder.nodes.has('external:customer_view')).toBe(false);
+            const edge = builder.edges.find(e =>
+                e.sourceId === 'view:customer_view' && e.targetId === 'table:customer_report'
+            );
+            expect(edge).toBeDefined();
         });
     });
 
@@ -456,10 +488,9 @@ describe('LineageBuilder', () => {
     });
 
     describe('extractCTEsWithRegex', () => {
-        it('extracts simple CTEs from SQL on disk', () => {
+        it('extracts simple CTEs from preloaded SQL', async () => {
             const sql = 'WITH my_cte AS (\n  SELECT * FROM orders\n)\nSELECT * FROM my_cte';
-            mockedFs.existsSync.mockReturnValue(true);
-            mockedFs.readFileSync.mockReturnValue(sql);
+            (mockedFs.promises.readFile as jest.Mock).mockResolvedValue(sql);
 
             // Build index with a file that has no queries (triggers regex fallback)
             const fa = makeFileAnalysis('cte_test.sql', [], []);
@@ -467,38 +498,36 @@ describe('LineageBuilder', () => {
             const index = makeIndex([], files);
 
             const builder = new LineageBuilder();
-            builder.buildFromIndex(index);
+            await builder.buildFromIndexAsync(index);
 
             expect(builder.nodes.has('cte:my_cte')).toBe(true);
         });
 
-        it('extracts RECURSIVE CTEs', () => {
+        it('extracts RECURSIVE CTEs from preloaded SQL', async () => {
             const sql = 'WITH RECURSIVE hierarchy AS (\n  SELECT 1\n)\nSELECT * FROM hierarchy';
-            mockedFs.existsSync.mockReturnValue(true);
-            mockedFs.readFileSync.mockReturnValue(sql);
+            (mockedFs.promises.readFile as jest.Mock).mockResolvedValue(sql);
 
             const fa = makeFileAnalysis('rec.sql', [], []);
             const files = new Map([['rec.sql', fa]]);
             const index = makeIndex([], files);
 
             const builder = new LineageBuilder();
-            builder.buildFromIndex(index);
+            await builder.buildFromIndexAsync(index);
 
             expect(builder.nodes.has('cte:hierarchy')).toBe(true);
         });
 
-        it('filters out SQL reserved words', () => {
+        it('filters out SQL reserved words from preloaded SQL', async () => {
             // "WITH SELECT AS (" should not match — SELECT is reserved
             const sql = 'SELECT * FROM foo';
-            mockedFs.existsSync.mockReturnValue(true);
-            mockedFs.readFileSync.mockReturnValue(sql);
+            (mockedFs.promises.readFile as jest.Mock).mockResolvedValue(sql);
 
             const fa = makeFileAnalysis('no_cte.sql', [], []);
             const files = new Map([['no_cte.sql', fa]]);
             const index = makeIndex([], files);
 
             const builder = new LineageBuilder();
-            builder.buildFromIndex(index);
+            await builder.buildFromIndexAsync(index);
 
             // No CTE nodes should be created from reserved words
             for (const [id] of builder.nodes) {
@@ -542,6 +571,34 @@ describe('LineageBuilder', () => {
 
             const downstream = builder.getDownstream('table:source');
             expect(downstream.some(n => n.id === 'table:target')).toBe(true);
+        });
+
+        it('handles deep graph-interface traversals without overflowing the call stack', () => {
+            const nodeCount = 12000;
+            const builder = new LineageBuilder();
+
+            for (let i = 0; i < nodeCount; i++) {
+                const nodeId = `table:chain_${i}`;
+                builder.nodes.set(nodeId, {
+                    id: nodeId,
+                    type: 'table',
+                    name: `chain_${i}`,
+                    metadata: {}
+                });
+
+                if (i > 0) {
+                    (builder as any).addEdge({
+                        id: `edge_${i - 1}_${i}`,
+                        sourceId: `table:chain_${i - 1}`,
+                        targetId: nodeId,
+                        type: 'direct',
+                        metadata: {}
+                    });
+                }
+            }
+
+            expect(builder.getDownstream('table:chain_0')).toHaveLength(nodeCount - 1);
+            expect(builder.getUpstream(`table:chain_${nodeCount - 1}`)).toHaveLength(nodeCount - 1);
         });
     });
 

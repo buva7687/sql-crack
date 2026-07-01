@@ -119,6 +119,26 @@ describe('FlowAnalyzer', () => {
             const result = fa.getUpstream('C');
             expect(result.depth).toBeGreaterThanOrEqual(1);
         });
+
+        it('handles a deep upstream chain without overflowing the call stack', () => {
+            const nodeCount = 12000;
+            const nodes: LineageNode[] = [];
+            const edges: LineageEdge[] = [];
+
+            for (let i = 0; i < nodeCount; i++) {
+                nodes.push(makeNode(`N${i}`));
+                if (i > 0) {
+                    edges.push(makeEdge(`N${i - 1}`, `N${i}`));
+                }
+            }
+
+            const graph = createMockGraph(nodes, edges);
+            const fa = new FlowAnalyzer(graph);
+            const result = fa.getUpstream(`N${nodeCount - 1}`);
+
+            expect(result.nodes).toHaveLength(nodeCount - 1);
+            expect(result.depth).toBe(nodeCount - 1);
+        });
     });
 
     describe('getDownstream', () => {
@@ -159,6 +179,26 @@ describe('FlowAnalyzer', () => {
             const fa = new FlowAnalyzer(graph);
             const result = fa.getDownstream('A', { filterTypes: ['view'] });
             expect(result.nodes.map(n => n.id)).toEqual(['B']);
+        });
+
+        it('handles a deep downstream chain without overflowing the call stack', () => {
+            const nodeCount = 12000;
+            const nodes: LineageNode[] = [];
+            const edges: LineageEdge[] = [];
+
+            for (let i = 0; i < nodeCount; i++) {
+                nodes.push(makeNode(`N${i}`));
+                if (i > 0) {
+                    edges.push(makeEdge(`N${i - 1}`, `N${i}`));
+                }
+            }
+
+            const graph = createMockGraph(nodes, edges);
+            const fa = new FlowAnalyzer(graph);
+            const result = fa.getDownstream('N0');
+
+            expect(result.nodes).toHaveLength(nodeCount - 1);
+            expect(result.depth).toBe(nodeCount - 1);
         });
     });
 

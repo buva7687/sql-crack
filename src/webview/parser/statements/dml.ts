@@ -519,19 +519,24 @@ export function tryProcessDmlStatements(args: ProcessDmlStatementsArgs): string 
                 height: 60
             });
 
-            const targetTables = context.statementType === 'delete'
-                ? resolveDeleteTargetTableNames(stmt, getTableName)
-                : (stmt.table ? (Array.isArray(stmt.table) ? stmt.table : [stmt.table]).map((tableRef: any) => getTableName(tableRef)).filter(Boolean) : []);
+            const resolvedTargets: Array<{ name: string; countsAsNewTable: boolean }> = context.statementType === 'delete'
+                ? resolveDeleteTargetTableNames(stmt, getTableName).map((name: string) => ({ name, countsAsNewTable: true }))
+                : resolveUpdateTargetInfos(stmt, getTableName);
             const opType = context.statementType.toUpperCase() as 'INSERT' | 'UPDATE' | 'DELETE' | 'MERGE' | 'CREATE_TABLE_AS';
             const targetIds: string[] = [];
 
-            for (const t of targetTables) {
-                const tableName = typeof t === 'string' ? t : getTableName(t);
+            for (const { name: tableName, countsAsNewTable } of resolvedTargets) {
                 if (!tableName) {
                     continue;
                 }
-                context.stats.tables++;
-                trackTargetTable(context, tableName);
+                // When the target is an alias of a table already rendered as a FROM source
+                // (T-SQL `UPDATE <alias> ... FROM <table> <alias>`), it is the same physical
+                // table, so don't count it again — doing so inflated the table count and
+                // produced a false "Possible Cartesian product" hint (issue #88).
+                if (countsAsNewTable) {
+                    context.stats.tables++;
+                    trackTargetTable(context, tableName);
+                }
                 const targetId = genId('table');
                 nodes.push({
                     id: targetId,
@@ -562,6 +567,10 @@ export function tryProcessDmlStatements(args: ProcessDmlStatementsArgs): string 
             let inboundToTargets = uniqueSourceRootIds;
             if (stmt.where) {
                 const conditionDetails = extractConditions(stmt.where);
+                // Count the WHERE predicates so they surface in the Filters stat and so a
+                // genuine filter/join condition suppresses the Cartesian-product heuristic
+                // (the synthetic FROM-source SELECT carries no WHERE of its own).
+                context.stats.conditions += conditionDetails.length;
                 const filterId = genId('filter');
                 nodes.push({
                     id: filterId,
@@ -653,6 +662,49 @@ export function resolveDeleteTargetTableNames(stmt: any, getTableName: GetTableN
         const lookupKey = normalizeIdentifier(rawName).toLowerCase();
         return aliasToTable.get(lookupKey) || rawName;
     }));
+}
+
+export function resolveUpdateTargetInfos(
+    stmt: any,
+    getTableName: GetTableNameFn
+): Array<{ name: string; countsAsNewTable: boolean }> {
+    const targetTables = stmt.table ? (Array.isArray(stmt.table) ? stmt.table : [stmt.table]) : [];
+    if (targetTables.length === 0) {
+        return [];
+    }
+
+    // Map each FROM alias to its real table name. In T-SQL, `UPDATE <alias> ... FROM <table> <alias>`
+    // reports the alias as the update "table", so resolve it back to the underlying table.
+    const fromItems = Array.isArray(stmt.from) ? stmt.from : [];
+    const aliasToTable = new Map<string, string>();
+    for (const fromItem of fromItems) {
+        const tableName = getTableName(fromItem);
+        if (!tableName) {
+            continue;
+        }
+        const alias = getNormalizedAlias(fromItem);
+        if (alias) {
+            aliasToTable.set(alias.toLowerCase(), tableName);
+        }
+    }
+
+    return targetTables
+        .map((targetRef: any) => {
+            const rawName = getTableName(targetRef);
+            if (!rawName) {
+                return null;
+            }
+            const key = normalizeIdentifier(rawName).toLowerCase();
+            const matchedSourceTable = aliasToTable.get(key);
+            return {
+                // Prefer the resolved table name so the write target isn't labeled with the alias.
+                name: matchedSourceTable || rawName,
+                // If the target is an alias of an existing FROM source, it's the same physical
+                // table already counted/rendered — don't double-count it.
+                countsAsNewTable: !matchedSourceTable,
+            };
+        })
+        .filter((info: { name: string; countsAsNewTable: boolean } | null): info is { name: string; countsAsNewTable: boolean } => Boolean(info && info.name));
 }
 
 function getUpdateSourceFromItems(stmt: any, getTableName: GetTableNameFn): any[] {

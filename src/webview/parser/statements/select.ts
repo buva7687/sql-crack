@@ -61,7 +61,7 @@ function trackFunctionUsage(
 
 /** Extract column name string from AST column_ref (handles PostgreSQL wrapped object form). */
 function resolveColumnName(col: any): string {
-    if (col === null || col === undefined) { return '?'; }
+    if (col === null || col === undefined) { return ''; }
     if (typeof col === 'string') { return col; }
     if (typeof col === 'number') { return String(col); }
     if (typeof col === 'object') {
@@ -73,16 +73,22 @@ function resolveColumnName(col: any): string {
         // Function call: { type: 'function', name: { ... } }
         if (col.type === 'function' && col.name) {
             const fname = typeof col.name === 'string' ? col.name : col.name?.name?.[0]?.value || col.name;
-            return typeof fname === 'string' ? `${fname}(...)` : '?';
+            return typeof fname === 'string' ? `${fname}(...)` : '';
         }
         // Aggregate expression: { type: 'aggr_func', name: 'COUNT' }
         if (col.type === 'aggr_func' && col.name) { return `${col.name}(...)`; }
+        // CASE expression: { type: 'case', args: [...] } or parser variants with expr
+        if (col.type === 'case') { return 'CASE'; }
+        // Window function wrappers often expose the function under expr/over.
+        if ((col.type === 'window_func' || col.over) && col.expr) {
+            return resolveColumnName(col.expr);
+        }
         // Binary expression: { type: 'binary_expr', operator: '+', left, right }
         if (col.type === 'binary_expr' && col.operator) { return `expr(${col.operator})`; }
         // Cast: { type: 'cast', expr, target }
         if (col.type === 'cast' && col.expr) { return `CAST(${resolveColumnName(col.expr)})`; }
     }
-    return '?';
+    return '';
 }
 
 export function processSelectStatement(
@@ -264,6 +270,7 @@ function processSelect(
                     id: joinId,
                     type: 'join',
                     label: joinType.toUpperCase(),
+                    joinType: joinType.toUpperCase(),
                     description: `Join with ${joinTable}`,
                     details: joinDetails,
                     x: 0, y: 0, width: 140, height: 60
@@ -337,6 +344,7 @@ function processSelect(
                         id: crossJoinId,
                         type: 'join',
                         label: 'CROSS JOIN',
+                        joinType: 'CROSS',
                         description: `Implicit join with ${getFromItemDisplayName(fromItem, ctx.dialect)}`,
                         details: [getFromItemDisplayName(fromItem, ctx.dialect)],
                         x: 0, y: 0, width: 140, height: 60
@@ -625,7 +633,7 @@ function processSelect(
         const sortId = genId(runtime, 'sort');
         const orderbyArr = Array.isArray(stmt.orderby) ? stmt.orderby : (stmt.orderby.columns || []);
         const sortCols = orderbyArr.map((o: any) => {
-            const col = resolveColumnName(o.expr?.column) || o.expr?.value || '?';
+            const col = resolveColumnName(o.expr?.column) || resolveColumnName(o.expr) || o.expr?.value || '?';
             const dir = o.type || 'ASC';
             return `${col} ${dir}`;
         }).join(', ');
@@ -1018,6 +1026,7 @@ function parseCteOrSubqueryInternals(
                         id: joinId,
                         type: 'join',
                         label: `${fromItem.join} ${joinTable}`,
+                        joinType: String(fromItem.join || 'JOIN').toUpperCase(),
                         description: 'Join',
                         details: joinDetails,
                         parentId: parentId,
@@ -1248,7 +1257,7 @@ function parseCteOrSubqueryInternals(
         const sortId = genId(runtime, 'child_sort');
         const orderbyArr = Array.isArray(stmt.orderby) ? stmt.orderby : (stmt.orderby.columns || []);
         const sortCols = orderbyArr.map((o: any) => {
-            const col = resolveColumnName(o.expr?.column) || o.expr?.value || '?';
+            const col = resolveColumnName(o.expr?.column) || resolveColumnName(o.expr) || o.expr?.value || '?';
             const dir = o.type || 'ASC';
             return `${col} ${dir}`;
         }).join(', ');

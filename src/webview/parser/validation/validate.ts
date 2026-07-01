@@ -10,6 +10,12 @@ export const DEFAULT_VALIDATION_LIMITS: ValidationLimits = {
     maxQueryCount: 50, // 50 statements max
 };
 
+const utf8Encoder = new TextEncoder();
+
+function getUtf8ByteSize(value: string): number {
+    return utf8Encoder.encode(value).byteLength;
+}
+
 /**
  * Validates SQL input against size and query count limits.
  * Call this before parsing to prevent performance issues with large inputs.
@@ -30,7 +36,7 @@ export function validateSql(
         };
     }
 
-    const sizeBytes = new Blob([sql]).size;
+    const sizeBytes = getUtf8ByteSize(sql);
     if (sizeBytes > limits.maxSqlSizeBytes) {
         return {
             type: 'size_limit',

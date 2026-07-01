@@ -193,7 +193,7 @@ export class ImpactView {
         const targetType = report.target.type === 'view' ? 'view' : 'table';
         const targetNodeId = `${targetType}:${targetTableName.toLowerCase()}`;
 
-        let html = `
+        const html = `
             <div class="impact-report">
                 <div class="report-header">
                     <h2>Impact Analysis Report</h2>

@@ -174,6 +174,12 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
         }
 
         if (!inDollarQuotes) {
+            if (inString && stringChar !== '`' && char === '\\' && nextChar) {
+                current += char + nextChar;
+                i++;
+                continue;
+            }
+
             // Treat backticks as quote delimiters too (MySQL identifier quoting),
             // so a semicolon inside a `back``tick` identifier never splits a
             // statement. Doubled delimiters ('', "", ``) are in-string escapes.

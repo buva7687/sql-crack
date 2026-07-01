@@ -24,6 +24,12 @@ import type {
     AstCTE
 } from './astTypes';
 
+interface TableLineLookup {
+    sql: string;
+    contextLineByTable: Map<string, number>;
+    fallbackLineByTable: Map<string, number>;
+}
+
 /**
  * Extracts table references from SQL queries (SELECT, INSERT, UPDATE, DELETE)
  */
@@ -33,6 +39,7 @@ export class ReferenceExtractor {
     private columnExtractor: ColumnExtractor;
     private globalCteNames: Set<string> = new Set(); // Track CTE names across the entire file
     private _activeDialect: SqlDialect = 'MySQL'; // Per-call dialect for reserved word scoping
+    private tableLineLookup: TableLineLookup | null = null;
 
     constructor(options: Partial<ExtractionOptions> = {}) {
         this.parser = new Parser();
@@ -74,6 +81,7 @@ export class ReferenceExtractor {
         dialect: SqlDialect = this.options.dialect
     ): TableReference[] {
         this._activeDialect = dialect;
+        this.tableLineLookup = null;
         const references: TableReference[] = [];
         const { sql: normalizedSql } = preprocessSqlForWorkspaceParsing(sql, dialect);
 
@@ -1010,6 +1018,73 @@ export class ReferenceExtractor {
         return null;
     }
 
+    private normalizeTableLineLookupKey(tableName: string): string {
+        const raw = String(tableName || '').trim();
+        const parts = raw.split('.');
+        const finalPart = parts[parts.length - 1] || raw;
+        return finalPart.replace(/^["'`]+|["'`]+$/g, '').toLowerCase();
+    }
+
+    private addTableLine(map: Map<string, number>, tableName: string | undefined, lineNumber: number): void {
+        if (!tableName) {
+            return;
+        }
+        const key = this.normalizeTableLineLookupKey(tableName);
+        if (!key || map.has(key) || this.isReservedWord(key)) {
+            return;
+        }
+        map.set(key, lineNumber);
+    }
+
+    private getTableLineLookup(sql: string): TableLineLookup {
+        if (this.tableLineLookup?.sql === sql) {
+            return this.tableLineLookup;
+        }
+
+        const lookup = this.buildTableLineLookup(sql);
+        this.tableLineLookup = lookup;
+        return lookup;
+    }
+
+    private buildTableLineLookup(sql: string): TableLineLookup {
+        const contextLineByTable = new Map<string, number>();
+        const fallbackLineByTable = new Map<string, number>();
+        const lines = sql.split('\n');
+        const identifier = '["\'`]?([#A-Za-z_][#A-Za-z0-9_$]*)["\'`]?';
+        const qualifiedIdentifier = `(?:["'\`]?[#A-Za-z_][#A-Za-z0-9_$]*["'\`]?\\.)?${identifier}`;
+        const contextPatterns = [
+            new RegExp(`\\bFROM\\s+${qualifiedIdentifier}\\b`, 'gi'),
+            new RegExp(`\\b(?:INNER|LEFT|RIGHT|FULL|CROSS|OUTER)?\\s*JOIN\\s+${qualifiedIdentifier}\\b`, 'gi'),
+            new RegExp(`\\bINSERT\\s+INTO\\s+${qualifiedIdentifier}\\b`, 'gi'),
+            new RegExp(`\\bUPDATE\\s+${qualifiedIdentifier}\\b`, 'gi'),
+            new RegExp(`\\bDELETE\\s+FROM\\s+${qualifiedIdentifier}\\b`, 'gi'),
+        ];
+        const fallbackPattern = /["'`]?([#A-Za-z_][#A-Za-z0-9_$]*)["'`]?/g;
+
+        lines.forEach((line, index) => {
+            if (line.trimStart().startsWith('--')) {
+                return;
+            }
+            const lineNumber = index + 1;
+
+            for (const pattern of contextPatterns) {
+                pattern.lastIndex = 0;
+                let match: RegExpExecArray | null;
+                while ((match = pattern.exec(line)) !== null) {
+                    this.addTableLine(contextLineByTable, match[1], lineNumber);
+                }
+            }
+
+            fallbackPattern.lastIndex = 0;
+            let tokenMatch: RegExpExecArray | null;
+            while ((tokenMatch = fallbackPattern.exec(line)) !== null) {
+                this.addTableLine(fallbackLineByTable, tokenMatch[1], lineNumber);
+            }
+        });
+
+        return { sql, contextLineByTable, fallbackLineByTable };
+    }
+
     /**
      * Find line number where table is referenced in the correct SQL context.
      * 
@@ -1029,49 +1104,11 @@ export class ReferenceExtractor {
      * @returns Line number (1-based) where the table is referenced, or 1 if not found
      */
     private findTableLine(sql: string, tableName: string): number {
-        const escaped = escapeRegex(tableName);
-        const lines = sql.split('\n');
-        
-        // Patterns to match table references in correct SQL contexts
-        const patterns = [
-            // FROM table
-            new RegExp(`\\bFROM\\s+(?:\\w+\\.)?["'\`]?${escaped}["'\`]?\\b`, 'i'),
-            // JOIN table
-            new RegExp(`\\b(?:INNER|LEFT|RIGHT|FULL|CROSS|OUTER)?\\s*JOIN\\s+(?:\\w+\\.)?["'\`]?${escaped}["'\`]?\\b`, 'i'),
-            // INSERT INTO table
-            new RegExp(`\\bINSERT\\s+INTO\\s+(?:\\w+\\.)?["'\`]?${escaped}["'\`]?\\b`, 'i'),
-            // UPDATE table
-            new RegExp(`\\bUPDATE\\s+(?:\\w+\\.)?["'\`]?${escaped}["'\`]?\\b`, 'i'),
-            // DELETE FROM table
-            new RegExp(`\\bDELETE\\s+FROM\\s+(?:\\w+\\.)?["'\`]?${escaped}["'\`]?\\b`, 'i'),
-        ];
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            // Skip comment lines
-            if (line.trimStart().startsWith('--')) {
-                continue;
-            }
-            
-            // Check if any pattern matches this line
-            for (const pattern of patterns) {
-                if (pattern.test(line)) {
-                    return i + 1;
-                }
-            }
-        }
-
-        // Fallback: if no context match found, search for table name with word boundaries
-        // (but still skip comments)
-        const fallbackRegex = new RegExp(`\\b${escaped}\\b`, 'i');
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            if (!line.trimStart().startsWith('--') && fallbackRegex.test(line)) {
-                return i + 1;
-            }
-        }
-
-        return 1;
+        const key = this.normalizeTableLineLookupKey(tableName);
+        const lookup = this.getTableLineLookup(sql);
+        return lookup.contextLineByTable.get(key)
+            ?? lookup.fallbackLineByTable.get(key)
+            ?? 1;
     }
 
 

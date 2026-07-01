@@ -20,7 +20,7 @@ export interface PinnedTabsCallbacks {
     isDarkTheme?: () => boolean;
 }
 
-let pinnedTabs: PinnedTab[] = [];
+const pinnedTabs: PinnedTab[] = [];
 let activeTabId: string | null = null;
 
 /**

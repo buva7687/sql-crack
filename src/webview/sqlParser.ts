@@ -21,6 +21,7 @@ import {
     preprocessSnowflakeSyntax,
     preprocessTeradataSyntax,
     rewriteGroupingSets,
+    maskStringsAndComments,
     stripSqlComments,
     stripFilterClauses
 } from './parser/dialects/preprocessing';
@@ -60,6 +61,7 @@ import {
     tryProcessDdlStatement,
     tryParseBulkDataStatement,
     tryParseCompatibleDeleteStatement,
+    tryParseCompatibleUpdateStatement,
     tryParseCompatibleMergeStatement,
     tryParseCompatibleOracleInsertStatement,
     tryParseSessionCommand,
@@ -263,6 +265,60 @@ function extractLeadingCommentDialect(stmt: string): SqlDialect | null {
     return selected?.dialect ?? null;
 }
 
+function splitTransactSqlImplicitUpdateOutputStatements(statement: string): string[] {
+    const stripped = stripLeadingComments(statement).trimStart();
+    if (!/^INSERT\b/i.test(stripped) || !/\bUPDATE\b/i.test(stripped) || !/\bOUTPUT\b/i.test(stripped)) {
+        return [statement];
+    }
+
+    const masked = maskStringsAndComments(statement);
+    const updateStartRegex = /(?:^|[\r\n])[ \t]*UPDATE\b/gi;
+    let match: RegExpExecArray | null;
+
+    while ((match = updateStartRegex.exec(masked)) !== null) {
+        const updateKeywordOffset = match[0].search(/UPDATE/i);
+        if (updateKeywordOffset < 0) {
+            continue;
+        }
+
+        const updateStart = match.index + updateKeywordOffset;
+        if (updateStart <= 0 || !/\bOUTPUT\b/i.test(masked.slice(updateStart))) {
+            continue;
+        }
+
+        let depth = 0;
+        for (let i = 0; i < updateStart; i++) {
+            if (masked[i] === '(') {
+                depth++;
+            } else if (masked[i] === ')') {
+                depth = Math.max(0, depth - 1);
+            }
+        }
+        if (depth !== 0) {
+            continue;
+        }
+
+        const before = statement.slice(0, updateStart).trim();
+        const after = statement.slice(updateStart).trim();
+        if (!before || !after || !/^INSERT\b/i.test(stripLeadingComments(before).trimStart())) {
+            continue;
+        }
+
+        return [before, after];
+    }
+
+    return [statement];
+}
+
+function splitSqlStatementsForDialect(sql: string, dialect: SqlDialect): string[] {
+    const statements = splitSqlStatements(sql);
+    if (dialect !== 'TransactSQL') {
+        return statements;
+    }
+
+    return statements.flatMap(splitTransactSqlImplicitUpdateOutputStatements);
+}
+
 // Parse multiple SQL statements
 export function parseSqlBatch(
     sql: string,
@@ -344,7 +400,7 @@ export function parseSqlBatch(
         };
     }
 
-    const statements = splitSqlStatements(sql);
+    const statements = splitSqlStatementsForDialect(sql, dialect);
     const queries: ParseResult[] = [];
     const queryLineRanges: Array<{ startLine: number; endLine: number }> = [];
 
@@ -424,6 +480,14 @@ export function parseSqlBatch(
         return count;
     };
 
+    const normalizeStatementLineForMatch = (line: string): string => {
+        return line.trim().replace(/;$/, '').trimEnd();
+    };
+
+    const lineMatchesStatementLine = (sourceLine: string, statementLine: string): boolean => {
+        return normalizeStatementLineForMatch(sourceLine) === normalizeStatementLineForMatch(statementLine);
+    };
+
     for (const stmt of statements) {
         const statementDialect = extractLeadingCommentDialect(stmt) || dialect;
         const stmtTrimmed = stmt.trim();
@@ -442,10 +506,10 @@ export function parseSqlBatch(
             ? stmtTrimmed.slice(firstNewlineIdx + 1).split('\n')[0]?.trim() || ''
             : '';
         for (let i = currentLine - 1; i < lines.length; i++) {
-            if (lines[i].includes(matchPrefix)) {
-                // For short prefixes, verify the next line matches too
-                if (matchPrefix.length < 30 && stmtSecondLine && i + 1 < lines.length) {
-                    if (!lines[i + 1].includes(stmtSecondLine)) {
+            if (lineMatchesStatementLine(lines[i], matchPrefix)) {
+                if (stmtSecondLine && i + 1 < lines.length) {
+                    const secondLineMatches = lineMatchesStatementLine(lines[i + 1], stmtSecondLine);
+                    if (!secondLineMatches) {
                         continue;
                     }
                 }
@@ -1230,6 +1294,18 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
         layoutGraph(deleteCompatibilityResult.nodes, deleteCompatibilityResult.edges);
         assignLineNumbers(deleteCompatibilityResult.nodes, sql);
         return deleteCompatibilityResult;
+    }
+
+    const updateCompatibilityResult = tryParseCompatibleUpdateStatement({
+        context,
+        sql,
+        genId: (prefix) => genId(context, prefix),
+        parseSql,
+    });
+    if (updateCompatibilityResult) {
+        layoutGraph(updateCompatibilityResult.nodes, updateCompatibilityResult.edges);
+        assignLineNumbers(updateCompatibilityResult.nodes, sql);
+        return updateCompatibilityResult;
     }
 
     const oracleInsertCompatibilityResult = tryParseCompatibleOracleInsertStatement({

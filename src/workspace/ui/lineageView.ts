@@ -34,7 +34,7 @@ export class LineageView {
             return this.generateEmptyState();
         }
 
-        let html = `
+        const html = `
             <div class="view-container view-lineage">
                 <div class="view-compact-header">
                     <span class="view-icon">${ICONS.columns}</span>

@@ -166,10 +166,25 @@ function resolveCancelledWorkerRequest(requestId: number, request: PendingWorker
 }
 
 function cancelSupersededWorkerRequests(requestId: number): void {
+    let supersededActiveRequest = false;
     for (const [pendingRequestId, pendingRequest] of pendingWorkerRequests) {
         if (pendingRequestId < requestId) {
             resolveCancelledWorkerRequest(pendingRequestId, pendingRequest);
+            supersededActiveRequest = true;
         }
+    }
+
+    // Resolving the superseded promises above only settles them on the main
+    // thread — it does NOT stop the worker, which processes messages serially
+    // and cannot abort an in-flight synchronous parse. A heavy superseded parse
+    // would keep the worker busy and the latest request would queue behind it,
+    // eventually hitting its own timeout (a false timeout for SQL that is
+    // actually small). Terminate the worker so the abandoned work stops and the
+    // next request spins up a fresh worker that runs immediately. node-sql-parser
+    // astify() is synchronous, so terminate-and-respawn is the only way to
+    // reclaim the worker.
+    if (supersededActiveRequest) {
+        destroyWorker();
     }
 }
 

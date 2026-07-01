@@ -501,6 +501,66 @@ describe('parserClient', () => {
             }
         });
 
+        it('terminates the busy worker when a newer request supersedes an in-flight one', async () => {
+            jest.useFakeTimers();
+            try {
+                const { workerInstances } = installWorkerEnvironment();
+                expect(isWorkerSupported()).toBe(true);
+
+                // Start an older parse and let it post to the worker. It is now
+                // in-flight, awaiting a response that never comes — simulating a
+                // heavy synchronous parse that holds the (serial) worker queue.
+                const olderParse = parseAsync('SELECT 1', 'MySQL');
+                jest.runOnlyPendingTimers();
+                await Promise.resolve();
+                expect(workerInstances).toHaveLength(1);
+                expect(workerInstances[0].postMessage).toHaveBeenCalled();
+
+                // A newer parse supersedes the in-flight one. Capture whether the
+                // busy worker was terminated at the moment of supersede (it cannot
+                // abort its synchronous parse, so it must be terminated rather than
+                // left to keep the serial queue blocked).
+                const newerParse = parseAsync('SELECT 2', 'MySQL');
+                const terminatedOnSupersede = workerInstances[0].terminate.mock.calls.length > 0;
+
+                // Let the newer request post. With the fix it runs on a fresh
+                // worker; without it, it queues behind the abandoned parse on the
+                // original worker. Settle both promises (whichever worker received
+                // 'SELECT 2') BEFORE asserting, so a future regression fails this
+                // test in isolation rather than leaking a pending parse.
+                jest.runOnlyPendingTimers();
+                await Promise.resolve();
+                const newerWorker = workerInstances.find(w =>
+                    w.postMessage.mock.calls.some(call => call[0]?.payload?.sql === 'SELECT 2')
+                );
+                const newerRequest = newerWorker?.postMessage.mock.calls.find(
+                    call => call[0]?.payload?.sql === 'SELECT 2'
+                )?.[0];
+                newerWorker?.emitMessage({
+                    type: 'parse',
+                    requestId: newerRequest?.requestId,
+                    result: {
+                        nodes: [{ id: 'n2' }],
+                        edges: [],
+                        stats: { tables: 0, joins: 0, subqueries: 0, ctes: 0, aggregations: 0, windowFunctions: 0, unions: 0, conditions: 0, complexity: 'Simple', complexityScore: 0 },
+                        hints: [],
+                        sql: 'SELECT 2',
+                        columnLineage: [],
+                        tableUsage: new Map(),
+                    },
+                });
+
+                const [olderResult, newerResult] = await Promise.all([olderParse, newerParse]);
+
+                expect(terminatedOnSupersede).toBe(true);
+                expect(workerInstances).toHaveLength(2);
+                expect(olderResult.error).toBe('Parse cancelled');
+                expect(newerResult.nodes).toEqual([{ id: 'n2' }]);
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+
         it('returns a lightweight batch result on worker timeout', async () => {
             jest.useFakeTimers();
             try {

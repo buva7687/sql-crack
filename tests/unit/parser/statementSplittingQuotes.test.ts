@@ -28,6 +28,14 @@ describe('statement splitting — quote and identifier delimiters', () => {
         expect(result[0]).toContain("'O''Brien;x'");
     });
 
+    it('does not split on semicolons after MySQL backslash-escaped quotes', () => {
+        const result = splitSqlStatements("SELECT 'O\\';Brien;x'; SELECT 2;");
+
+        expect(result).toHaveLength(2);
+        expect(result[0]).toContain("'O\\';Brien;x'");
+        expect(result[1]).toBe('SELECT 2');
+    });
+
     it('preserves doubled double quotes in quoted identifiers', () => {
         const result = splitSqlStatements('SELECT "co""l;n" FROM t; SELECT 2;');
         expect(result).toHaveLength(2);

@@ -199,33 +199,40 @@ export function getGraphInteractionsScriptFragment(): string {
             }
         }
 
-        function getNeighbors(nodeId) {
-            const upstream = new Set();
-            const downstream = new Set();
+        function addGraphAdjacencyEdge(map, key, value) {
+            if (!map.has(key)) {
+                map.set(key, new Set());
+            }
+            map.get(key).add(value);
+        }
+
+        function buildGraphAdjacency() {
+            const upstreamByNode = new Map();
+            const downstreamByNode = new Map();
             document.querySelectorAll('.edge').forEach(edge => {
                 const source = edge.getAttribute('data-source');
                 const target = edge.getAttribute('data-target');
                 if (!source || !target) return;
-                if (target === nodeId) upstream.add(source);
-                if (source === nodeId) downstream.add(target);
+                addGraphAdjacencyEdge(upstreamByNode, target, source);
+                addGraphAdjacencyEdge(downstreamByNode, source, target);
             });
+            return { upstreamByNode, downstreamByNode };
+        }
+
+        function getNeighbors(nodeId, adjacency) {
+            const graphAdjacency = adjacency || buildGraphAdjacency();
+            const upstream = new Set();
+            const downstream = new Set();
+            (graphAdjacency.upstreamByNode.get(nodeId) || []).forEach(id => upstream.add(id));
+            (graphAdjacency.downstreamByNode.get(nodeId) || []).forEach(id => downstream.add(id));
             return { upstream, downstream };
         }
 
-        function getLineageDepth(nodeId, direction) {
-            // Build adjacency once from a single edge scan
-            var upMap = {};
-            var downMap = {};
-            document.querySelectorAll('.edge').forEach(function(edge) {
-                var source = edge.getAttribute('data-source');
-                var target = edge.getAttribute('data-target');
-                if (!source || !target) return;
-                if (!upMap[target]) upMap[target] = [];
-                upMap[target].push(source);
-                if (!downMap[source]) downMap[source] = [];
-                downMap[source].push(target);
-            });
-            var adj = direction === 'upstream' ? upMap : downMap;
+        function getLineageDepth(nodeId, direction, adjacency) {
+            const graphAdjacency = adjacency || buildGraphAdjacency();
+            const adj = direction === 'upstream'
+                ? graphAdjacency.upstreamByNode
+                : graphAdjacency.downstreamByNode;
             var visited = {};
             visited[nodeId] = true;
             var queue = [nodeId];
@@ -233,14 +240,14 @@ export function getGraphInteractionsScriptFragment(): string {
             while (queue.length > 0) {
                 var next = [];
                 for (var i = 0; i < queue.length; i++) {
-                    var neighbors = adj[queue[i]];
+                    var neighbors = adj.get(queue[i]);
                     if (!neighbors) continue;
-                    for (var j = 0; j < neighbors.length; j++) {
-                        if (!visited[neighbors[j]]) {
-                            visited[neighbors[j]] = true;
-                            next.push(neighbors[j]);
+                    neighbors.forEach(function(neighbor) {
+                        if (!visited[neighbor]) {
+                            visited[neighbor] = true;
+                            next.push(neighbor);
                         }
-                    }
+                    });
                 }
                 if (next.length > 0) depth++;
                 queue = next;
@@ -280,15 +287,14 @@ export function getGraphInteractionsScriptFragment(): string {
             const queue = [sourceId];
             const visited = new Set([sourceId]);
             const parentMap = new Map();
+            const adjacency = buildGraphAdjacency();
             let found = false;
 
             while (queue.length > 0 && !found) {
                 const currentId = queue.shift();
-                const nextEdges = Array.from(document.querySelectorAll('.edge'))
-                    .filter((edge) => edge.getAttribute('data-source') === currentId);
+                const nextNodeIds = adjacency.downstreamByNode.get(currentId) || [];
 
-                for (const edge of nextEdges) {
-                    const target = edge.getAttribute('data-target');
+                for (const target of nextNodeIds) {
                     if (!target || visited.has(target)) {
                         continue;
                     }
@@ -532,19 +538,19 @@ export function getGraphInteractionsScriptFragment(): string {
         }
 
         // ========== Trace Mode (Full Lineage) ==========
-        function traceAllUpstream(nodeId, visited = new Map(), distance = 0) {
+        function traceAllUpstream(nodeId, adjacency, visited = new Map(), distance = 0) {
             if (visited.has(nodeId)) return visited;
             visited.set(nodeId, distance);
-            const { upstream } = getNeighbors(nodeId);
-            upstream.forEach(id => traceAllUpstream(id, visited, distance + 1));
+            const { upstream } = getNeighbors(nodeId, adjacency);
+            upstream.forEach(id => traceAllUpstream(id, adjacency, visited, distance + 1));
             return visited;
         }
 
-        function traceAllDownstream(nodeId, visited = new Map(), distance = 0) {
+        function traceAllDownstream(nodeId, adjacency, visited = new Map(), distance = 0) {
             if (visited.has(nodeId)) return visited;
             visited.set(nodeId, distance);
-            const { downstream } = getNeighbors(nodeId);
-            downstream.forEach(id => traceAllDownstream(id, visited, distance + 1));
+            const { downstream } = getNeighbors(nodeId, adjacency);
+            downstream.forEach(id => traceAllDownstream(id, adjacency, visited, distance + 1));
             return visited;
         }
 
@@ -576,9 +582,10 @@ export function getGraphInteractionsScriptFragment(): string {
                 return;
             }
 
+            const adjacency = buildGraphAdjacency();
             const traced = traceMode === 'upstream'
-                ? traceAllUpstream(selectedNodeId)
-                : traceAllDownstream(selectedNodeId);
+                ? traceAllUpstream(selectedNodeId, adjacency)
+                : traceAllDownstream(selectedNodeId, adjacency);
 
             document.querySelectorAll('.node').forEach(node => {
                 const nodeId = node.getAttribute('data-id');
@@ -692,7 +699,8 @@ export function getGraphInteractionsScriptFragment(): string {
             const type = node.getAttribute('data-type') || 'node';
             const filePath = node.getAttribute('data-filepath') || '';
 
-            const { upstream, downstream } = getNeighbors(nodeId);
+            const adjacency = buildGraphAdjacency();
+            const { upstream, downstream } = getNeighbors(nodeId, adjacency);
             const connectionCount = upstream.size + downstream.size;
             const typeLabel = type === 'file'
                 ? 'File'
@@ -706,8 +714,8 @@ export function getGraphInteractionsScriptFragment(): string {
 
             if (selectionTitle) selectionTitle.textContent = label;
             if (selectionMeta) {
-                var upDepth = getLineageDepth(nodeId, 'upstream');
-                var downDepth = getLineageDepth(nodeId, 'downstream');
+                var upDepth = getLineageDepth(nodeId, 'upstream', adjacency);
+                var downDepth = getLineageDepth(nodeId, 'downstream', adjacency);
                 var depthInfo = [];
                 if (upDepth > 0) depthInfo.push(upDepth + ' level' + (upDepth > 1 ? 's' : '') + ' up');
                 if (downDepth > 0) depthInfo.push(downDepth + ' level' + (downDepth > 1 ? 's' : '') + ' down');

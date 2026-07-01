@@ -13,6 +13,28 @@ describe('parser worker migration prep', () => {
         }
         return 0;
     };
+    const extractBlockBody = (source: string, marker: string): string => {
+        const markerIndex = source.indexOf(marker);
+        expect(markerIndex).toBeGreaterThanOrEqual(0);
+
+        const blockStart = source.indexOf('{', markerIndex);
+        expect(blockStart).toBeGreaterThanOrEqual(0);
+
+        let depth = 0;
+        for (let index = blockStart; index < source.length; index += 1) {
+            const character = source[index];
+            if (character === '{') {
+                depth += 1;
+            } else if (character === '}') {
+                depth -= 1;
+                if (depth === 0) {
+                    return source.slice(blockStart + 1, index);
+                }
+            }
+        }
+
+        throw new Error(`Could not extract block body for marker: ${marker}`);
+    };
 
     class MockWorker {
         public readonly postMessage = jest.fn();
@@ -70,6 +92,16 @@ describe('parser worker migration prep', () => {
         expect(indexSource).toContain('const requestId = ++parseRequestId;');
         const staleGuards = indexSource.match(/requestId !== parseRequestId/g) || [];
         expect(staleGuards.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('hides superseded global loading when comments-only refresh exits early', () => {
+        const commentsOnlyBranch = extractBlockBody(indexSource, 'if (!hasExecutableSql(sql))');
+        const hideLoaderIndex = commentsOnlyBranch.indexOf('hideGlobalLoading();');
+        const returnIndex = commentsOnlyBranch.indexOf('return;');
+
+        expect(hideLoaderIndex).toBeGreaterThanOrEqual(0);
+        expect(returnIndex).toBeGreaterThanOrEqual(0);
+        expect(hideLoaderIndex).toBeLessThan(returnIndex);
     });
 
     it('keeps parse-token guard for deferred hydration flow', () => {

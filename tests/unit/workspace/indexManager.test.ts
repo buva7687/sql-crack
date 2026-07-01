@@ -14,6 +14,7 @@
  */
 
 import * as path from 'path';
+import * as crypto from 'crypto';
 import * as vscode from 'vscode';
 import { IndexManager } from '../../../src/workspace/indexManager';
 import { WorkspaceScanner } from '../../../src/workspace/scanner';
@@ -36,6 +37,8 @@ jest.mock('../../../src/workspace/scanner');
 
 /** Drain the microtask queue so pending promise continuations execute. */
 const flushPromises = (): Promise<void> => new Promise(resolve => process.nextTick(resolve));
+const MOCK_MTIME = 1_700_000_000_000;
+const hashSql = (sql: string): string => crypto.createHash('sha256').update(sql, 'utf8').digest('hex');
 
 describe('IndexManager', () => {
     let indexManager: IndexManager;
@@ -50,7 +53,7 @@ describe('IndexManager', () => {
     ): FileAnalysis => ({
         filePath,
         fileName: path.basename(filePath),
-        lastModified: Date.now(),
+        lastModified: MOCK_MTIME,
         contentHash: `hash-${filePath}`,
         definitions: definitions.map(d => ({
             name: d.name || 'unknown',
@@ -74,6 +77,13 @@ describe('IndexManager', () => {
         __resetStorage();
         __resetMockConfig();
         __resetFileSystemWatcherMock();
+        (vscode.workspace.fs.stat as jest.Mock).mockResolvedValue({
+            type: 1,
+            ctime: MOCK_MTIME,
+            mtime: MOCK_MTIME,
+            size: 1024
+        });
+        (vscode.workspace.fs.readFile as jest.Mock).mockResolvedValue(new Uint8Array());
 
         // Create fresh mock context (simulates extension activation)
         mockContext = createMockExtensionContext();
@@ -776,14 +786,110 @@ describe('IndexManager', () => {
             // Manually set workspace state (simulating previous session)
             await mockContext.workspaceState.update('sqlWorkspaceIndex', cachedIndex);
 
-            // Large workspace = no auto-index, should use cache
-            mockScanner.getFileCount.mockResolvedValue(100);
+            // Disable auto-indexing for this test; a valid cache should still be reused.
+            mockScanner.getFileCount.mockResolvedValue(1);
 
-            await indexManager.initialize();
+            await indexManager.initialize(0);
 
             // Should have loaded from cache
             expect(indexManager.findDefinition('cached_table')).toBeDefined();
             expect(mockScanner.analyzeWorkspace).not.toHaveBeenCalled();
+        });
+
+        it('should ignore cache when a cached file changed while the extension was offline', async () => {
+            const cachedIndex = {
+                version: 4,
+                identity: JSON.stringify({ schema: 4, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                lastUpdated: Date.now(),
+                fileCount: 1,
+                filesArray: [['/cached.sql', createMockAnalysis('/cached.sql', [{ name: 'cached_table' }])]],
+                fileHashesArray: [['/cached.sql', 'old-content-hash']],
+                definitionArray: [['cached_table', [{ name: 'cached_table', type: 'table', filePath: '/cached.sql', lineNumber: 1, columns: [] }]]],
+                referenceArray: []
+            };
+
+            await mockContext.workspaceState.update('sqlWorkspaceIndex', cachedIndex);
+            mockScanner.getFileCount.mockResolvedValue(1);
+            mockScanner.analyzeWorkspace.mockResolvedValue([
+                createMockAnalysis('/cached.sql', [{ name: 'fresh_table' }])
+            ]);
+            (vscode.workspace.fs.stat as jest.Mock).mockResolvedValue({
+                type: 1,
+                ctime: MOCK_MTIME,
+                mtime: MOCK_MTIME + 1,
+                size: 21
+            });
+            (vscode.workspace.fs.readFile as jest.Mock).mockResolvedValue(
+                new TextEncoder().encode('CREATE TABLE fresh_table (id INT);')
+            );
+
+            const result = await indexManager.initialize();
+
+            expect(result.cacheState).toBe('stale');
+            expect(mockScanner.analyzeWorkspace).toHaveBeenCalled();
+            expect(indexManager.findDefinition('cached_table')).toBeUndefined();
+            expect(indexManager.findDefinition('fresh_table')).toBeDefined();
+        });
+
+        it('should ignore cache when the workspace file count changed while offline', async () => {
+            const cachedIndex = {
+                version: 4,
+                identity: JSON.stringify({ schema: 4, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                lastUpdated: Date.now(),
+                fileCount: 1,
+                filesArray: [['/cached.sql', createMockAnalysis('/cached.sql', [{ name: 'cached_table' }])]],
+                fileHashesArray: [['/cached.sql', 'hash-/cached.sql']],
+                definitionArray: [['cached_table', [{ name: 'cached_table', type: 'table', filePath: '/cached.sql', lineNumber: 1, columns: [] }]]],
+                referenceArray: []
+            };
+
+            await mockContext.workspaceState.update('sqlWorkspaceIndex', cachedIndex);
+            mockScanner.getFileCount.mockResolvedValue(2);
+            mockScanner.analyzeWorkspace.mockResolvedValue([
+                createMockAnalysis('/cached.sql', [{ name: 'cached_table' }]),
+                createMockAnalysis('/added.sql', [{ name: 'added_table' }])
+            ]);
+
+            const result = await indexManager.initialize();
+
+            expect(result.cacheState).toBe('stale');
+            expect(mockScanner.analyzeWorkspace).toHaveBeenCalled();
+            expect(indexManager.findDefinition('added_table')).toBeDefined();
+        });
+
+        it('should keep cache when only the mtime changed but the content hash still matches', async () => {
+            const sql = 'CREATE TABLE cached_table (id INT);';
+            const contentHash = hashSql(sql);
+            const cachedAnalysis = {
+                ...createMockAnalysis('/cached.sql', [{ name: 'cached_table' }]),
+                contentHash
+            };
+            const cachedIndex = {
+                version: 4,
+                identity: JSON.stringify({ schema: 4, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                lastUpdated: Date.now(),
+                fileCount: 1,
+                filesArray: [['/cached.sql', cachedAnalysis]],
+                fileHashesArray: [['/cached.sql', contentHash]],
+                definitionArray: [['cached_table', [{ name: 'cached_table', type: 'table', filePath: '/cached.sql', lineNumber: 1, columns: [] }]]],
+                referenceArray: []
+            };
+
+            await mockContext.workspaceState.update('sqlWorkspaceIndex', cachedIndex);
+            mockScanner.getFileCount.mockResolvedValue(1);
+            (vscode.workspace.fs.stat as jest.Mock).mockResolvedValue({
+                type: 1,
+                ctime: MOCK_MTIME,
+                mtime: MOCK_MTIME + 1,
+                size: sql.length
+            });
+            (vscode.workspace.fs.readFile as jest.Mock).mockResolvedValue(new TextEncoder().encode(sql));
+
+            const result = await indexManager.initialize(0);
+
+            expect(result.cacheState).toBe('valid');
+            expect(mockScanner.analyzeWorkspace).not.toHaveBeenCalled();
+            expect(indexManager.findDefinition('cached_table')).toBeDefined();
         });
 
         it('should ignore cache with wrong version', async () => {
@@ -895,13 +1001,13 @@ describe('IndexManager', () => {
             await indexManager.buildIndex();
 
             mockScanner.analyzeWorkspace.mockClear();
-            mockScanner.getFileCount.mockResolvedValue(100);
+            mockScanner.getFileCount.mockResolvedValue(1);
             __setMockConfig('sqlCrack', {
                 additionalFileExtensions: ['bteq', 'hql']
             });
 
             const reloadedManager = new IndexManager(mockContext as vscode.ExtensionContext, 'MySQL');
-            await reloadedManager.initialize();
+            await reloadedManager.initialize(0);
 
             expect(mockScanner.analyzeWorkspace).not.toHaveBeenCalled();
             expect(reloadedManager.findDefinition('cached_table')).toBeDefined();
@@ -1006,11 +1112,11 @@ describe('IndexManager', () => {
             referenceArray: []
         });
 
-        it('reports a valid cache and a usable index without rebuilding (large workspace)', async () => {
+        it('reports a valid cache and a usable index without rebuilding', async () => {
             await mockContext.workspaceState.update('sqlWorkspaceIndex', validCache());
-            mockScanner.getFileCount.mockResolvedValue(100);
+            mockScanner.getFileCount.mockResolvedValue(1);
 
-            const result = await indexManager.initialize();
+            const result = await indexManager.initialize(0);
 
             expect(result.cacheState).toBe('valid');
             expect(result.hasValidIndex).toBe(true);

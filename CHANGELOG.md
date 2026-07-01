@@ -5,6 +5,45 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-07-01
+
+### Fixed
+
+- **T-SQL `UPDATE <alias> ... FROM <table> <alias>`**: The update-target alias is now resolved back to its real FROM table instead of being counted as a separate table, so single-table aliased updates no longer produce a false "Possible Cartesian product" hint. WHERE predicates on `UPDATE`/`DELETE ... FROM` are now counted as filter conditions. (#88)
+- **T-SQL `UPDATE ... OUTPUT [...] INTO`**: `UPDATE` statements with an `OUTPUT`/`OUTPUT ... INTO` clause now parse via a compatibility path (mirroring the existing `DELETE ... OUTPUT` handling) instead of failing with a syntax error, including issue samples where the preceding `INSERT` is not semicolon-terminated. The `OUTPUT INTO` target is rendered as a write node. (#87)
+
+- **SQL Flow performance hints**: CROSS JOIN hints now read the normalized join type, GROUP BY / ORDER BY hint analysis handles object-form AST lists, and `COUNT(*)` detection recognizes parser `star` nodes.
+- **ORDER BY ordinal labels**: `ORDER BY 2 DESC` now falls back to the numeric expression instead of rendering unresolved `? DESC` labels.
+- **Workspace lineage invalidation**: Rebuilding or refreshing the workspace index now clears cached impact reports and lineage-detail state so stale or deleted-node details are not reused.
+- **Cluster state isolation**: Large-graph cluster expand/collapse state is reset for each new SQL Flow render so cluster state no longer bleeds between queries.
+- **Workspace graph tracing performance**: Lineage tracing and shortest-path lookup now use prebuilt adjacency maps instead of repeatedly scanning all SVG edges.
+- **Workspace indexing performance**: Table reference line lookup now builds per-file lookup context once instead of splitting the full SQL text and recompiling regexes per reference.
+- **Zero-gravity animation performance**: The animation loop now uses cached node maps and rendered element lookups instead of per-frame DOM queries and linear edge endpoint searches.
+- **Lineage legend persistence errors**: Rejected workspace-state writes for lineage legend visibility are now logged instead of silently ignored.
+- **Empty stacked-cloud offset input**: `calculateStackedCloudOffsets()` now returns before empty-input spread calculations.
+- **Parser worker supersede cancellation**: Newer parse requests now terminate and respawn a busy parser worker after cancelling superseded in-flight work, preventing stale heavy parses from blocking the worker queue and causing false timeouts for the latest request.
+- **Comments-only refresh loader cleanup**: SQL Flow now hides the global loading overlay before the comments-only early return, so a superseded parse cannot leave the loader stuck.
+- **Workspace lineage view/CTE resolution**: Statement lineage edges now resolve existing `view:`, `cte:`, and `external:` nodes instead of checking only `table:`, preventing valid view references from falling through to stray external nodes.
+- **Dead-column CTE output hints**: Dead-column detection keeps scoped CTE-body analysis while also recognizing downstream CTE output usage, including outer `SELECT` projections and table aliases.
+- **Workspace index cache freshness**: Cached workspace indexes are validated against current file count, file stats, and content hashes before reuse, so offline file edits, additions, and deletions trigger a rebuild instead of serving stale definitions.
+- **Release workflow ordering and concurrency**: The release workflow now creates the GitHub release/tag before external Marketplace/Open VSX publishing and serializes release attempts with workflow-level concurrency.
+- **Performance baseline CI wiring**: Hard perf baseline suites are excluded from normal Jest/coverage runs and are executed through the dedicated `test:perf` script.
+- **Validation byte counting**: SQL size-limit validation uses `TextEncoder` byte length instead of `Blob`, for correct sizing in Node-like contexts.
+- **MySQL backslash escapes in statement splitting**: The statement splitter no longer splits on semicolons inside MySQL backslash-escaped string literals (`\'` / `\"`).
+- **Batch statement line matching**: Statement-start line ranges are matched by exact normalized full-line equality instead of a substring/30-character-prefix heuristic, reducing mismatches on duplicated prefixes.
+- **`resolveColumnName` expression coverage**: `CASE`, window, and other complex AST expression forms render readable labels instead of falling back to `?`.
+
+### Changed
+
+- **Hint analysis helpers**: Dead-column and related hint paths now reuse shared `stripSqlComments` / `maskStringsAndComments` helpers instead of ad-hoc inline regex normalization.
+- **ESLint configuration**: Adopted `eslint:recommended` and `@typescript-eslint/recommended`, replaced the deprecated `@typescript-eslint/semi` rule with the base `semi` rule, and added documented opt-outs for rules incompatible with the parser's intentionally untyped AST handling (e.g. `no-explicit-any`). Converted never-reassigned `let` bindings to `const`.
+- **Coverage configuration**: Tightened Jest coverage wiring and added direct unit coverage for previously integration-only modules (hint generation, workspace graph building, lineage).
+
+### Tests
+
+- Added regression coverage for worker supersede termination, comments-only loader cleanup, CTE output dead-column detection, workspace cache freshness, view-backed lineage edges, performance test wiring, release workflow ordering/concurrency, validation byte counting, backslash-escape statement splitting, full-line batch matching, `resolveColumnName` expression handling, SQL Flow hint AST variants, workspace reference line lookup performance, zero-gravity animation lookup performance, workspace graph adjacency reuse, lineage state invalidation, and stacked-cloud empty input.
+- Branch validation: 279 suites, 3,585 tests passing. `npx tsc --noEmit` and `npm run lint` pass.
+
 ## [0.9.0] - 2026-06-16
 
 ### Security

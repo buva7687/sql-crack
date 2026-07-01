@@ -443,6 +443,32 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain('updateGraphActionButtons();');
     });
 
+    it('uses a prebuilt edge adjacency map for graph trace and shortest path traversal', () => {
+        const script = getWebviewScript({
+            nonce: 'test',
+            graphData: '{"nodes":[]}',
+            searchFilterQuery: '',
+            initialView: 'graph',
+            currentGraphMode: 'tables',
+        });
+
+        expect(script).toContain('function buildGraphAdjacency()');
+        expect(script).toContain('function getNeighbors(nodeId, adjacency)');
+        expect(script).toContain('function getLineageDepth(nodeId, direction, adjacency)');
+        expect(script).toContain('const adjacency = buildGraphAdjacency();');
+        expect(script).toContain('traceAllUpstream(selectedNodeId, adjacency)');
+        expect(script).toContain('traceAllDownstream(selectedNodeId, adjacency)');
+        expect(script).toContain('const nextNodeIds = adjacency.downstreamByNode.get(currentId) || [];');
+
+        const shortestPathBody = script.match(/function findShortestPath\(sourceId, targetId\) {[\s\S]*?function applyPathHighlight/)?.[0] || '';
+        expect(shortestPathBody).not.toContain("document.querySelectorAll('.edge')");
+
+        const traceBody = script.match(/function applyTraceMode\(\) {[\s\S]*?function setTraceMode/)?.[0] || '';
+        expect(traceBody).toContain('const adjacency = buildGraphAdjacency();');
+        expect(traceBody).not.toContain('traceAllUpstream(selectedNodeId)');
+        expect(traceBody).not.toContain('traceAllDownstream(selectedNodeId)');
+    });
+
     it('re-initializes lineage legend bar after each graph result to prevent overlap', () => {
         const script = getWebviewScript({
             nonce: 'test',

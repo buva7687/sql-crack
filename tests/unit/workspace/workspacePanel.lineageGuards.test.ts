@@ -1,4 +1,6 @@
 import * as vscode from 'vscode';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import { WorkspacePanel } from '../../../src/workspace/workspacePanel';
 import { LineageBuilder } from '../../../src/workspace/lineage/lineageBuilder';
 import { resolveAutoIndexThresholdFromConfig } from '../../../src/workspace/panel/settings';
@@ -16,6 +18,15 @@ describe('WorkspacePanel lineage guards and config defaults', () => {
 
     it('does not retain a legacy in-class handleMessage router', () => {
         expect((WorkspacePanel.prototype as any).handleMessage).toBeUndefined();
+    });
+
+    it('logs lineage legend persistence failures', () => {
+        const source = readFileSync(join(__dirname, '../../../src/workspace/workspacePanel.ts'), 'utf8');
+        const setterMatch = source.match(/setLineageLegendVisible: \(visible\) => \{[\s\S]*?\n {12}\},/);
+
+        expect(setterMatch?.[0]).toContain('workspaceState.update(LINEAGE_LEGEND_VISIBILITY_STATE_KEY, visible).then');
+        expect(setterMatch?.[0]).toContain('Failed to persist lineage legend visibility');
+        expect(setterMatch?.[0]).toContain('logger.warn');
     });
 
     it('reuses a single in-flight lineage build promise across concurrent callers', async () => {
@@ -53,6 +64,53 @@ describe('WorkspacePanel lineage guards and config defaults', () => {
 
         expect(buildSpy).toHaveBeenCalledTimes(1);
         expect(context._lineageGraph).toBe(mockGraph);
+        expect(context._lineageBuildPromise).toBeNull();
+    });
+
+    it('does not attach lineage state when disposed during an in-flight build', async () => {
+        const mockGraph = {
+            nodes: new Map(),
+            edges: [],
+            columnEdges: [],
+            getUpstream: jest.fn(),
+            getDownstream: jest.fn(),
+            getColumnLineage: jest.fn(),
+        } as any;
+
+        let resolveBuild: ((graph: any) => void) | undefined;
+        const buildSpy = jest
+            .spyOn(LineageBuilder.prototype, 'buildFromIndexAsync')
+            .mockImplementation(() => new Promise(resolve => {
+                resolveBuild = resolve;
+            }));
+
+        const context: any = {
+            _isDisposed: false,
+            _lineageGraph: null,
+            _lineageBuilder: null,
+            _flowAnalyzer: null,
+            _impactAnalyzer: null,
+            _columnLineageTracker: null,
+            _lineageBuildPromise: null,
+            _lineageBuildVersion: 0,
+            _indexManager: {
+                getIndex: jest.fn(() => ({ files: [] })),
+            },
+        };
+
+        const buildPromise = (WorkspacePanel.prototype as any).buildLineageGraph.call(context);
+        await Promise.resolve();
+        expect(buildSpy).toHaveBeenCalledTimes(1);
+
+        context._isDisposed = true;
+        resolveBuild?.(mockGraph);
+        await buildPromise;
+
+        expect(context._lineageGraph).toBeNull();
+        expect(context._lineageBuilder).toBeNull();
+        expect(context._flowAnalyzer).toBeNull();
+        expect(context._impactAnalyzer).toBeNull();
+        expect(context._columnLineageTracker).toBeNull();
         expect(context._lineageBuildPromise).toBeNull();
     });
 
@@ -189,5 +247,36 @@ describe('WorkspacePanel lineage guards and config defaults', () => {
         expect(html).toContain('const initialLineageDetailDirection = "downstream";');
         expect(html).toContain('const initialLineageDetailExpandedNodes = ["table:orders","view:daily_orders"];');
         expect(html).toContain('const initialWorkspaceRestoreState = {"impact":{"hasReport":true,"html":"<div>impact-report</div>"}};');
+    });
+
+    it('clears derived lineage detail and impact state when the index is invalidated', () => {
+        const context: any = {
+            _lineageBuildVersion: 4,
+            _lineageGraph: { nodes: new Map() },
+            _lineageBuilder: {},
+            _flowAnalyzer: {},
+            _impactAnalyzer: {},
+            _columnLineageTracker: {},
+            _currentImpactReport: {
+                changeType: 'modify',
+                target: { type: 'table', name: 'orders' },
+            },
+            _lineageDetailNodeId: 'table:orders',
+            _lineageDetailDirection: 'downstream',
+            _lineageDetailExpandedNodes: ['table:orders'],
+        };
+
+        (WorkspacePanel.prototype as any).invalidateLineageState.call(context);
+
+        expect(context._lineageBuildVersion).toBe(5);
+        expect(context._lineageGraph).toBeNull();
+        expect(context._lineageBuilder).toBeNull();
+        expect(context._flowAnalyzer).toBeNull();
+        expect(context._impactAnalyzer).toBeNull();
+        expect(context._columnLineageTracker).toBeNull();
+        expect(context._currentImpactReport).toBeNull();
+        expect(context._lineageDetailNodeId).toBeNull();
+        expect(context._lineageDetailDirection).toBe('both');
+        expect(context._lineageDetailExpandedNodes).toEqual([]);
     });
 });
