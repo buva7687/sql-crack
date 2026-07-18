@@ -7,7 +7,7 @@ import type {
     WindowFunctionDetail
 } from '../../types';
 import { getAggregateFunctions, getWindowFunctions } from '../../../dialects';
-import { unwrapIdentifierValue } from '../astUtils';
+import { unwrapIdentifierValue } from '../../../shared/astUtils';
 import { formatExpressionFromAst } from './columns';
 
 export type TrackFunctionUsageFn = (
@@ -57,10 +57,24 @@ export function extractWindowFunctionDetails(
     const windowFuncList = getWindowFunctions(dialect);
 
     const getStringName = (obj: any): string | null => {
-        if (typeof obj === 'string') {return obj;}
-        if (obj && typeof obj.name === 'string') {return obj.name;}
-        if (obj && typeof obj.value === 'string') {return obj.value;}
-        return null;
+        return unwrapIdentifierValue(obj) || unwrapIdentifierValue(obj?.name) || null;
+    };
+
+    const getWindowSpec = (over: any): any =>
+        over?.as_window_specification?.window_specification
+        || over?.window_specification
+        || over;
+
+    const formatIdentifierExpr = (expr: any): string => {
+        const unwrapped = unwrapIdentifierValue(expr)
+            || unwrapIdentifierValue(expr?.column)
+            || unwrapIdentifierValue(expr?.expr?.column)
+            || unwrapIdentifierValue(expr?.expr);
+        if (unwrapped) {
+            return unwrapped;
+        }
+        const formatted = formatExpressionFromAst(expr);
+        return formatted || '?';
     };
 
     for (const col of columns) {
@@ -105,19 +119,20 @@ export function extractWindowFunctionDetails(
                 }
             }
 
-            const partitionBy = col.expr.over?.partitionby?.map((p: any) =>
-                p.column || p.expr?.column || p.value || '?'
-            ).filter(Boolean);
+            const windowSpec = getWindowSpec(col.expr.over);
 
-            const orderBy = col.expr.over?.orderby?.map((o: any) => {
-                const colName = o.expr?.column || o.column || '?';
+            const partitionBy = windowSpec?.partitionby?.map(formatIdentifierExpr).filter(Boolean);
+
+            const orderBy = windowSpec?.orderby?.map((o: any) => {
+                const colName = formatIdentifierExpr(o.expr || o);
                 const dir = o.type || '';
                 return dir ? `${colName} ${dir}` : colName;
             }).filter(Boolean);
 
             let frame: string | undefined;
-            if (col.expr.over?.frame) {
-                const f = col.expr.over.frame;
+            const frameNode = windowSpec?.frame || windowSpec?.window_frame_clause;
+            if (frameNode) {
+                const f = frameNode;
                 frame = `${f.type || 'ROWS'} ${f.start || ''} ${f.end ? 'TO ' + f.end : ''}`.trim();
             }
 
@@ -364,8 +379,10 @@ export function extractCaseStatementDetails(columns: any): CaseDetail[] {
 
     function formatExpr(expr: any): string {
         if (!expr) {return '?';}
-        if (expr.column) {return expr.column;}
-        if (expr.value) {return String(expr.value);}
+        const unwrapped = unwrapIdentifierValue(expr.column) || unwrapIdentifierValue(expr);
+        if (unwrapped) {return unwrapped;}
+        if (expr.value !== undefined) {return String(expr.value);}
+        if (expr.type === 'null') {return 'NULL';}
         if (expr.type === 'binary_expr') {
             const left = formatExpr(expr.left);
             const right = formatExpr(expr.right);
@@ -381,6 +398,10 @@ export function extractCaseStatementDetails(columns: any): CaseDetail[] {
 
             if (caseExpr.args && Array.isArray(caseExpr.args)) {
                 for (const arg of caseExpr.args) {
+                    const argType = typeof arg?.type === 'string' ? arg.type.toLowerCase() : '';
+                    if (argType === 'else') {
+                        continue;
+                    }
                     if (arg.cond && arg.result) {
                         conditions.push({
                             when: formatExpr(arg.cond),
@@ -390,7 +411,12 @@ export function extractCaseStatementDetails(columns: any): CaseDetail[] {
                 }
             }
 
-            const elseValue = caseExpr.else ? formatExpr(caseExpr.else) : undefined;
+            const elseArg = Array.isArray(caseExpr.args)
+                ? caseExpr.args.find((arg: any) => typeof arg?.type === 'string' && arg.type.toLowerCase() === 'else')
+                : undefined;
+            const elseValue = caseExpr.else !== undefined
+                ? formatExpr(caseExpr.else)
+                : (elseArg ? formatExpr(elseArg.result ?? elseArg.expr ?? elseArg.value) : undefined);
             const alias = col.as;
 
             if (conditions.length > 0) {

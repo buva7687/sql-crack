@@ -283,8 +283,7 @@ export function updateNodeEdgesFeature(options: {
     if (!mainGroup) {
         return;
     }
-    const nodeMap = new Map(nodes.map(candidate => [candidate.id, candidate]));
-    const resolvedNodeMap = providedNodeMap || nodeMap;
+    const resolvedNodeMap = providedNodeMap ?? new Map(nodes.map(candidate => [candidate.id, candidate]));
 
     const cachedEdgeIds = edgeIdsByNodeId?.get(node.id);
     const edgeElements = cachedEdgeIds

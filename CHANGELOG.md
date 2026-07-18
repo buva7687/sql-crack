@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] - 2026-07-18
+
+### Fixed
+
+- **PostgreSQL workspace lineage `CREATE TABLE` crash**: Shared AST identifier unwrapping now handles PostgreSQL's object-wrapped column identifiers, so ordinary PostgreSQL `CREATE TABLE` statements no longer crash lineage building with `columnName.toLowerCase is not a function`.
+- **Workspace CTAS dependency extraction**: `CREATE TABLE AS SELECT` statements now inspect parser `query_expr` bodies, restoring source-table references that were previously missed.
+- **T-SQL aliased update targets**: Workspace reference extraction now resolves `UPDATE <alias> ... FROM <table> AS <alias>` back to the real write target instead of recording only a read/reference from the FROM clause.
+- **Window function details**: Window partition/order fields now read parser `as_window_specification.window_specification` nodes and unwrap PostgreSQL-style identifier objects, so window cards no longer render empty or `[object Object]` details.
+- **Drag-path allocation**: SQL Flow drag edge updates now reuse a provided node map without allocating an unused fallback map on every mousemove.
+
+### Tests
+
+- Added regression coverage for PostgreSQL column identifier unwrapping, workspace lineage `CREATE TABLE` safety, CTAS `query_expr` references, T-SQL update-alias writes, PostgreSQL-wrapped window identifiers, CASE/ELSE formatting variants, and drag-path map reuse.
+- Branch validation: 278 suites, 3,581 tests passing. `npm run typecheck` and `npm run lint` pass.
+
 ## [0.9.1] - 2026-07-01
 
 ### Fixed

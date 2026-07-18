@@ -17,6 +17,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { LineageBuilder } from '../../../../src/workspace/lineage/lineageBuilder';
 import { logger } from '../../../../src/logger';
+import { SchemaExtractor } from '../../../../src/workspace/extraction/schemaExtractor';
 import type { WorkspaceIndex, SchemaDefinition, FileAnalysis, TableReference } from '../../../../src/workspace/types';
 import type { ColumnInfo } from '../../../../src/workspace/extraction/types';
 
@@ -144,6 +145,22 @@ describe('LineageBuilder', () => {
 
             expect(builder.nodes.has('column:users.id')).toBe(true);
             expect(builder.nodes.has('column:users.email')).toBe(true);
+        });
+
+        it('builds lineage for ordinary PostgreSQL CREATE TABLE columns', () => {
+            const defs = new SchemaExtractor().extractDefinitions(
+                'CREATE TABLE accounts (id INT, name TEXT);',
+                'accounts.sql',
+                'PostgreSQL'
+            );
+            const fileAnalysis = makeFileAnalysis('accounts.sql', defs, []);
+            const files = new Map([['accounts.sql', fileAnalysis]]);
+            const index = makeIndex(defs, files);
+            const builder = new LineageBuilder({ includeExternal: true, includeColumns: true });
+
+            expect(() => builder.buildFromIndex(index)).not.toThrow();
+            expect(builder.nodes.has('column:accounts.id')).toBe(true);
+            expect(builder.nodes.has('column:accounts.name')).toBe(true);
         });
 
         it('skips column nodes when includeColumns is false', () => {

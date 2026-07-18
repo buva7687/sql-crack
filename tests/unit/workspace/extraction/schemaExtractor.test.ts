@@ -51,6 +51,14 @@ describe('SchemaExtractor.extractDefinitions', () => {
             const idCol = columns.find(c => c.name === 'id');
             expect(idCol).toBeDefined();
         });
+
+        it('unwraps PostgreSQL column AST wrappers into string names', () => {
+            const sql = 'CREATE TABLE accounts (id INT, name TEXT);';
+            const defs = extractor.extractDefinitions(sql, '/sql/accounts.sql', 'PostgreSQL');
+
+            expect(defs).toHaveLength(1);
+            expect(defs[0].columns.map(col => col.name)).toEqual(['id', 'name']);
+        });
     });
 
     describe('CREATE VIEW via AST parser', () => {

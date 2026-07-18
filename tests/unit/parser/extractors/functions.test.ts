@@ -355,6 +355,34 @@ describe('Function Extractors', () => {
             expect(mysqlResult).toBeDefined();
             expect(pgResult).toBeDefined();
         });
+
+        it('extracts PostgreSQL wrapped window partition and order identifiers', () => {
+            const columns = [{
+                expr: {
+                    name: 'ROW_NUMBER',
+                    over: {
+                        as_window_specification: {
+                            window_specification: {
+                                partitionby: [
+                                    { expr: { column: { expr: { value: 'dept' } } } }
+                                ],
+                                orderby: [
+                                    {
+                                        expr: { column: { expr: { value: 'created_at' } } },
+                                        type: 'DESC'
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }];
+
+            const result = extractWindowFunctionDetails(columns, 'PostgreSQL');
+
+            expect(result[0].partitionBy).toEqual(['dept']);
+            expect(result[0].orderBy).toEqual(['created_at DESC']);
+        });
     });
 
     describe('extractAggregateFunctionDetails', () => {
@@ -622,6 +650,35 @@ describe('Function Extractors', () => {
             const result = extractCaseStatementDetails(columns);
 
             expect(result[0].elseValue).toBe('no');
+        });
+
+        it('formats numeric zero literals and parser ELSE args', () => {
+            const columns = [{
+                as: 'flag',
+                expr: {
+                    type: 'case',
+                    args: [
+                        {
+                            cond: {
+                                type: 'binary_expr',
+                                operator: '=',
+                                left: { column: 'amount' },
+                                right: { type: 'number', value: 0 }
+                            },
+                            result: { type: 'number', value: 0 }
+                        },
+                        {
+                            type: 'else',
+                            result: { type: 'number', value: 1 }
+                        }
+                    ]
+                }
+            }];
+
+            const result = extractCaseStatementDetails(columns);
+
+            expect(result[0].conditions[0]).toEqual({ when: 'amount = 0', then: '0' });
+            expect(result[0].elseValue).toBe('1');
         });
 
         it('formats binary expression in condition', () => {

@@ -113,6 +113,49 @@ describe('ReferenceExtractor behavioral coverage', () => {
         ]));
     });
 
+    it('resolves SQL Server UPDATE aliases to the real write target', () => {
+        const refs = extractor.extractReferences(
+            `
+            UPDATE o
+            SET amount = s.amount
+            FROM dbo.orders AS o
+            JOIN dbo.staging AS s ON o.id = s.id
+            `,
+            'query.sql',
+            'TransactSQL'
+        );
+
+        expect(refs).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                tableName: 'orders',
+                schema: 'dbo',
+                referenceType: 'update',
+                context: 'UPDATE',
+            }),
+            expect.objectContaining({
+                tableName: 'staging',
+                schema: 'dbo',
+                referenceType: 'join',
+            }),
+        ]));
+    });
+
+    it('extracts CREATE TABLE AS SELECT sources from parser query_expr bodies', () => {
+        const refs = extractor.extractReferences(
+            'CREATE TABLE "sales"."orders_summary" AS SELECT * FROM "sales"."orders";',
+            'query.sql',
+            'PostgreSQL'
+        );
+
+        expect(refs).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                tableName: 'orders',
+                schema: 'sales',
+                referenceType: 'select',
+            }),
+        ]));
+    });
+
     it('captures DELETE targets and subquery sources', () => {
         const refs = extractor.extractReferences(
             'DELETE FROM target_table WHERE id IN (SELECT id FROM source_table)',

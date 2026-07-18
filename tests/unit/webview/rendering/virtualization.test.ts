@@ -12,6 +12,7 @@ import {
     setVirtualizationConfig,
     getVirtualizationConfig,
 } from '../../../../src/webview/virtualization';
+import { updateNodeEdgesFeature } from '../../../../src/webview/rendering/virtualizedViewport';
 import type { FlowNode, FlowEdge } from '../../../../src/webview/types';
 
 // ============================================================
@@ -198,6 +199,31 @@ describe('getVisibleElements', () => {
         const offscreen = makeNode({ id: 'far', x: 10000, y: 10000 });
         const result = getVisibleElements([offscreen], [], bounds);
         expect(result.visibleNodes).toHaveLength(1);
+    });
+});
+
+describe('updateNodeEdgesFeature', () => {
+    it('does not build a fallback node map when a nodeMap is provided', () => {
+        const nodes = {
+            map: jest.fn(() => {
+                throw new Error('fallback map should not be built');
+            })
+        } as unknown as FlowNode[];
+        const mainGroup = {
+            querySelectorAll: jest.fn(() => [])
+        } as unknown as SVGGElement;
+
+        expect(() => updateNodeEdgesFeature({
+            mainGroup,
+            node: makeNode({ id: 'a' }),
+            nodes,
+            layoutType: 'horizontal',
+            calculateEdgePath: jest.fn(),
+            nodeMap: new Map(),
+            edgeElementsById: new Map(),
+            edgeIdsByNodeId: new Map([['a', new Set()]])
+        })).not.toThrow();
+        expect((nodes as any).map).not.toHaveBeenCalled();
     });
 });
 

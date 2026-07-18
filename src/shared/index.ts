@@ -16,6 +16,7 @@ export {
 export type { ColorblindMode } from './theme';
 
 export { escapeRegex, safeString, escapeHtml, stripSqlComments } from './stringUtils';
+export { unwrapIdentifierValue } from './astUtils';
 
 export {
     CANVAS,

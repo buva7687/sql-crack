@@ -12,7 +12,7 @@ import {
     ColumnUsageContext
 } from './types';
 import { ColumnExtractor } from './columnExtractor';
-import { escapeRegex, stripSqlComments } from '../../shared';
+import { escapeRegex, stripSqlComments, unwrapIdentifierValue } from '../../shared';
 import { preprocessSqlForWorkspaceParsing } from '../parserConfig';
 import { REFERENCE_SQL_RESERVED_WORDS, TERADATA_RESERVED_WORDS } from './constants';
 import type {
@@ -442,10 +442,11 @@ export class ReferenceExtractor {
                 this.extractFromDelete(stmt, filePath, sql, references, aliasMap, depth, statementIndex);
                 break;
             case 'create':
-                // Extract references from CREATE VIEW AS SELECT
-                if (stmt.select || stmt.query) {
+                // Extract references from CREATE VIEW/CTAS AS SELECT. node-sql-parser
+                // emits CTAS SELECT bodies as query_expr for several dialects.
+                if (stmt.select || stmt.query || stmt.query_expr) {
                     this.extractFromStatement(
-                        stmt.select || stmt.query,
+                        stmt.select || stmt.query || stmt.query_expr,
                         filePath,
                         sql,
                         references,
@@ -623,10 +624,20 @@ export class ReferenceExtractor {
 
         // Target table
         if (stmt.table) {
+            const fromAliases = this.collectFromAliases(stmt.from);
             const tables = Array.isArray(stmt.table) ? stmt.table : [stmt.table];
             for (const t of tables) {
                 const tableRef = typeof t === 'string' ? { table: t } as AstTableRef : t as AstTableRef;
-                const ref = this.createTableReference(tableRef, filePath, sql, 'update', 'UPDATE', statementIndex);
+                const targetName = this.getTableName(tableRef);
+                const resolvedAlias = targetName ? fromAliases.get(targetName.toLowerCase()) : undefined;
+                const ref = this.createTableReference(
+                    resolvedAlias || tableRef,
+                    filePath,
+                    sql,
+                    'update',
+                    'UPDATE',
+                    statementIndex
+                );
                 const tableNameLower = ref?.tableName?.toLowerCase();
                 if (ref && tableNameLower) {
                     const isCTE = aliasMap.cteNames.has(tableNameLower);
@@ -852,6 +863,23 @@ export class ReferenceExtractor {
         }
     }
 
+    private collectFromAliases(fromItems: AstStatement['from']): Map<string, AstTableRef> {
+        const aliases = new Map<string, AstTableRef>();
+        const items = Array.isArray(fromItems) ? fromItems : (fromItems ? [fromItems] : []);
+        for (const item of items) {
+            const aliasName = unwrapIdentifierValue(item?.as);
+            if (!aliasName) {
+                continue;
+            }
+            const tableName = this.getTableName(item);
+            if (!tableName) {
+                continue;
+            }
+            aliases.set(aliasName.toLowerCase(), item);
+        }
+        return aliases;
+    }
+
     /**
      * Create a TableReference from AST item
      */
@@ -1008,12 +1036,15 @@ export class ReferenceExtractor {
         if (typeof item === 'string') {return item;}
 
         if (item.table) {
-            if (typeof item.table === 'string') {return item.table;}
-            if (item.table.table) {return item.table.table;}
-            if (item.table.name) {return item.table.name;}
+            const tableObject = typeof item.table === 'object' ? item.table : undefined;
+            const tableName = unwrapIdentifierValue(item.table)
+                || unwrapIdentifierValue(tableObject?.table)
+                || unwrapIdentifierValue(tableObject?.name);
+            if (tableName) {return tableName;}
         }
 
-        if (item.name) {return item.name;}
+        const name = unwrapIdentifierValue(item.name);
+        if (name) {return name;}
 
         return null;
     }

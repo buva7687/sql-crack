@@ -13,7 +13,7 @@ describe('audit section 2 performance regression guards', () => {
         const source = readFileSync(join(__dirname, '../../src/webview/rendering/virtualizedViewport.ts'), 'utf8');
         expect(source).toContain('renderedEdgeIds: Set<string>;');
         expect(source).toContain('const visibleEdgeIds = new Set(result.visibleEdges.map(edge => edge.id));');
-        expect(source).toContain('const nodeMap = new Map(nodes.map(candidate => [candidate.id, candidate]));');
+        expect(source).toContain('const resolvedNodeMap = providedNodeMap ?? new Map(nodes.map(candidate => [candidate.id, candidate]));');
         expect(source).not.toContain("edgesGroup.innerHTML = '';");
         expect(source).not.toContain('nodes.find(candidate => candidate.id === sourceId)');
     });

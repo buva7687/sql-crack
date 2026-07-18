@@ -9,7 +9,7 @@ import {
     ExtractionOptions,
     DEFAULT_EXTRACTION_OPTIONS,
 } from './types';
-import { escapeRegex, stripSqlComments } from '../../shared';
+import { escapeRegex, stripSqlComments, unwrapIdentifierValue } from '../../shared';
 import { preprocessSqlForWorkspaceParsing } from '../parserConfig';
 import { SCHEMA_SQL_RESERVED_WORDS } from './constants';
 
@@ -247,14 +247,10 @@ export class SchemaExtractor {
     private parseColumnDefinition(colDef: any): ColumnInfo | null {
         try {
             // Get column name
-            let name: string;
-            if (typeof colDef.column === 'string') {
-                name = colDef.column;
-            } else if (colDef.column?.column) {
-                name = colDef.column.column;
-            } else if (colDef.column?.name) {
-                name = colDef.column.name;
-            } else {
+            const name = unwrapIdentifierValue(colDef.column)
+                || unwrapIdentifierValue(colDef.column?.column)
+                || unwrapIdentifierValue(colDef.column?.name);
+            if (!name) {
                 return null;
             }
 
