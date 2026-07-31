@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Quoted workspace schema fallback parsing**: Regex fallback extraction now supports double-quoted, backtick-quoted, bracketed, and schema-qualified table and column identifiers, including quoted foreign-key references. Parenthesis and comma scanning is quote-aware, so delimiters inside identifiers no longer corrupt definitions.
+- **Comment/string-safe workspace extraction**: Schema and lineage fallback paths now use position-preserving masking before matching SQL structure, preventing commented examples or SQL-like string contents from creating phantom tables, CTEs, targets, or incorrect source locations. Comma-separated fallback CTEs are also recognized.
+- **SQL Server global temporary tables**: Comment stripping, dialect preprocessing, and hash-temp rewriting now preserve `##global_temp` identifiers instead of treating them as comments or malformed names.
+- **Workspace definition SQL boundaries**: Captured `CREATE TABLE` and `CREATE VIEW` SQL no longer stops at `create` text inside ordinary, sigil-prefixed, or quoted identifiers, preserving complete CTAS statements and their lineage.
+- **Recursive CTE source locations**: Multiline `WITH RECURSIVE` declarations now report the actual CTE name line even for short names that also occur inside the `RECURSIVE` keyword.
+- **T-SQL `OUTPUT` compatibility reporting**: `UPDATE` and `DELETE` compatibility paths no longer report successful `OUTPUT` handling when the rewritten statement still returns an error or partial parse.
+- **Parameterized PostgreSQL limits**: `LIMIT $1` and equivalent wrapped AST values now render their parameter names instead of `[object Object]`.
+- **Dialect detection and warnings**: A lone backtick is now a low-confidence MySQL signal, while combined MySQL syntax remains high confidence. Generic array subscripts such as `arr[5]` no longer produce PostgreSQL-specific warnings.
+- **Dialect preprocessing delimiter handling**: Balanced-parenthesis scanning now handles doubled double-quote and backtick escapes, bracketed identifiers, and nested block comments.
+
+### Performance
+
+- **Workspace impact analysis**: Direct targets, incoming edges, column target flows, and direct column edges are indexed once per analysis instead of repeatedly scanning the full graph for every node.
+- **Workspace schema and CTE extraction**: Position-preserving SQL masks and CTE declaration locations are computed once per source instead of rescanning and remasking the entire file for every extracted definition or CTE.
+
+### Tests
+
+- Added regression coverage for quoted schema extraction, `CREATE` text inside identifiers, comment/string masking, fallback and recursive CTE locations, target resolution, global temporary tables, T-SQL `OUTPUT` partial parses, parameterized limits, dialect scoring and warnings, delimiter-aware preprocessing, and indexed impact analysis.
+- Branch validation: 280 suites, 3,631 tests passing. `npx tsc --noEmit` and `npm run lint` pass.
+
 ## [0.9.2] - 2026-07-18
 
 ### Fixed

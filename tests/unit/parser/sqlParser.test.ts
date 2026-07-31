@@ -257,6 +257,15 @@ SELECT * FROM t3;`;
       expect(limitNode).toBeDefined();
     });
 
+    it('formats PostgreSQL parameterized LIMIT values without object coercion', () => {
+      const result = parseSql('SELECT * FROM users LIMIT $1', 'PostgreSQL');
+
+      expect(result.error).toBeUndefined();
+      const limitNode = result.nodes.find(n => n.type === 'limit');
+      expect(limitNode?.details).toContain('$1 rows');
+      expect(limitNode?.details?.join(' ')).not.toContain('[object Object]');
+    });
+
     it('parses SELECT with DISTINCT', () => {
       const result = parseSql('SELECT DISTINCT category FROM products', 'MySQL');
 

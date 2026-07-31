@@ -91,6 +91,28 @@ function resolveColumnName(col: any): string {
     return '';
 }
 
+function resolveLimitValue(limit: any): string {
+    const value = limit?.value ?? limit;
+    const firstValue = Array.isArray(value) ? value[0] : value;
+
+    if (firstValue === null || firstValue === undefined) {
+        return '?';
+    }
+    if (typeof firstValue === 'string' || typeof firstValue === 'number' || typeof firstValue === 'bigint') {
+        return String(firstValue);
+    }
+    if (typeof firstValue === 'object') {
+        if (firstValue.value !== null && firstValue.value !== undefined) {
+            return resolveLimitValue(firstValue.value);
+        }
+        if (firstValue.type === 'var' && firstValue.name !== null && firstValue.name !== undefined) {
+            const prefix = typeof firstValue.prefix === 'string' ? firstValue.prefix : '';
+            return `${prefix}${String(firstValue.name)}`;
+        }
+    }
+    return '?';
+}
+
 export function processSelectStatement(
     context: ParserContext,
     stmt: any,
@@ -659,7 +681,7 @@ function processSelect(
     if (stmt.limit && !(Array.isArray(stmt.limit.value) && stmt.limit.value.length === 0)) {
         ctx.hasNoLimit = false;
         const limitId = genId(runtime, 'limit');
-        const limitVal = stmt.limit.value?.[0]?.value ?? stmt.limit.value ?? stmt.limit;
+        const limitVal = resolveLimitValue(stmt.limit);
         nodes.push({
             id: limitId,
             type: 'limit',
@@ -1280,7 +1302,7 @@ function parseCteOrSubqueryInternals(
     // Add LIMIT if present (guard against phantom objects from node-sql-parser)
     if (stmt.limit && !(Array.isArray(stmt.limit.value) && stmt.limit.value.length === 0)) {
         const limitId = genId(runtime, 'child_limit');
-        const limitVal = stmt.limit.value?.[0]?.value ?? stmt.limit.value ?? stmt.limit;
+        const limitVal = resolveLimitValue(stmt.limit);
         nodes.push({
             id: limitId,
             type: 'limit',

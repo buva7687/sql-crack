@@ -231,4 +231,20 @@ describe('DELETE join and USING visualization', () => {
         expect(outputSink).toBeDefined();
         expect(result.edges.some((edge: any) => edge.source === deleteNode?.id && edge.target === outputSink?.id)).toBe(true);
     });
+
+    it('does not report a successful OUTPUT compatibility parse for a partial fallback result', () => {
+        const result = parseSql(
+            'DELETE FROM orders OUTPUT DELETED.id INTO deleted_order_log WHERE ;',
+            'TransactSQL' as SqlDialect
+        );
+
+        expect(result.partial).toBe(true);
+        expect(result.hints.some((entry: any) => entry.message?.includes('Parse error:'))).toBe(true);
+        expect(result.hints.some((entry: any) => entry.message?.includes('DELETE ... OUTPUT via compatibility parser'))).toBe(false);
+        expect(result.nodes.some((node: any) =>
+            node.label === 'deleted_order_log'
+            && node.accessMode === 'write'
+            && node.operationType === 'INSERT'
+        )).toBe(false);
+    });
 });

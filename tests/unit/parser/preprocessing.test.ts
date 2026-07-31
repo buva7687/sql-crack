@@ -1,6 +1,28 @@
-import { collapseSnowflakePaths, rewriteGroupingSets, preprocessOracleSyntax, preprocessSnowflakeSyntax, preprocessTeradataSyntax, preprocessTransactSqlSyntax, preprocessForParsing, hoistNestedCtes } from '../../../src/webview/sqlParser';
+import { collapseSnowflakePaths, rewriteGroupingSets, preprocessHashTempTableIdentifiers, preprocessOracleSyntax, preprocessSnowflakeSyntax, preprocessTeradataSyntax, preprocessTransactSqlSyntax, preprocessForParsing, hoistNestedCtes } from '../../../src/webview/sqlParser';
+import { findMatchingParen, maskStringsAndComments } from '../../../src/webview/parser/dialects/preprocessing';
 
 describe('parser preprocessing transforms', () => {
+    describe('shared lexical helpers', () => {
+        it('preserves and quotes SQL Server global temp-table identifiers', () => {
+            const sql = 'CREATE TABLE ##global_temp (id INT); SELECT * FROM ##global_temp';
+
+            expect(maskStringsAndComments(sql)).toContain('##global_temp');
+            expect(preprocessHashTempTableIdentifiers(sql, 'TransactSQL')).toBe(
+                'CREATE TABLE "##global_temp" (id INT); SELECT * FROM "##global_temp"'
+            );
+        });
+
+        it('finds the outer close parenthesis past backtick and bracket identifiers', () => {
+            const sql = '(SELECT `a)b`, [order) items] FROM t) trailing';
+            expect(findMatchingParen(sql, 0)).toBe(sql.indexOf(') trailing'));
+        });
+
+        it('finds the outer close parenthesis past nested block comments', () => {
+            const sql = '(SELECT /* outer /* inner ) */ still ) */ 1) trailing';
+            expect(findMatchingParen(sql, 0)).toBe(sql.indexOf(') trailing'));
+        });
+    });
+
     describe('rewriteGroupingSets', () => {
         it('returns null when GROUPING SETS is absent', () => {
             const sql = 'SELECT dept, SUM(sales) FROM sales GROUP BY dept';

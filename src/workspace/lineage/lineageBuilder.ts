@@ -9,7 +9,7 @@ import {
 } from '../types';
 import { ColumnInfo } from '../extraction/types';
 import { getDisplayName, getQualifiedKey, parseQualifiedKey } from '../identifiers';
-import { escapeRegex, stripSqlComments } from '../../shared';
+import { stripSqlComments } from '../../shared';
 import {
     LineageNode,
     LineageEdge,
@@ -25,6 +25,174 @@ type NodeSqlParserCtor = new () => NodeSqlParserInstance;
 
 let cachedSqlParserCtor: NodeSqlParserCtor | null | undefined;
 const MAX_PRELOAD_CONCURRENCY = 20;
+
+function skipQuotedSqlToken(sql: string, startIndex: number): number {
+    const quote = sql[startIndex];
+    const closingQuote = quote === '[' ? ']' : quote;
+    let index = startIndex + 1;
+
+    while (index < sql.length) {
+        if (sql[index] === '\\' && quote !== '[' && index + 1 < sql.length) {
+            index += 2;
+            continue;
+        }
+        if (sql[index] === closingQuote) {
+            // SQL identifiers and strings escape their closing delimiter by doubling it.
+            if (index + 1 < sql.length && sql[index + 1] === closingQuote) {
+                index += 2;
+                continue;
+            }
+            return index + 1;
+        }
+        index++;
+    }
+
+    return sql.length;
+}
+
+/**
+ * Replace comment contents with spaces while retaining every newline and string
+ * index. Regex consumers can then safely map matches back to the original SQL.
+ */
+function maskSqlCommentsPreservingPositions(sql: string): string {
+    const masked = sql.split('');
+    let index = 0;
+
+    const maskRange = (start: number, end: number): void => {
+        for (let position = start; position < end; position++) {
+            if (masked[position] !== '\n' && masked[position] !== '\r') {
+                masked[position] = ' ';
+            }
+        }
+    };
+
+    while (index < sql.length) {
+        const char = sql[index];
+
+        if (char === "'" || char === '"' || char === '`' || char === '[') {
+            const tokenStart = index;
+            index = skipQuotedSqlToken(sql, index);
+            maskRange(tokenStart, index);
+            continue;
+        }
+
+        if (char === '-' && sql[index + 1] === '-') {
+            const commentStart = index;
+            while (index < sql.length && sql[index] !== '\n' && sql[index] !== '\r') {
+                index++;
+            }
+            maskRange(commentStart, index);
+            continue;
+        }
+
+        if (char === '/' && sql[index + 1] === '*') {
+            const commentStart = index;
+            let depth = 1;
+            index += 2;
+
+            while (index < sql.length && depth > 0) {
+                if (sql[index] === '/' && sql[index + 1] === '*') {
+                    depth++;
+                    index += 2;
+                } else if (sql[index] === '*' && sql[index + 1] === '/') {
+                    depth--;
+                    index += 2;
+                } else {
+                    index++;
+                }
+            }
+
+            maskRange(commentStart, index);
+            continue;
+        }
+
+        // Preserve SQL Server temp-table identifiers such as #staging and ##global_staging.
+        const isTempTableIdentifier = char === '#' && (
+            /[a-zA-Z0-9_]/.test(sql[index + 1] || '') ||
+            (sql[index + 1] === '#' && /[a-zA-Z0-9_]/.test(sql[index + 2] || ''))
+        );
+        if (char === '#' && !isTempTableIdentifier) {
+            const commentStart = index;
+            while (index < sql.length && sql[index] !== '\n' && sql[index] !== '\r') {
+                index++;
+            }
+            maskRange(commentStart, index);
+            continue;
+        }
+
+        index++;
+    }
+
+    return masked.join('');
+}
+
+function findMatchingSqlParenthesis(sql: string, openingIndex: number): number {
+    let depth = 0;
+
+    for (let index = openingIndex; index < sql.length; index++) {
+        const char = sql[index];
+        if (char === "'" || char === '"' || char === '`' || char === '[') {
+            index = skipQuotedSqlToken(sql, index) - 1;
+            continue;
+        }
+        if (char === '(') {
+            depth++;
+        } else if (char === ')') {
+            depth--;
+            if (depth === 0) {
+                return index;
+            }
+        }
+    }
+
+    return -1;
+}
+
+function findCteDeclarations(sql: string): Array<{ name: string; index: number }> {
+    const maskedSql = maskSqlCommentsPreservingPositions(sql);
+    const declarations: Array<{ name: string; index: number }> = [];
+    const withPattern = /\b(WITH\s+(?:RECURSIVE\s+)?)(\w+)\s+AS\s*\(/gi;
+    let match: RegExpExecArray | null;
+
+    while ((match = withPattern.exec(maskedSql)) !== null) {
+        let cteName = match[2];
+        let nameIndex = match.index + match[1].length;
+        let openingIndex = match.index + match[0].lastIndexOf('(');
+
+        while (cteName) {
+            declarations.push({ name: cteName, index: nameIndex });
+
+            const closingIndex = findMatchingSqlParenthesis(maskedSql, openingIndex);
+            if (closingIndex < 0) {
+                break;
+            }
+
+            let nextIndex = closingIndex + 1;
+            while (nextIndex < maskedSql.length && /\s/.test(maskedSql[nextIndex])) {
+                nextIndex++;
+            }
+            if (maskedSql[nextIndex] !== ',') {
+                break;
+            }
+
+            nextIndex++;
+            while (nextIndex < maskedSql.length && /\s/.test(maskedSql[nextIndex])) {
+                nextIndex++;
+            }
+
+            const nextCteMatch = /^(\w+)\s+AS\s*\(/i.exec(maskedSql.slice(nextIndex));
+            if (!nextCteMatch) {
+                break;
+            }
+
+            cteName = nextCteMatch[1];
+            nameIndex = nextIndex;
+            openingIndex = nextIndex + nextCteMatch[0].lastIndexOf('(');
+        }
+    }
+
+    return declarations;
+}
 
 function getNodeSqlParserCtor(): NodeSqlParserCtor | null {
     if (cachedSqlParserCtor !== undefined) {
@@ -691,7 +859,7 @@ export class LineageBuilder implements LineageGraph {
 
         // 8. Fallback: Check for SELECT INTO or INSERT patterns in SQL
         if (query.sql) {
-            const sql = query.sql.toUpperCase();
+            const sql = maskSqlCommentsPreservingPositions(query.sql).toUpperCase();
 
             // SELECT INTO pattern
             const intoMatch = sql.match(/INTO\s+(?:TEMP(?:ORARY)?(?:\s+TABLE)?\s+)?(?:(\w+)\.)?([A-Z_][A-Z0-9_$#]*)/);
@@ -1023,13 +1191,22 @@ export class LineageBuilder implements LineageGraph {
         filePath: string,
         cteNames: Map<string, { name: string; filePath: string; lineNumber: number }>
     ): void {
+        const declarations = findCteDeclarations(sql);
         const ParserCtor = getNodeSqlParserCtor();
         if (!ParserCtor) {
-            this.extractCTEsWithRegex(sql, filePath, cteNames);
+            this.extractCTEsWithRegex(sql, filePath, cteNames, declarations);
             return;
         }
 
         const parser = new ParserCtor();
+        const cteLineNumbers = new Map<string, number>();
+        for (const declaration of declarations) {
+            const cteKey = declaration.name.toLowerCase();
+            if (!cteLineNumbers.has(cteKey)) {
+                const lineNumber = sql.substring(0, declaration.index).split('\n').length;
+                cteLineNumbers.set(cteKey, lineNumber);
+            }
+        }
         // Try different dialects
         const dialects = ['postgresql', 'mysql', 'transactsql', 'snowflake', 'bigquery'];
         let parsedSuccessfully = false;
@@ -1054,11 +1231,10 @@ export class LineageBuilder implements LineageGraph {
                         if (cteName && typeof cteName === 'string') {
                             const cteKey = cteName.toLowerCase();
                             if (!cteNames.has(cteKey)) {
-                                const lineNumber = this.getLineNumberFromSQL(sql, cteName);
                                 cteNames.set(cteKey, {
                                     name: cteName,
                                     filePath: filePath,
-                                    lineNumber: lineNumber
+                                    lineNumber: cteLineNumbers.get(cteKey) ?? 1
                                 });
                             }
                         }
@@ -1078,7 +1254,7 @@ export class LineageBuilder implements LineageGraph {
         }
 
         // Fallback to regex extraction
-        this.extractCTEsWithRegex(sql, filePath, cteNames);
+        this.extractCTEsWithRegex(sql, filePath, cteNames, declarations);
     }
 
     /**
@@ -1087,19 +1263,13 @@ export class LineageBuilder implements LineageGraph {
     private extractCTEsWithRegex(
         sql: string,
         filePath: string,
-        cteNames: Map<string, { name: string; filePath: string; lineNumber: number }>
+        cteNames: Map<string, { name: string; filePath: string; lineNumber: number }>,
+        declarations = findCteDeclarations(sql)
     ): void {
-        // Match WITH ... AS patterns (handles both WITH name AS and WITH RECURSIVE name AS)
-        const withPattern = /WITH\s+(?:RECURSIVE\s+)?(\w+)\s+AS\s*\(/gi;
-        let match;
-        
-        while ((match = withPattern.exec(sql)) !== null) {
-            const cteName = match[1];
+        for (const declaration of declarations) {
+            const cteName = declaration.name;
             if (cteName && !this.isReservedWord(cteName)) {
-                // Find line number
-                const beforeMatch = sql.substring(0, match.index);
-                const lineNumber = beforeMatch.split('\n').length;
-                
+                const lineNumber = sql.substring(0, declaration.index).split('\n').length;
                 const cteKey = cteName.toLowerCase();
                 if (!cteNames.has(cteKey)) {
                     cteNames.set(cteKey, {
@@ -1119,22 +1289,6 @@ export class LineageBuilder implements LineageGraph {
         const reserved = ['select', 'from', 'where', 'join', 'inner', 'left', 'right', 'outer', 'on', 'as', 'with', 'recursive'];
         return reserved.includes(word.toLowerCase());
     }
-
-    /**
-     * Get line number from SQL for a given identifier
-     */
-    private getLineNumberFromSQL(sql: string, identifier: string): number {
-        // Find the first occurrence of the identifier that's part of a WITH clause
-        const escaped = escapeRegex(identifier);
-        const withPattern = new RegExp(`WITH\\s+(?:RECURSIVE\\s+)?${escaped}\\s+AS`, 'i');
-        const match = withPattern.exec(sql);
-        if (match) {
-            const beforeMatch = sql.substring(0, match.index);
-            return beforeMatch.split('\n').length;
-        }
-        return 1;
-    }
-
 
     /**
      * Extract CTE names and subquery aliases from SQL content

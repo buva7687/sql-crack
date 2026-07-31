@@ -81,6 +81,48 @@ describe('SchemaExtractor.extractDefinitions', () => {
         });
     });
 
+    describe('statement SQL boundaries', () => {
+        it.each([
+            {
+                label: 'CTAS target',
+                sql: 'CREATE TABLE created_orders AS SELECT order_id FROM orders;',
+            },
+            {
+                label: 'view target',
+                sql: 'CREATE VIEW v_created_today AS SELECT order_id FROM orders;',
+            },
+            {
+                label: 'selected column',
+                sql: 'CREATE TABLE snapshot AS SELECT created_at FROM orders;',
+            },
+            {
+                label: 'declared column',
+                sql: 'CREATE TABLE orders (\n id INT,\n created_at TIMESTAMP\n);',
+            },
+        ])('does not stop at CREATE inside a $label identifier', ({ sql }) => {
+            const defs = extractor.extractDefinitions(
+                sql,
+                '/sql/create-identifiers.sql',
+                'PostgreSQL'
+            );
+
+            expect(defs).toHaveLength(1);
+            expect(defs[0].sql).toBe(sql);
+        });
+
+        it.each([
+            { dialect: 'PostgreSQL' as const, identifier: '"create"' },
+            { dialect: 'MySQL' as const, identifier: '`create`' },
+            { dialect: 'TransactSQL' as const, identifier: '[create]' },
+        ])('ignores CREATE inside $identifier quoted identifiers', ({ dialect, identifier }) => {
+            const sql = `CREATE TABLE snapshot AS SELECT ${identifier} FROM source_table;`;
+            const defs = extractor.extractDefinitions(sql, '/sql/quoted-create.sql', dialect);
+
+            expect(defs).toHaveLength(1);
+            expect(defs[0].sql).toContain(`${identifier} FROM source_table`);
+        });
+    });
+
     describe('regex fallback', () => {
         it('falls back to regex for unsupported syntax', () => {
             // Dialect set to something that will cause parser to fail
@@ -117,6 +159,129 @@ describe('SchemaExtractor.extractDefinitions', () => {
 
             // Should find page_views, possibly with schema
             expect(defs.length).toBeGreaterThanOrEqual(1);
+        });
+
+        it.each([
+            {
+                dialect: 'PostgreSQL' as const,
+                table: '"Sales Data"."Order Items"',
+                firstColumn: '"Order ID"',
+            },
+            {
+                dialect: 'MySQL' as const,
+                table: '`Sales Data`.`Order Items`',
+                firstColumn: '`Order ID`',
+            },
+            {
+                dialect: 'TransactSQL' as const,
+                table: '[Sales Data].[Order Items]',
+                firstColumn: '[Order ID]',
+            },
+        ])('preserves quoted identifiers on $dialect regex fallback', ({ dialect, table, firstColumn }) => {
+            const sql = `
+                CREATE TABLE ${table} (
+                    ${firstColumn} INT,
+                    "Display, Name" VARCHAR(100)
+                );
+                @@invalid@@
+            `;
+
+            const defs = extractor.extractDefinitions(sql, '/sql/quoted.sql', dialect);
+
+            expect(defs).toHaveLength(1);
+            expect(defs[0]).toMatchObject({
+                type: 'table',
+                schema: 'Sales Data',
+                name: 'Order Items',
+            });
+            expect(defs[0].columns.map(column => column.name)).toEqual([
+                'Order ID',
+                'Display, Name',
+            ]);
+        });
+
+        it('does not split a column definition at a comma inside a string default', () => {
+            const sql = `
+                CREATE TABLE contacts (
+                    id INT,
+                    surname VARCHAR(100) DEFAULT 'Smith, John' NOT NULL
+                );
+                @@invalid@@
+            `;
+
+            const defs = extractor.extractDefinitions(sql, '/sql/contacts.sql', 'MySQL');
+
+            expect(defs).toHaveLength(1);
+            expect(defs[0].columns.map(column => column.name)).toEqual(['id', 'surname']);
+            expect(defs[0].columns.find(column => column.name === 'surname')).toMatchObject({
+                nullable: false,
+            });
+        });
+
+        it('ignores CREATE TABLE text inside string literals during regex fallback', () => {
+            const sql = `
+                SELECT 'CREATE TABLE phantom_table (fake_id INT)' AS example;
+                CREATE TABLE real_table (real_id INT);
+                @@invalid@@
+            `;
+
+            const defs = extractor.extractDefinitions(sql, '/sql/string-example.sql', 'MySQL');
+
+            expect(defs.map(definition => definition.name)).toEqual(['real_table']);
+        });
+
+        it('preserves multiline local and global temp-table targets', () => {
+            jest.spyOn((extractor as any).parser, 'astify').mockImplementation(() => {
+                throw new Error('force regex fallback');
+            });
+            const sql = `
+                CREATE TABLE
+                #staging (id INT);
+                CREATE TABLE
+                ##global_staging (id INT);
+                @@invalid@@
+            `;
+
+            const defs = extractor.extractDefinitions(sql, '/sql/temp-tables.sql', 'TransactSQL');
+
+            expect(defs.map(def => def.name)).toEqual(['#staging', '##global_staging']);
+            for (const def of defs) {
+                expect(def.sql).toContain(def.name);
+            }
+        });
+
+        it('treats dollar, hash, and at signs as identifier characters at boundaries', () => {
+            jest.spyOn((extractor as any).parser, 'astify').mockImplementation(() => {
+                throw new Error('force regex fallback');
+            });
+            const sql = `
+                CREATE TABLE $created_orders (id INT);
+                CREATE TABLE @created_orders (id INT);
+                CREATE TABLE #created_orders (id INT);
+            `;
+
+            const defs = extractor.extractDefinitions(sql, '/sql/sigil-identifiers.sql', 'MySQL');
+
+            expect(defs.map(def => def.name)).toEqual([
+                '$created_orders',
+                '@created_orders',
+                '#created_orders',
+            ]);
+            for (const def of defs) {
+                expect(def.sql).toContain(def.name);
+            }
+        });
+
+        it('does not remask the full source once per extracted definition', () => {
+            const maskSpy = jest.spyOn(extractor as any, 'maskSqlComments');
+            const sql = `
+                CREATE TABLE first_table (id INT);
+                CREATE TABLE second_table (id INT);
+                CREATE TABLE third_table (id INT);
+            `;
+
+            expect(extractor.extractDefinitions(sql, '/sql/multiple.sql', 'MySQL')).toHaveLength(3);
+            expect(maskSpy.mock.calls.length).toBeLessThanOrEqual(2);
         });
     });
 
@@ -173,6 +338,21 @@ CREATE TABLE orders (
 
             expect(defs).toHaveLength(1);
             expect(defs[0].lineNumber).toBeGreaterThan(0);
+        });
+
+        it('uses the real definition location and SQL after block and hash comment examples', () => {
+            const sql = `/*
+CREATE TABLE accounts (block_comment_id INT);
+*/
+# CREATE TABLE accounts (hash_comment_id INT);
+CREATE TABLE accounts (real_id INT);
+`;
+
+            const defs = extractor.extractDefinitions(sql, '/sql/accounts.sql', 'MySQL');
+
+            expect(defs).toHaveLength(1);
+            expect(defs[0].lineNumber).toBe(5);
+            expect(defs[0].sql).toBe('CREATE TABLE accounts (real_id INT);');
         });
     });
 });

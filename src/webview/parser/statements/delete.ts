@@ -393,6 +393,12 @@ function tryParseTransactSqlDeleteOutput(args: TryParseCompatibleDeleteArgs): Pa
     }
 
     const result = parseSql(outputInfo.sanitizedSql, context.dialect);
+    // parseSql degrades parser failures to an explicit partial regex result.
+    // Do not label that best-effort result as a successful compatibility parse;
+    // returning null lets the normal pipeline report the original statement.
+    if (result.error || result.partial) {
+        return null;
+    }
     result.sql = sql;
 
     const detail = outputInfo.columns.length > 0

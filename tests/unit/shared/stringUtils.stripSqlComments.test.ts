@@ -17,6 +17,11 @@ describe('stripSqlComments', () => {
         expect(stripSqlComments('SELECT 1 # comment')).toBe('SELECT 1  ');
     });
 
+    it('preserves SQL Server global temp-table identifiers', () => {
+        const sql = 'CREATE TABLE ##global_temp (id INT); SELECT * FROM ##global_temp';
+        expect(stripSqlComments(sql)).toBe(sql);
+    });
+
     it('preserves -- inside single-quoted strings', () => {
         const sql = "SELECT '--not a comment' FROM t";
         expect(stripSqlComments(sql)).toBe(sql);

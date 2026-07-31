@@ -1,6 +1,6 @@
 // Impact Analyzer - Analyze impact of changes
 
-import { LineageGraph, LineageNode } from './types';
+import { ColumnLineageEdge, LineageEdge, LineageGraph, LineageNode } from './types';
 import { FlowAnalyzer } from './flowAnalyzer';
 import { normalizeIdentifier, parseQualifiedKey } from '../identifiers';
 
@@ -111,6 +111,7 @@ export class ImpactAnalyzer {
         const directEdges = this.graph.edges.filter(e =>
             e.sourceId === nodeId && !e.targetId.startsWith(ownColumnPrefix)
         );
+        const directTargetIds = new Set(directEdges.map(edge => edge.targetId));
         const directImpacts: ImpactItem[] = [];
         const transitiveImpacts: ImpactItem[] = [];
 
@@ -120,9 +121,17 @@ export class ImpactAnalyzer {
         const foreignKeyReasons = new Map<string, string>();
         const foreignKeyColumnsByTableId = new Map<string, Set<string>>();
         const normalizedTarget = normalizeIdentifier(tableName) || tableName.toLowerCase();
+        const incomingEdgesByTargetId = new Map<string, LineageEdge[]>();
+        const columnFlowByTargetId = new Map<string, ColumnLineageEdge>();
 
         // Check regular edges for non-structural relationships
         for (const edge of this.graph.edges) {
+            const incomingEdges = incomingEdgesByTargetId.get(edge.targetId);
+            if (incomingEdges) {
+                incomingEdges.push(edge);
+            } else {
+                incomingEdgesByTargetId.set(edge.targetId, [edge]);
+            }
             if (edge.metadata?.relationship !== 'contains' && edge.targetId.startsWith('column:')) {
                 columnsWithDataFlow.add(edge.targetId);
             }
@@ -136,6 +145,9 @@ export class ImpactAnalyzer {
                 const targetColId = `column:${colEdge.targetTableId.replace(/^(table|view):/, '')}.${colEdge.targetColumnName.toLowerCase()}`;
                 columnsWithDataFlow.add(sourceColId);
                 columnsWithDataFlow.add(targetColId);
+                if (!columnFlowByTargetId.has(targetColId)) {
+                    columnFlowByTargetId.set(targetColId, colEdge);
+                }
             }
         }
 
@@ -198,7 +210,7 @@ export class ImpactAnalyzer {
                 continue;
             }
 
-            const isDirect = directEdges.some(e => e.targetId === depNode.id);
+            const isDirect = directTargetIds.has(depNode.id);
 
             // For transitive column impacts, only include if there's actual data flow
             // (not just structural "contains" relationship from parent table)
@@ -216,8 +228,7 @@ export class ImpactAnalyzer {
                         f => targetDefFiles.has(f) || targetEdgeFiles.has(f)
                     );
                     // Also check if any edge connecting to this dep originated from a target-related file
-                    const hasSharedFileEdge = this.graph.edges.some(e => {
-                        if (e.targetId !== depNode.id) {return false;}
+                    const hasSharedFileEdge = (incomingEdgesByTargetId.get(depNode.id) || []).some(e => {
                         const edgeFile = e.metadata?.filePath as string | undefined;
                         return edgeFile ? (targetDefFiles.has(edgeFile) || targetEdgeFiles.has(edgeFile)) : false;
                     });
@@ -234,10 +245,7 @@ export class ImpactAnalyzer {
             // For column nodes, try to find source column info from column lineage
             let reason = this.generateImpactReason(depNode, tableName, 'table');
             if (depNode.type === 'column' && this.graph.columnEdges) {
-                const colEdge = this.graph.columnEdges.find(e => {
-                    const targetColId = `column:${e.targetTableId.replace(/^(table|view):/, '')}.${e.targetColumnName.toLowerCase()}`;
-                    return targetColId === depNode.id;
-                });
+                const colEdge = columnFlowByTargetId.get(depNode.id);
                 if (colEdge) {
                     const sourceTable = this.getTableDisplayName(colEdge.sourceTableId);
                     const targetTable = this.getTableDisplayName(colEdge.targetTableId);
@@ -335,11 +343,15 @@ export class ImpactAnalyzer {
 
         const directImpacts: ImpactItem[] = [];
         const transitiveImpacts: ImpactItem[] = [];
+        const directTargetIds = new Set<string>();
+        for (const edge of this.graph.edges) {
+            if (edge.sourceId === columnId) {
+                directTargetIds.add(edge.targetId);
+            }
+        }
 
         for (const depNode of downstream.nodes) {
-            const isDirect = this.graph.edges.some(e =>
-                e.sourceId === columnId && e.targetId === depNode.id
-            );
+            const isDirect = directTargetIds.has(depNode.id);
 
             const resolved = this.resolveImpactLocation(depNode);
             const impactItem: ImpactItem = {

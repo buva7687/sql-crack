@@ -1,4 +1,4 @@
-import { detectDialect } from '../../../src/webview/sqlParser';
+import { detectDialect, parseSql } from '../../../src/webview/sqlParser';
 
 describe('detectDialect', () => {
     it('detects Snowflake FLATTEN syntax with high confidence', () => {
@@ -14,10 +14,18 @@ describe('detectDialect', () => {
         expect(result.confidence).toBe('high');
     });
 
-    it('detects MySQL backtick syntax with high confidence', () => {
+    it('treats backtick quoting alone as an ambiguous low-confidence signal', () => {
         const result = detectDialect('SELECT `id` FROM `users`');
+        expect(result.dialect).toBeNull();
+        expect(result.scores.MySQL).toBe(1);
+        expect(result.confidence).toBe('low');
+    });
+
+    it('detects MySQL when backticks are combined with a MySQL-specific signal', () => {
+        const result = detectDialect('SELECT `id`, COUNT(*) FROM `users` GROUP BY `id` WITH ROLLUP');
         expect(result.dialect).toBe('MySQL');
         expect(result.confidence).toBe('high');
+        expect(result.scores.MySQL).toBeGreaterThanOrEqual(2);
     });
 
     it('detects SQL Server CROSS APPLY syntax with high confidence', () => {
@@ -30,6 +38,11 @@ describe('detectDialect', () => {
         const result = detectDialect('SELECT 1');
         expect(result.dialect).toBeNull();
         expect(result.confidence).toBe('none');
+    });
+
+    it('does not warn that generic numeric subscripting is PostgreSQL-specific', () => {
+        const result = parseSql('SELECT values_col[5] FROM measurements', 'SQLite');
+        expect(result.hints.some(hint => hint.message === 'PostgreSQL-specific syntax detected')).toBe(false);
     });
 
     it('ignores line comments during detection', () => {

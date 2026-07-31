@@ -305,4 +305,55 @@ describe('ImpactAnalyzer', () => {
             expect(report.suggestions.some(s => s.includes('maintenance window') || s.includes('rollback'))).toBe(true);
         });
     });
+
+    describe('edge lookup scaling', () => {
+        it('indexes graph and column edges instead of repeatedly scanning them per downstream node', () => {
+            const nodes = [
+                makeNode('table:orders', 'table', 'orders', { filePath: 'shared.sql' }),
+                makeNode('column:report.total', 'column', 'total', {
+                    parentId: 'table:report',
+                    filePath: 'shared.sql'
+                }),
+                makeNode('table:report', 'table', 'report', { filePath: 'shared.sql' })
+            ];
+            const edges = [
+                makeEdge('table:orders', 'column:report.total'),
+                makeEdge('column:report.total', 'table:report')
+            ];
+            const columnEdges: ColumnLineageEdge[] = [{
+                id: 'orders.amount->report.total',
+                sourceTableId: 'table:orders',
+                sourceColumnName: 'amount',
+                targetTableId: 'table:report',
+                targetColumnName: 'total',
+                transformationType: 'direct',
+                filePath: 'shared.sql',
+                lineNumber: 1
+            }];
+            const { graph, analyzer } = makeAnalyzer(nodes, edges, columnEdges);
+            const graphSomeSpy = jest.spyOn(graph.edges, 'some');
+            const columnFindSpy = jest.spyOn(graph.columnEdges, 'find');
+
+            const report = analyzer.analyzeTableChange('orders');
+
+            expect(report.summary.totalAffected).toBeGreaterThan(0);
+            expect(graphSomeSpy).not.toHaveBeenCalled();
+            expect(columnFindSpy).not.toHaveBeenCalled();
+        });
+
+        it('indexes direct column targets once', () => {
+            const nodes = [
+                makeNode('column:orders.amount', 'column', 'amount'),
+                makeNode('column:report.total', 'column', 'total', { filePath: 'report.sql' })
+            ];
+            const edges = [makeEdge('column:orders.amount', 'column:report.total')];
+            const { graph, analyzer } = makeAnalyzer(nodes, edges);
+            const graphSomeSpy = jest.spyOn(graph.edges, 'some');
+
+            const report = analyzer.analyzeColumnChange('orders', 'amount');
+
+            expect(report.directImpacts).toHaveLength(1);
+            expect(graphSomeSpy).not.toHaveBeenCalled();
+        });
+    });
 });

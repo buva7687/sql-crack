@@ -98,7 +98,6 @@ export function detectDialectSyntaxPatterns(sql: string): {
     hasPostgresTypeCast: boolean;
     hasPostgresAtTimeZone: boolean;
     hasPostgresDollarQuotes: boolean;
-    hasPostgresArrayAccess: boolean;
     hasPostgresJsonOperators: boolean;
     hasMysqlBackticks: boolean;
     hasMysqlGroupByRollup: boolean;
@@ -170,7 +169,6 @@ export function detectDialectSyntaxPatterns(sql: string): {
         hasPostgresTypeCast: /::\s*[a-z_][\w$]*(?:\s*\(\s*\d+(?:\s*,\s*\d+)?\s*\))?/i.test(maskedSql),
         hasPostgresAtTimeZone: /\bAT\s+TIME\s+ZONE\b/i.test(maskedSql),
         hasPostgresDollarQuotes: hasPostgresDollarQuoteLiteral(sql),
-        hasPostgresArrayAccess: /\w+\[\d+\]/.test(maskedSql),
         hasPostgresJsonOperators: /->>|#>|\?&|\?\|/.test(maskedSql),
         hasMysqlBackticks: /`[\w-]+`/.test(maskedSql),
         hasMysqlGroupByRollup: /GROUP BY.*WITH ROLLUP/i.test(maskedSql),
@@ -350,12 +348,19 @@ export function detectDialect(sql: string): DialectDetectionResult {
         topMatch.dialect === 'Oracle'
         && (scores.Oracle || 0) === 1
         && syntax.hasOracleMinus;
+    const hasOnlyMysqlBacktickSignal =
+        topMatch.dialect === 'MySQL'
+        && (scores.MySQL || 0) === 1
+        && syntax.hasMysqlBackticks;
     const hasOnlyTeradataSampleSignal =
         topMatch.dialect === 'Teradata'
         && (scores.Teradata || 0) === 2
         && syntax.hasTeradataSample;
     const isHighConfidence =
-        (matchedDialects.length === 1 && !hasOnlyOracleMinusSignal && !hasOnlyTeradataSampleSignal) ||
+        (matchedDialects.length === 1
+            && !hasOnlyOracleMinusSignal
+            && !hasOnlyMysqlBacktickSignal
+            && !hasOnlyTeradataSampleSignal) ||
         (topMatch.score >= 3 && topMatch.score >= secondMatchScore + 2);
 
     if (!isHighConfidence) {

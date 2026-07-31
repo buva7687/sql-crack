@@ -1459,8 +1459,11 @@ export function maskStringsAndComments(sql: string): string {
         }
         if (chars[i] === '#') {
             const next = i + 1 < chars.length ? chars[i + 1] : '';
-            const isIdentChar = /[a-zA-Z0-9_]/.test(next);
-            if (!isIdentChar) {
+            const afterDoubleHash = i + 2 < chars.length ? chars[i + 2] : '';
+            const isTempIdentifier =
+                /[a-zA-Z0-9_]/.test(next)
+                || (next === '#' && /[a-zA-Z0-9_]/.test(afterDoubleHash));
+            if (!isTempIdentifier) {
                 while (i < chars.length && chars[i] !== '\n') {
                     chars[i] = ' ';
                     i++;
@@ -1670,18 +1673,50 @@ export function findMatchingParen(sql: string, openPos: number): number {
             }
             continue;
         }
-        if (ch === '"') {
+        if (ch === '"' || ch === '`') {
+            const quote = ch;
             i++;
-            while (i < sql.length && sql[i] !== '"') { i++; }
-            if (i < sql.length) { i++; }
+            while (i < sql.length) {
+                if (sql[i] === quote && i + 1 < sql.length && sql[i + 1] === quote) {
+                    i += 2;
+                    continue;
+                }
+                if (sql[i] === quote) {
+                    i++;
+                    break;
+                }
+                i++;
+            }
+            continue;
+        }
+        if (ch === '[') {
+            i++;
+            while (i < sql.length) {
+                if (sql[i] === ']' && i + 1 < sql.length && sql[i + 1] === ']') {
+                    i += 2;
+                    continue;
+                }
+                if (sql[i] === ']') {
+                    i++;
+                    break;
+                }
+                i++;
+            }
             continue;
         }
         if (ch === '/' && i + 1 < sql.length && sql[i + 1] === '*') {
             i += 2;
-            while (i < sql.length) {
-                if (sql[i] === '*' && i + 1 < sql.length && sql[i + 1] === '/') {
+            let commentDepth = 1;
+            while (i < sql.length && commentDepth > 0) {
+                if (sql[i] === '/' && i + 1 < sql.length && sql[i + 1] === '*') {
+                    commentDepth++;
                     i += 2;
-                    break;
+                    continue;
+                }
+                if (sql[i] === '*' && i + 1 < sql.length && sql[i + 1] === '/') {
+                    commentDepth--;
+                    i += 2;
+                    continue;
                 }
                 i++;
             }

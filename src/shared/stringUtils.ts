@@ -153,10 +153,14 @@ export function stripSqlComments(sql: string): string {
             continue;
         }
 
-        // Hash line comment: # (but not #identifier for temp tables)
+        // Hash line comment: # (but not #identifier/##identifier temp tables)
         if (ch === '#') {
             const nextCh = i + 1 < len ? sql[i + 1] : '';
-            if (!/[a-zA-Z0-9_]/.test(nextCh)) {
+            const afterDoubleHash = i + 2 < len ? sql[i + 2] : '';
+            const isTempIdentifier =
+                /[a-zA-Z0-9_]/.test(nextCh)
+                || (nextCh === '#' && /[a-zA-Z0-9_]/.test(afterDoubleHash));
+            if (!isTempIdentifier) {
                 while (i < len && sql[i] !== '\n' && sql[i] !== '\r') { i++; }
                 out += ' ';
                 continue;

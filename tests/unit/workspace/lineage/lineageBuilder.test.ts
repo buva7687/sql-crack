@@ -502,6 +502,62 @@ describe('LineageBuilder', () => {
                 })
             ]));
         });
+
+        it('ignores commented target patterns and resolves the real SELECT INTO target', () => {
+            const commentedTarget = makeDef('commented_target');
+            const realTarget = makeDef('real_target');
+            const analysis = makeFileAnalysis(
+                'targets.sql',
+                [commentedTarget, realTarget],
+                []
+            );
+            const builder = new LineageBuilder();
+            builder.buildFromIndex(makeIndex([commentedTarget, realTarget]));
+
+            const targetId = (builder as any).resolveTargetTableId(
+                {
+                    statementType: 'select',
+                    sql: [
+                        '-- INSERT INTO commented_target SELECT 1',
+                        '/* SELECT 1 INTO commented_target */',
+                        'SELECT 1 INTO real_target'
+                    ].join('\n')
+                },
+                0,
+                analysis,
+                'targets.sql'
+            );
+
+            expect(targetId).toBe('table:real_target');
+        });
+
+        it('does not resolve a target mentioned only inside SQL comments', () => {
+            const commentedTarget = makeDef('commented_target');
+            const unrelatedTarget = makeDef('unrelated_target');
+            const analysis = makeFileAnalysis(
+                'comments_only.sql',
+                [commentedTarget, unrelatedTarget],
+                []
+            );
+            const builder = new LineageBuilder();
+            builder.buildFromIndex(makeIndex([commentedTarget, unrelatedTarget]));
+
+            const targetId = (builder as any).resolveTargetTableId(
+                {
+                    statementType: 'select',
+                    sql: [
+                        '-- INSERT INTO commented_target SELECT 1',
+                        '/* SELECT 1 INTO commented_target */',
+                        'SELECT 1'
+                    ].join('\n')
+                },
+                0,
+                analysis,
+                'comments_only.sql'
+            );
+
+            expect(targetId).toBeNull();
+        });
     });
 
     describe('extractCTEsWithRegex', () => {
@@ -520,8 +576,8 @@ describe('LineageBuilder', () => {
             expect(builder.nodes.has('cte:my_cte')).toBe(true);
         });
 
-        it('extracts RECURSIVE CTEs from preloaded SQL', async () => {
-            const sql = 'WITH RECURSIVE hierarchy AS (\n  SELECT 1\n)\nSELECT * FROM hierarchy';
+        it('extracts multiline RECURSIVE CTEs with the correct name line', async () => {
+            const sql = 'WITH RECURSIVE\n e AS (\n  SELECT 1\n)\nSELECT * FROM e';
             (mockedFs.promises.readFile as jest.Mock).mockResolvedValue(sql);
 
             const fa = makeFileAnalysis('rec.sql', [], []);
@@ -531,7 +587,10 @@ describe('LineageBuilder', () => {
             const builder = new LineageBuilder();
             await builder.buildFromIndexAsync(index);
 
-            expect(builder.nodes.has('cte:hierarchy')).toBe(true);
+            expect(builder.nodes.get('cte:e')).toEqual(expect.objectContaining({
+                name: 'e',
+                lineNumber: 2
+            }));
         });
 
         it('filters out SQL reserved words from preloaded SQL', async () => {
@@ -550,6 +609,61 @@ describe('LineageBuilder', () => {
             for (const [id] of builder.nodes) {
                 expect(id.startsWith('cte:')).toBe(false);
             }
+        });
+
+        it('ignores commented CTEs and preserves valid CTE line numbers', () => {
+            const sql = [
+                '-- WITH line_phantom AS (SELECT 1)',
+                '/*',
+                'WITH block_phantom AS (SELECT 2)',
+                '*/',
+                'WITH first_cte AS (',
+                '  SELECT 1',
+                '),',
+                'second_cte AS (',
+                '  SELECT 2',
+                ')',
+                'SELECT * FROM first_cte JOIN second_cte ON 1 = 1'
+            ].join('\n');
+            const cteNames = new Map<string, {
+                name: string;
+                filePath: string;
+                lineNumber: number;
+            }>();
+            const builder = new LineageBuilder();
+
+            (builder as any).extractCTEsWithRegex(sql, 'comments.sql', cteNames);
+
+            expect(Array.from(cteNames.keys())).toEqual(['first_cte', 'second_cte']);
+            expect(cteNames.get('first_cte')).toEqual({
+                name: 'first_cte',
+                filePath: 'comments.sql',
+                lineNumber: 5
+            });
+            expect(cteNames.get('second_cte')).toEqual({
+                name: 'second_cte',
+                filePath: 'comments.sql',
+                lineNumber: 8
+            });
+        });
+
+        it('ignores CTE-like text inside quoted SQL tokens', () => {
+            const sql = [
+                "SELECT 'WITH string_phantom AS (SELECT 1)' AS note;",
+                'SELECT "WITH identifier_phantom AS (SELECT 2)" FROM source;',
+                'WITH real_cte AS (SELECT 3) SELECT * FROM real_cte'
+            ].join('\n');
+            const cteNames = new Map<string, {
+                name: string;
+                filePath: string;
+                lineNumber: number;
+            }>();
+            const builder = new LineageBuilder();
+
+            (builder as any).extractCTEsWithRegex(sql, 'quoted.sql', cteNames);
+
+            expect(Array.from(cteNames.keys())).toEqual(['real_cte']);
+            expect(cteNames.get('real_cte')?.lineNumber).toBe(3);
         });
     });
 

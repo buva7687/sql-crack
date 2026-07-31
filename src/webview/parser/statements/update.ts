@@ -32,7 +32,7 @@ export function tryParseCompatibleUpdateStatement(args: TryParseCompatibleUpdate
     const result = parseSql(outputInfo.sanitizedSql, context.dialect);
     // If the sanitized statement still doesn't parse, let the normal pipeline handle it
     // (which reports the original error) rather than showing a misleading partial graph.
-    if (result.error) {
+    if (result.error || result.partial) {
         return null;
     }
     result.sql = sql;
