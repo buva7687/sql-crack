@@ -201,6 +201,62 @@ describe('workspace dependency graph layout and cycle detection', () => {
         expect(edgesBySourceLabel.get('view_b')).toEqual(['source_b']);
     });
 
+    it('keeps same-file view dependencies in table mode', () => {
+        const filePath = '/repo/models.sql';
+        const analysis: FileAnalysis = {
+            filePath,
+            fileName: path.basename(filePath),
+            lastModified: Date.now(),
+            contentHash: 'models-hash',
+            definitions: [
+                createDefinition(filePath, 'base_table', { statementIndex: 0, lineNumber: 1 }),
+                createDefinition(filePath, 'derived_view', {
+                    type: 'view',
+                    statementIndex: 1,
+                    lineNumber: 2,
+                    sql: 'CREATE VIEW derived_view AS SELECT * FROM base_table;'
+                }),
+            ],
+            references: [
+                createReference(filePath, 'base_table', { statementIndex: 1, lineNumber: 2 }),
+            ],
+        };
+
+        const graph = buildDependencyGraph(createIndex([analysis]), 'tables');
+        const labels = new Map(graph.nodes.map(node => [node.id, node.label]));
+
+        expect(graph.edges).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                source: expect.stringMatching(/^table_/),
+                target: expect.stringMatching(/^table_/),
+            }),
+        ]));
+        expect(graph.edges.some(edge =>
+            labels.get(edge.source) === 'derived_view' && labels.get(edge.target) === 'base_table'
+        )).toBe(true);
+    });
+
+    it('creates table-mode dependencies for CREATE TABLE AS SELECT', () => {
+        const sourceFile = '/repo/source.sql';
+        const targetFile = '/repo/snapshot.sql';
+        const source = createFileAnalysis(sourceFile, createDefinition(sourceFile, 'orders'), []);
+        const snapshot = createFileAnalysis(
+            targetFile,
+            createDefinition(targetFile, 'orders_snapshot', {
+                statementIndex: 0,
+                sql: 'CREATE TABLE orders_snapshot AS SELECT * FROM orders;'
+            }),
+            [createReference(targetFile, 'orders', { statementIndex: 0 })]
+        );
+
+        const graph = buildDependencyGraph(createIndex([source, snapshot]), 'tables');
+        const labels = new Map(graph.nodes.map(node => [node.id, node.label]));
+
+        expect(graph.edges.some(edge =>
+            labels.get(edge.source) === 'orders_snapshot' && labels.get(edge.target) === 'orders'
+        )).toBe(true);
+    });
+
     it('resolves unqualified references through normalized definition-name fallback', () => {
         const producerFile = '/repo/source.sql';
         const consumerFile = '/repo/consumer.sql';

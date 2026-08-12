@@ -22,6 +22,7 @@ import { getTooltipScriptFragment } from './scripts/tooltip';
 import { getWorkspaceShellScriptFragment } from './scripts/workspaceShell';
 import { getWorkspaceCommandBarScriptFragment } from './scripts/workspaceCommandBar';
 import type { WorkspaceInitialRestoreState } from '../panel/viewStateBootstrap';
+import { escapeForInlineScriptValue } from '../../shared/stringUtils';
 
 /**
  * Parameters for generating webview script
@@ -61,20 +62,25 @@ export function getWebviewScript(params: WebviewScriptParams): string {
     const normalizedLineageDepth = Number.isFinite(lineageDefaultDepth)
         ? Math.min(20, Math.max(1, Math.floor(lineageDefaultDepth)))
         : 5;
+    // graphData arrives as a serialized object because it is also assembled by
+    // the workspace panel. Parse and re-serialize it at this final inline-script
+    // boundary so every bootstrap value receives the same script-termination
+    // protection, including tests and future callers of this generator.
+    const serializedGraphData = escapeForInlineScriptValue(JSON.parse(graphData));
 
     return `
     <script nonce="${nonce}">
         const vscode = acquireVsCodeApi();
-        const graphData = ${graphData};
-        const initialViewMode = '${initialView}';
-        const initialSearchQuery = ${JSON.stringify(searchFilterQuery || '')};
-        let currentGraphMode = '${currentGraphMode}';
+        const graphData = ${serializedGraphData};
+        const initialViewMode = ${escapeForInlineScriptValue(initialView)};
+        const initialSearchQuery = ${escapeForInlineScriptValue(searchFilterQuery || '')};
+        let currentGraphMode = ${escapeForInlineScriptValue(currentGraphMode)};
         let lineageDepth = ${normalizedLineageDepth};
         let lineageLegendVisibleFromHost = ${lineageLegendVisible ? 'true' : 'false'};
-        const initialLineageDetailNodeId = ${lineageDetailNodeId ? JSON.stringify(lineageDetailNodeId) : 'null'};
-        const initialLineageDetailDirection = ${JSON.stringify(lineageDetailDirection)};
-        const initialLineageDetailExpandedNodes = ${JSON.stringify(lineageDetailExpandedNodes)};
-        const initialWorkspaceRestoreState = ${JSON.stringify(initialRestoreState)};
+        const initialLineageDetailNodeId = ${escapeForInlineScriptValue(lineageDetailNodeId)};
+        const initialLineageDetailDirection = ${escapeForInlineScriptValue(lineageDetailDirection)};
+        const initialLineageDetailExpandedNodes = ${escapeForInlineScriptValue(lineageDetailExpandedNodes)};
+        const initialWorkspaceRestoreState = ${escapeForInlineScriptValue(initialRestoreState)};
         function normalizeLineageDepth(value, fallbackDepth = 5) {
             const numeric = Number(value);
             if (!Number.isFinite(numeric)) {

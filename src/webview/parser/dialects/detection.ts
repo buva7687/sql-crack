@@ -225,7 +225,10 @@ export function detectDialectSyntaxPatterns(sql: string): {
 }
 
 export function detectDialect(sql: string): DialectDetectionResult {
-    const strippedSql = stripSqlComments(sql);
+    // Dialect detection must not reinterpret MySQL `#word` comments as T-SQL
+    // temp identifiers based on surrounding tokens. Temp names are not a
+    // dialect signal, so treating every unquoted hash as a comment is safe here.
+    const strippedSql = stripSqlComments(sql, { preserveHashTempIdentifiers: false });
     if (!strippedSql.trim()) {
         return {
             dialect: null,

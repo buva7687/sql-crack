@@ -60,6 +60,20 @@ describe('visualizationPanel.ts integration', () => {
         });
     });
 
+    describe('static method: sourceRange', () => {
+        it('returns the selection range retained by the current panel', () => {
+            const range = new vscodeMock.Range(
+                new vscodeMock.Position(2, 4),
+                new vscodeMock.Position(5, 9)
+            );
+            VisualizationPanel.currentPanel = {
+                _currentOptions: { sourceRange: range }
+            };
+
+            expect(VisualizationPanel.sourceRange).toBe(range);
+        });
+    });
+
     describe('normalizeAdvancedLimit (shared)', () => {
         const source = require('fs').readFileSync(require('path').join(__dirname, '../../src/visualizationPanel.ts'), 'utf8');
 

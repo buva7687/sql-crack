@@ -79,6 +79,14 @@ describe('SchemaExtractor.extractDefinitions', () => {
             expect(defs[0].type).toBe('view');
             expect(defs[0].name).toBe('recent_orders');
         });
+
+        it('unwraps quoted PostgreSQL explicit view column names', () => {
+            const sql = 'CREATE VIEW order_view ("Order ID", total) AS SELECT id, amount FROM orders;';
+            const defs = extractor.extractDefinitions(sql, '/sql/views.sql', 'PostgreSQL');
+
+            expect(defs).toHaveLength(1);
+            expect(defs[0].columns.map(column => column.name)).toEqual(['Order ID', 'total']);
+        });
     });
 
     describe('statement SQL boundaries', () => {
@@ -159,6 +167,28 @@ describe('SchemaExtractor.extractDefinitions', () => {
 
             // Should find page_views, possibly with schema
             expect(defs.length).toBeGreaterThanOrEqual(1);
+        });
+
+        it('does not borrow a later table body for a CTAS definition', () => {
+            const sql = [
+                'CREATE TABLE snapshot AS SELECT 1;',
+                'CREATE TABLE later_table (id INT);',
+                '@@force_regex_fallback@@'
+            ].join('\n');
+            const defs = extractor.extractDefinitions(sql, '/sql/fallback.sql', 'MySQL');
+
+            expect(defs.find(def => def.name === 'snapshot')?.columns).toEqual([]);
+            expect(defs.find(def => def.name === 'later_table')?.columns.map(column => column.name)).toEqual(['id']);
+        });
+
+        it('does not treat a parenthesized CTAS query as a column-definition body', () => {
+            const sql = [
+                'CREATE TABLE snapshot AS (SELECT 1 AS id);',
+                '@@force_regex_fallback@@'
+            ].join('\n');
+            const defs = extractor.extractDefinitions(sql, '/sql/fallback.sql', 'MySQL');
+
+            expect(defs.find(def => def.name === 'snapshot')?.columns).toEqual([]);
         });
 
         it.each([

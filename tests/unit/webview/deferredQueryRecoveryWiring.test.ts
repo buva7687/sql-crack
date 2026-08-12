@@ -14,4 +14,12 @@ describe('deferred query recovery wiring', () => {
         expect(indexSource).toContain("hydratedQuery.nodes.length === 0 && hasExecutableSql(querySql)");
         expect(indexSource).toContain('buildFallbackQueryErrorResult(querySql, fallbackMessage)');
     });
+
+    it('does not cache cancellation sentinels and keeps overlapping loading ownership stable', () => {
+        expect(indexSource).toContain("'independent'");
+        expect(indexSource).toContain('if (isCancelledBatchParseResult(hydrated)) {');
+        expect(indexSource).toContain('const loadingToken = beginQueryLoading();');
+        expect(indexSource).toContain('endQueryLoading(loadingToken);');
+        expect(indexSource).toContain('if (token !== queryLoadingToken) {');
+    });
 });

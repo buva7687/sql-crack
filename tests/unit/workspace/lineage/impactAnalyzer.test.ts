@@ -95,23 +95,30 @@ describe('ImpactAnalyzer', () => {
             expect(report.suggestions.some(s => s.includes("view 'missing_view' not found"))).toBe(true);
         });
 
-        it('identifies transitive impacts', () => {
+        it('identifies transitive impacts across independent definition files', () => {
             const nodes = [
-                makeNode('table:orders', 'table', 'orders'),
-                makeNode('table:staging', 'table', 'staging', { filePath: 'staging.sql' }),
-                makeNode('table:report', 'table', 'report', { filePath: 'staging.sql' })
+                makeNode('table:orders', 'table', 'orders', {
+                    filePath: 'orders.sql',
+                    metadata: { definitionFiles: ['orders.sql'] }
+                }),
+                makeNode('table:staging', 'table', 'staging', {
+                    filePath: 'staging.sql',
+                    metadata: { definitionFiles: ['staging.sql'] }
+                }),
+                makeNode('table:report', 'table', 'report', {
+                    filePath: 'report.sql',
+                    metadata: { definitionFiles: ['report.sql'] }
+                })
             ];
             const edges = [
-                makeEdge('table:orders', 'table:staging'),
-                makeEdge('table:staging', 'table:report')
+                makeEdge('table:orders', 'table:staging', 'direct', { filePath: 'staging.sql' }),
+                makeEdge('table:staging', 'table:report', 'direct', { filePath: 'report.sql' })
             ];
             const { analyzer } = makeAnalyzer(nodes, edges);
 
             const report = analyzer.analyzeTableChange('orders');
             expect(report.directImpacts).toHaveLength(1);
-            // The cross-file filter may filter out report if def files don't overlap
-            // but staging.sql is shared, so report should appear as transitive
-            expect(report.transitiveImpacts.length + report.directImpacts.length).toBeGreaterThanOrEqual(1);
+            expect(report.transitiveImpacts.map(impact => impact.node.id)).toContain('table:report');
         });
 
         it('respects changeType in report', () => {

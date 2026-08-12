@@ -174,7 +174,7 @@ describe('Bug 4+5: splitSqlStatements handles comments and doubled quotes', () =
             'utf8'
         );
         expect(source).toContain('inLineComment');
-        expect(source).toContain('inBlockComment');
+        expect(source).toContain('blockCommentDepth');
         expect(source).toContain('nextChar === stringChar');
     });
 });

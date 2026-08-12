@@ -305,6 +305,34 @@ describe('IndexManager', () => {
             await rebuildPromise;
             expect(mockScanner.analyzeWorkspace).toHaveBeenCalledTimes(2);
         });
+
+        it('does not resurrect a file deleted while a full rebuild is analyzing it', async () => {
+            mockScanner.analyzeWorkspace.mockResolvedValueOnce([
+                createMockAnalysis('/deleted.sql', [{ name: 'deleted_table' }]),
+                createMockAnalysis('/keep.sql', [{ name: 'keep_table' }]),
+            ]);
+            await indexManager.buildIndex();
+
+            let finishRebuild!: (analyses: FileAnalysis[]) => void;
+            mockScanner.analyzeWorkspace.mockImplementationOnce(() => new Promise(resolve => {
+                finishRebuild = resolve;
+            }));
+
+            const rebuild = indexManager.buildIndex();
+            await flushPromises();
+            await indexManager.removeFile(vscode.Uri.file('/deleted.sql'));
+
+            finishRebuild([
+                createMockAnalysis('/deleted.sql', [{ name: 'deleted_table' }]),
+                createMockAnalysis('/keep.sql', [{ name: 'keep_table' }]),
+            ]);
+            await rebuild;
+
+            expect(indexManager.getIndex()?.files.has('/deleted.sql')).toBe(false);
+            expect(indexManager.getIndex()?.fileCount).toBe(1);
+            expect(indexManager.findDefinition('deleted_table')).toBeUndefined();
+            expect(indexManager.findDefinition('keep_table')).toBeDefined();
+        });
     });
 
     // =========================================================================

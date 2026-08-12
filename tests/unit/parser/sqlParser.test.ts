@@ -190,6 +190,28 @@ SELECT 2;`;
       expect(statements).toHaveLength(2);
     });
 
+    it('ignores semicolons inside nested PostgreSQL block comments', () => {
+      const sql = `/* outer; /* inner; */ still outer; */
+SELECT 1;
+SELECT 2;`;
+      const statements = splitSqlStatements(sql);
+
+      expect(statements).toHaveLength(2);
+      expect(statements[0]).toContain('SELECT 1');
+      expect(statements[1]).toContain('SELECT 2');
+    });
+
+    it('treats a leading #word as a MySQL comment while preserving contextual #temp names', () => {
+      const mysqlSql = '#CONNECT BY PRIOR id = parent_id;\nSELECT 1;';
+      expect(splitSqlStatements(mysqlSql)).toEqual([expect.stringContaining('SELECT 1')]);
+
+      const transactSql = 'CREATE TABLE #temp (id INT); SELECT * FROM #temp;';
+      const statements = splitSqlStatements(transactSql);
+      expect(statements).toHaveLength(2);
+      expect(statements[0]).toContain('#temp');
+      expect(statements[1]).toContain('#temp');
+    });
+
     it('splits SQL file with comment headers containing numbered lists', () => {
       const sql = `-- ============================================================
 -- Table-Valued Functions (TVF) - Snowflake

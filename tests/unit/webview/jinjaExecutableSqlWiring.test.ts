@@ -7,6 +7,6 @@ describe('webview hasExecutableSql jinja wiring', () => {
     it('preprocesses Jinja before checking for executable SQL', () => {
         expect(source).toContain("from './parser/dialects/jinjaPreprocessor'");
         expect(source).toContain('const { rewritten } = preprocessJinjaTemplates(sql);');
-        expect(source).toContain('stripSqlComments(rewritten).trim().length > 0');
+        expect(source).toContain('stripSqlComments(rewritten, { preserveHashTempIdentifiers: false }).trim().length > 0');
     });
 });

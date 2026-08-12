@@ -468,6 +468,6 @@
   },
   "overrides": {
     "lodash": "^4.18.1",
-    "dompurify": "^3.4.8"
+    "dompurify": "^3.4.13"
   }
 }

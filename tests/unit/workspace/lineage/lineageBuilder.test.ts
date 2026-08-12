@@ -253,7 +253,7 @@ describe('LineageBuilder', () => {
             debugSpy.mockRestore();
         });
 
-        it('logs warning when async SQL preload cannot provide SQL for CTE/alias extraction', async () => {
+        it('does not require file SQL to filter already-classified references', async () => {
             const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => {});
             (mockedFs.promises.readFile as jest.Mock).mockRejectedValue(new Error('EACCES'));
 
@@ -270,7 +270,7 @@ describe('LineageBuilder', () => {
             const builder = new LineageBuilder();
             await builder.buildFromIndexAsync(index);
 
-            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('CTE/alias extraction (restricted.sql)'));
+            expect(warnSpy).not.toHaveBeenCalled();
             warnSpy.mockRestore();
         });
 
@@ -393,6 +393,36 @@ describe('LineageBuilder', () => {
 
             // CTE reference should not create an external node or edge
             expect(builder.nodes.has('external:my_cte')).toBe(false);
+        });
+
+        it('does not let a CTE name hide a physical table in a later statement', () => {
+            const report = makeDef('report', 'table', [], { filePath: 'pipeline.sql' });
+            const refs = [
+                makeRef('orders', 'select', { filePath: 'pipeline.sql', statementIndex: 1 }),
+                makeRef('report', 'insert', { filePath: 'pipeline.sql', statementIndex: 1 }),
+            ];
+            const queries = [{
+                statementType: 'select',
+                outputColumns: [],
+                inputTables: [],
+                inputColumns: [],
+                transformations: [],
+                ctes: [{ name: 'orders', columns: [], lineNumber: 1 }],
+                subqueries: [],
+                lineNumber: 1,
+            }];
+            const analysis = makeFileAnalysis('pipeline.sql', [report], refs, queries as any);
+            const index = makeIndex([report], new Map([['pipeline.sql', analysis]]));
+
+            const builder = new LineageBuilder({ includeExternal: true, includeColumns: false });
+            builder.buildFromIndex(index);
+
+            expect(builder.edges).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    sourceId: 'external:orders',
+                    targetId: 'table:report',
+                }),
+            ]));
         });
 
         it('resolves a view reference to the existing view node, not a stray external node', () => {

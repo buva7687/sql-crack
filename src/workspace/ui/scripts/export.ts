@@ -57,13 +57,20 @@ export function getExportToPngScript(): string {
     return `
         // ========== PNG Export Function ==========
         const MAX_RASTER_DIMENSION = 16384;
+        const MAX_RASTER_PIXELS = 16 * 1024 * 1024;
         function getRasterScale(width, height, preferredScale = 2) {
             const safeWidth = Math.max(1, Number(width) || 1);
             const safeHeight = Math.max(1, Number(height) || 1);
             const widthLimitScale = MAX_RASTER_DIMENSION / safeWidth;
             const heightLimitScale = MAX_RASTER_DIMENSION / safeHeight;
-            const effectiveScale = Math.min(preferredScale, widthLimitScale, heightLimitScale);
-            return Number.isFinite(effectiveScale) && effectiveScale > 0 ? effectiveScale : 1;
+            const pixelLimitScale = Math.sqrt(MAX_RASTER_PIXELS / safeWidth / safeHeight);
+            const effectiveScale = Math.min(preferredScale, widthLimitScale, heightLimitScale, pixelLimitScale);
+            if (Number.isFinite(effectiveScale) && effectiveScale > 0) {
+                return effectiveScale;
+            }
+            // Preserve a bounded result even when hostile/corrupt SVG geometry
+            // overflows the area calculation above.
+            return Math.min(1, Math.sqrt(MAX_RASTER_PIXELS) / Math.max(safeWidth, safeHeight));
         }
 
         function exportToPng(copyToClipboard = false) {
@@ -126,25 +133,39 @@ export function getExportToPngScript(): string {
                     ctx.drawImage(img, 0, 0);
                     URL.revokeObjectURL(svgUrl);
 
-                    // Convert to PNG and either copy or send to extension for save
-                    const pngDataUrl = canvas.toDataURL('image/png');
-                    const base64Data = pngDataUrl.split(',')[1];
                     const filename = 'workspace-dependencies-' + Date.now() + '.png';
 
-                    const saveViaDialog = function() {
-                        vscode.postMessage({ command: 'savePng', data: base64Data, filename: filename });
-                    };
-
-                    if (copyToClipboard && navigator.clipboard && typeof ClipboardItem !== 'undefined' && typeof navigator.clipboard.write === 'function') {
-                        // Use canvas.toBlob() instead of fetch(dataURL): the panel CSP is
-                        // default-src 'none' with no connect-src, so fetch() against a
-                        // data: URL is blocked. toBlob() builds the Blob directly with no
-                        // network request. Fall back to the save dialog on any failure.
+                    // Encode once as a Blob. This avoids a synchronous, full-size
+                    // canvas data URL allocation. The host message remains base64
+                    // because webview messages must stay JSON-serializable.
+                    try {
                         canvas.toBlob(function(blob) {
                             if (!blob) {
+                                vscode.postMessage({ command: 'exportPngError', error: 'Failed to encode PNG image' });
+                                return;
+                            }
+
+                            const saveViaDialog = function() {
+                                blob.arrayBuffer()
+                                    .then(function(data) {
+                                        const bytes = new Uint8Array(data);
+                                        const chunkSize = 0x8000;
+                                        let binary = '';
+                                        for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+                                            binary += String.fromCharCode.apply(null, bytes.subarray(offset, offset + chunkSize));
+                                        }
+                                        vscode.postMessage({ command: 'savePng', data: btoa(binary), filename: filename });
+                                    })
+                                    .catch(function() {
+                                        vscode.postMessage({ command: 'exportPngError', error: 'Failed to prepare PNG image for saving' });
+                                    });
+                            };
+
+                            if (!(copyToClipboard && navigator.clipboard && typeof ClipboardItem !== 'undefined' && typeof navigator.clipboard.write === 'function')) {
                                 saveViaDialog();
                                 return;
                             }
+
                             // Guard the synchronous parts too: new ClipboardItem() and
                             // navigator.clipboard.write() can throw synchronously (e.g.
                             // unsupported type, permissions), which a .catch() alone would
@@ -174,8 +195,8 @@ export function getExportToPngScript(): string {
                                 saveViaDialog();
                             }
                         }, 'image/png');
-                    } else {
-                        saveViaDialog();
+                    } catch (encodeErr) {
+                        vscode.postMessage({ command: 'exportPngError', error: 'Failed to encode PNG image' });
                     }
                 };
 

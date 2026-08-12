@@ -17,6 +17,20 @@ describe('stripSqlComments', () => {
         expect(stripSqlComments('SELECT 1 # comment')).toBe('SELECT 1  ');
     });
 
+    it('strips MySQL hash comments that begin immediately with a word', () => {
+        expect(stripSqlComments('#CONNECT BY PRIOR id = parent_id\nSELECT 1')).toBe(' \nSELECT 1');
+    });
+
+    it('preserves contextual SQL Server temp-table identifiers', () => {
+        const sql = 'CREATE TABLE #temp (id INT); SELECT #temp.id FROM #temp';
+        expect(stripSqlComments(sql)).toBe(sql);
+    });
+
+    it('can force ambiguous hashes to be treated as comments for MySQL-aware callers', () => {
+        const sql = 'SELECT * FROM\n#comment without whitespace\nusers';
+        expect(stripSqlComments(sql, { preserveHashTempIdentifiers: false })).toBe('SELECT * FROM\n \nusers');
+    });
+
     it('preserves SQL Server global temp-table identifiers', () => {
         const sql = 'CREATE TABLE ##global_temp (id INT); SELECT * FROM ##global_temp';
         expect(stripSqlComments(sql)).toBe(sql);

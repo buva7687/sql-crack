@@ -437,6 +437,24 @@ describe('Function Extractors', () => {
             expect(result[0].alias).toBe('total_count');
         });
 
+        it('preserves separate output aliases for the same aggregate expression', () => {
+            const aggregateExpr = {
+                type: 'aggr_func',
+                name: 'SUM',
+                args: { column: 'amount' }
+            };
+            const columns = [
+                { as: 'gross', expr: { ...aggregateExpr } },
+                { as: 'net', expr: { ...aggregateExpr } }
+            ];
+
+            const result = extractAggregateFunctionDetails(columns);
+
+            expect(result).toHaveLength(2);
+            expect(result.map(detail => detail.alias)).toEqual(['gross', 'net']);
+            expect(result.every(detail => detail.expression === 'SUM(amount)')).toBe(true);
+        });
+
         it('extracts nested aggregates', () => {
             const columns = [{
                 expr: {

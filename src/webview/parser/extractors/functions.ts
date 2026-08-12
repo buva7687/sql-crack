@@ -163,7 +163,10 @@ export function extractAggregateFunctionDetails(
     if (!columns || !Array.isArray(columns)) { return []; }
 
     const aggregateFuncSet = new Set(getAggregateFunctions(dialect));
-    const details: AggregateFunctionDetailWithSource[] = [];
+    type ExtractedAggregateDetail = AggregateFunctionDetailWithSource & {
+        topLevelOutputIndex?: number;
+    };
+    const details: ExtractedAggregateDetail[] = [];
 
     function getExpressionFunctionName(expr: any): string {
         if (typeof expr?.name === 'string') {
@@ -336,7 +339,8 @@ export function extractAggregateFunctionDetails(
         }
     }
 
-    for (const col of columns) {
+    for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
+        const col = columns[columnIndex];
         if (!col?.expr) {
             continue;
         }
@@ -349,23 +353,44 @@ export function extractAggregateFunctionDetails(
         const isTopLevelAggregate =
             topExprType === 'aggr_func' || (topExprName && aggregateFuncSet.has(topExprName));
 
-        if (col.as && addedCount === 1 && isTopLevelAggregate) {
-            details[startIndex].alias = col.as;
+        if (addedCount === 1 && isTopLevelAggregate) {
+            details[startIndex].topLevelOutputIndex = columnIndex;
+            if (col.as) {
+                details[startIndex].alias = col.as;
+            }
         }
     }
 
     const deduped: AggregateFunctionDetailWithSource[] = [];
-    const indexByKey = new Map<string, number>();
+    const seenKeys = new Set<string>();
+    const baseKey = (detail: AggregateFunctionDetailWithSource): string =>
+        `${detail.name}|${detail.expression}|${detail.sourceTable || ''}|${detail.sourceColumn || ''}`;
+    const projectedBaseKeys = new Set(
+        details
+            .filter(detail => detail.topLevelOutputIndex !== undefined)
+            .map(baseKey)
+    );
     for (const detail of details) {
-        const key = `${detail.name}|${detail.expression}|${detail.sourceTable || ''}|${detail.sourceColumn || ''}`;
-        const existingIndex = indexByKey.get(key);
-        if (existingIndex === undefined) {
-            indexByKey.set(key, deduped.length);
-            deduped.push(detail);
+        const aggregateKey = baseKey(detail);
+        if (detail.topLevelOutputIndex === undefined && projectedBaseKeys.has(aggregateKey)) {
             continue;
         }
-        if (!deduped[existingIndex].alias && detail.alias) {
-            deduped[existingIndex].alias = detail.alias;
+        // Every top-level SELECT output is meaningful even if multiple outputs
+        // intentionally use the same aggregate expression. Nested occurrences,
+        // however, are shown once and are omitted when that aggregate already has
+        // a top-level output card.
+        const key = detail.topLevelOutputIndex === undefined
+            ? aggregateKey
+            : `${aggregateKey}|output:${detail.topLevelOutputIndex}`;
+        if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            deduped.push({
+                name: detail.name,
+                expression: detail.expression,
+                alias: detail.alias,
+                sourceColumn: detail.sourceColumn,
+                sourceTable: detail.sourceTable,
+            });
         }
     }
 

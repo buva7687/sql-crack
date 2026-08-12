@@ -1240,6 +1240,10 @@ function applyParserCompatibilityPreprocessing(
 }
 
 export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: ParseOptions = {}): ParseResult {
+    // Keep the source text as the public result payload. Compatibility rewrites
+    // below are parser implementation details and must never replace the SQL
+    // shown, copied, pinned, or compared by the webview.
+    const originalSql = sql;
     const context = createFreshContext(dialect);
     const nodes: FlowNode[] = [];
     const edges: FlowEdge[] = [];
@@ -1400,6 +1404,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
             };
             // Return regex fallback with the timeout hint merged in
             const fallbackResult = regexFallbackParse(sql, dialect);
+            fallbackResult.sql = originalSql;
             fallbackResult.hints.unshift(timeoutHint);
             layoutGraph(fallbackResult.nodes, fallbackResult.edges);
             assignLineNumbers(fallbackResult.nodes, sql);
@@ -1513,7 +1518,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
                 .sort((a, b) => a.name.localeCompare(b.name));
         }
 
-        return { nodes, edges, stats: context.stats, hints: context.hints, sql, columnLineage, columnFlows, tableUsage: context.tableUsageMap };
+        return { nodes, edges, stats: context.stats, hints: context.hints, sql: originalSql, columnLineage, columnFlows, tableUsage: context.tableUsageMap };
     } catch (err) {
         const originalError = err instanceof Error ? err.message : 'Parse error';
         let message = originalError;
@@ -1597,6 +1602,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
         // Instead of returning empty result, use regex fallback parser
         // This gives users a best-effort visualization instead of nothing
         const fallbackResult = regexFallbackParse(sql, dialect);
+        fallbackResult.sql = originalSql;
 
         // Add the original parse error as a hint so users know what went wrong
         fallbackResult.hints.unshift({

@@ -243,17 +243,15 @@ function buildTableGraph(
     // Create edges based on view/query dependencies.
     // Views reference tables, so create edges from views to their source tables.
     for (const analysis of index.files.values()) {
-        // Get tables defined in this file
-        const definedHere = new Set(
-            analysis.definitions.map(d => getQualifiedKey(d.name, d.schema))
-        );
-
-        const viewDefinitions = analysis.definitions
-            .filter(def => def.type === 'view')
+        const dependentDefinitions = analysis.definitions
+            .filter(def => def.type === 'view' || (
+                def.type === 'table'
+                && (/\bAS\s+(?:SELECT|\()/i.test(def.sql) || /^\s*(?:WITH[\s\S]+?)?SELECT[\s\S]+?\bINTO\b/i.test(def.sql))
+            ))
             .sort((a, b) => (a.lineNumber || Number.MAX_SAFE_INTEGER) - (b.lineNumber || Number.MAX_SAFE_INTEGER));
 
-        for (let viewIndex = 0; viewIndex < viewDefinitions.length; viewIndex++) {
-            const def = viewDefinitions[viewIndex];
+        for (let definitionIndex = 0; definitionIndex < dependentDefinitions.length; definitionIndex++) {
+            const def = dependentDefinitions[definitionIndex];
             const sourceId = nodeIdMap.get(getQualifiedKey(def.name, def.schema));
             if (!sourceId) {
                 continue;
@@ -263,7 +261,7 @@ function buildTableGraph(
                 ? analysis.references.filter(ref => ref.statementIndex === def.statementIndex)
                 : [];
 
-            const nextDef = viewDefinitions[viewIndex + 1];
+            const nextDef = dependentDefinitions[definitionIndex + 1];
             const refsByLineRange = analysis.references.filter(ref => {
                 if (!Number.isFinite(def.lineNumber) || def.lineNumber <= 0) {
                     return true;
@@ -284,10 +282,6 @@ function buildTableGraph(
 
             for (const ref of scopedReferences) {
                 const refKey = getQualifiedKey(ref.tableName, ref.schema);
-                if (definedHere.has(refKey)) {
-                    continue;
-                }
-
                 const targets = getDefinitionCandidates(index, definitionNameIndex, ref);
                 if (targets.length > 0) {
                     for (const targetDef of targets) {

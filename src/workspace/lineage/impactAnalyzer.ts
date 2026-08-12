@@ -1,6 +1,6 @@
 // Impact Analyzer - Analyze impact of changes
 
-import { ColumnLineageEdge, LineageEdge, LineageGraph, LineageNode } from './types';
+import { ColumnLineageEdge, LineageGraph, LineageNode } from './types';
 import { FlowAnalyzer } from './flowAnalyzer';
 import { normalizeIdentifier, parseQualifiedKey } from '../identifiers';
 
@@ -121,17 +121,10 @@ export class ImpactAnalyzer {
         const foreignKeyReasons = new Map<string, string>();
         const foreignKeyColumnsByTableId = new Map<string, Set<string>>();
         const normalizedTarget = normalizeIdentifier(tableName) || tableName.toLowerCase();
-        const incomingEdgesByTargetId = new Map<string, LineageEdge[]>();
         const columnFlowByTargetId = new Map<string, ColumnLineageEdge>();
 
         // Check regular edges for non-structural relationships
         for (const edge of this.graph.edges) {
-            const incomingEdges = incomingEdgesByTargetId.get(edge.targetId);
-            if (incomingEdges) {
-                incomingEdges.push(edge);
-            } else {
-                incomingEdgesByTargetId.set(edge.targetId, [edge]);
-            }
             if (edge.metadata?.relationship !== 'contains' && edge.targetId.startsWith('column:')) {
                 columnsWithDataFlow.add(edge.targetId);
             }
@@ -175,28 +168,6 @@ export class ImpactAnalyzer {
             }
         }
 
-        // Defense-in-depth: collect target's definition files and files with direct edges
-        // to filter out cross-file false positives from shared node IDs
-        const targetDefFiles = new Set<string>(node.metadata?.definitionFiles || []);
-        if (node.filePath) {targetDefFiles.add(node.filePath);}
-
-        // Collect files that have edges originating from the target node
-        const targetEdgeFiles = new Set<string>();
-        for (const edge of this.graph.edges) {
-            if (edge.sourceId === nodeId && edge.metadata?.filePath) {
-                targetEdgeFiles.add(edge.metadata.filePath);
-            }
-        }
-
-        // Collect table/view node IDs that have a foreign key relationship with the target
-        const fkRelatedNodeIds = new Set<string>();
-        for (const [colId, reason] of foreignKeyReasons) {
-            const colNode = this.graph.nodes.get(colId);
-            if (colNode?.parentId) {
-                fkRelatedNodeIds.add(colNode.parentId);
-            }
-        }
-
         const addedImpactNodes = new Set<string>();
 
         for (const depNode of downstream.nodes) {
@@ -216,28 +187,6 @@ export class ImpactAnalyzer {
             // (not just structural "contains" relationship from parent table)
             if (!isDirect && depNode.type === 'column' && !columnsWithDataFlow.has(depNode.id)) {
                 continue;
-            }
-
-            // Cross-file false positive filter for transitive table/view impacts:
-            // Skip if the impacted node's definition files have no overlap with
-            // the target's files/edge files AND there's no FK relationship
-            if (!isDirect && (depNode.type === 'table' || depNode.type === 'view')) {
-                const depDefFiles = depNode.metadata?.definitionFiles as string[] | undefined;
-                if (depDefFiles && depDefFiles.length > 0) {
-                    const hasFileOverlap = depDefFiles.some(
-                        f => targetDefFiles.has(f) || targetEdgeFiles.has(f)
-                    );
-                    // Also check if any edge connecting to this dep originated from a target-related file
-                    const hasSharedFileEdge = (incomingEdgesByTargetId.get(depNode.id) || []).some(e => {
-                        const edgeFile = e.metadata?.filePath as string | undefined;
-                        return edgeFile ? (targetDefFiles.has(edgeFile) || targetEdgeFiles.has(edgeFile)) : false;
-                    });
-                    const hasFkRelation = fkRelatedNodeIds.has(depNode.id);
-
-                    if (!hasFileOverlap && !hasSharedFileEdge && !hasFkRelation) {
-                        continue;
-                    }
-                }
             }
 
             const resolved = this.resolveImpactLocation(depNode);

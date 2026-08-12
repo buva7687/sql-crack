@@ -10,6 +10,7 @@ import { ParseResult, BatchParseResult, QueryStats, SqlDialect, ValidationError,
 import { parseSql, parseSqlBatch, validateSql, DEFAULT_VALIDATION_LIMITS, ParseOptions, BatchParseOptions } from './sqlParser';
 
 type WorkerBackedResponse = ParseResult | BatchParseResult;
+export type ParseRequestMode = 'latest' | 'independent';
 
 type ParserWorkerRequest =
     | {
@@ -285,11 +286,13 @@ function queueWorkerRequest<T extends WorkerBackedResponse>(
     });
 }
 
-function beginParseRequest(): number {
+function beginParseRequest(mode: ParseRequestMode = 'latest'): number {
     const requestId = ++nextParseRequestId;
-    latestParseRequestId = requestId;
     pendingParseRequests++;
-    cancelSupersededWorkerRequests(requestId);
+    if (mode === 'latest') {
+        latestParseRequestId = requestId;
+        cancelSupersededWorkerRequests(requestId);
+    }
     return requestId;
 }
 
@@ -297,8 +300,20 @@ function finishParseRequest(): void {
     pendingParseRequests = Math.max(0, pendingParseRequests - 1);
 }
 
-function isParseRequestStale(requestId: number): boolean {
-    return requestId <= cancelledParseRequestId || requestId !== latestParseRequestId;
+function isParseRequestStale(requestId: number, mode: ParseRequestMode = 'latest'): boolean {
+    if (requestId <= cancelledParseRequestId) {
+        return true;
+    }
+    return mode === 'latest'
+        ? requestId !== latestParseRequestId
+        : requestId < latestParseRequestId;
+}
+
+export function isCancelledBatchParseResult(result: BatchParseResult): boolean {
+    return result.queries.length === 1
+        && result.queries[0]?.error === 'Parse cancelled'
+        && result.parseErrors?.length === 1
+        && result.parseErrors[0]?.message === 'Parse cancelled';
 }
 
 /**
@@ -361,13 +376,14 @@ export async function parseBatchAsync(
     sql: string,
     dialect: SqlDialect = 'MySQL',
     limits?: ValidationLimits,
-    options: BatchParseOptions = {}
+    options: BatchParseOptions = {},
+    requestMode: ParseRequestMode = 'latest'
 ): Promise<BatchParseResult> {
     const appliedLimits = limits ?? DEFAULT_VALIDATION_LIMITS;
-    const requestId = beginParseRequest();
+    const requestId = beginParseRequest(requestMode);
     try {
         await yieldToMainLoop();
-        if (isParseRequestStale(requestId)) {
+        if (isParseRequestStale(requestId, requestMode)) {
             return createCancelledBatchParseResult(sql);
         }
 
@@ -380,7 +396,7 @@ export async function parseBatchAsync(
                 });
             } catch (error) {
                 destroyWorker();
-                if (isParseRequestStale(requestId)) {
+                if (isParseRequestStale(requestId, requestMode)) {
                     return createCancelledBatchParseResult(sql);
                 }
                 // A worker timeout means the parse is genuinely heavy — running it
@@ -475,7 +491,7 @@ export async function parseWithFallback(
  * Cancel any pending parse operations
  */
 export function cancelPendingParse(): void {
-    cancelledParseRequestId = latestParseRequestId;
+    cancelledParseRequestId = nextParseRequestId;
     for (const [requestId, pendingRequest] of pendingWorkerRequests) {
         resolveCancelledWorkerRequest(requestId, pendingRequest);
     }

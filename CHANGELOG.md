@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Workspace lineage and impact completeness**: Transitive impacts now follow valid cross-file graph paths, repeated table references retain their statement-specific locations, and CTE/subquery aliases are scoped to the statement that declares them. Physical tables that reuse an earlier CTE name are no longer hidden from lineage.
+- **Workspace table dependencies**: Tables mode now includes same-file view dependencies and `CREATE TABLE AS SELECT` relationships while still suppressing true self-edges.
+- **Workspace index delete races**: Files deleted during a full rebuild are reconciled through build-scoped tombstones, preventing stale analysis or parse errors from resurrecting deleted nodes and keeping index counts accurate.
+- **Workspace schema extraction**: Explicit quoted PostgreSQL view columns are unwrapped correctly, and regex fallback table-body scanning is bounded to the current statement so CTAS definitions cannot inherit columns from later DDL, including parenthesized CTAS queries.
+- **Workspace webview bootstrap security**: Search, graph, lineage, and restored-view state are escaped at the final inline-script boundary, preventing repository-controlled SQL identifiers from terminating the script and injecting HTML or CSS.
+- **Deferred query hydration**: Concurrent deferred-tab parses use independently scoped requests, cancellation sentinels are never cached as query failures, and token-owned loading state prevents stale hydrations from hiding an active loader.
+- **SQL source and refresh fidelity**: Parser compatibility rewrites remain internal so preview, copy, pin, and compare use the original SQL. Manual and automatic refresh preserve the originating editor selection, while pinned panels refresh their own immutable snapshot instead of targeting the main panel.
+- **SQL comment and statement parsing**: PostgreSQL nested block comments no longer create phantom statements. MySQL `#comment` text without whitespace is treated as a comment while contextual T-SQL/Redshift `#temp` and `##temp` table identifiers remain supported.
+- **Aggregate output details**: Repeated aggregate expressions projected under different aliases remain distinct outputs, while nested visits to the same aggregate are still deduplicated.
+- **Workspace PNG export memory**: Rasterization now enforces both dimension and total-pixel limits and encodes through `toBlob()`, avoiding oversized synchronous data-URL allocations.
 - **Quoted workspace schema fallback parsing**: Regex fallback extraction now supports double-quoted, backtick-quoted, bracketed, and schema-qualified table and column identifiers, including quoted foreign-key references. Parenthesis and comma scanning is quote-aware, so delimiters inside identifiers no longer corrupt definitions.
 - **Comment/string-safe workspace extraction**: Schema and lineage fallback paths now use position-preserving masking before matching SQL structure, preventing commented examples or SQL-like string contents from creating phantom tables, CTEs, targets, or incorrect source locations. Comma-separated fallback CTEs are also recognized.
 - **SQL Server global temporary tables**: Comment stripping, dialect preprocessing, and hash-temp rewriting now preserve `##global_temp` identifiers instead of treating them as comments or malformed names.
@@ -24,10 +34,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Workspace impact analysis**: Direct targets, incoming edges, column target flows, and direct column edges are indexed once per analysis instead of repeatedly scanning the full graph for every node.
 - **Workspace schema and CTE extraction**: Position-preserving SQL masks and CTE declaration locations are computed once per source instead of rescanning and remasking the entire file for every extracted definition or CTE.
 
+### Security
+
+- Updated the enforced DOMPurify production dependency to 3.4.13, clearing the transitive jsPDF sanitizer advisories reported by `npm audit --omit=dev`.
+
 ### Tests
 
-- Added regression coverage for quoted schema extraction, `CREATE` text inside identifiers, comment/string masking, fallback and recursive CTE locations, target resolution, global temporary tables, T-SQL `OUTPUT` partial parses, parameterized limits, dialect scoring and warnings, delimiter-aware preprocessing, and indexed impact analysis.
-- Branch validation: 280 suites, 3,631 tests passing. `npx tsc --noEmit` and `npm run lint` pass.
+- Added regression coverage for quoted schema extraction, `CREATE` text inside identifiers, comment/string masking, fallback and recursive CTE locations, target resolution, global temporary tables, T-SQL `OUTPUT` partial parses, parameterized limits, dialect scoring and warnings, delimiter-aware preprocessing, indexed impact analysis, statement-scoped lineage, transitive impact, delete/build races, CTAS graph edges, safe bootstrap serialization, deferred hydration, source-preserving refresh, nested/hash comments, aggregate aliases, and bounded PNG export.
+- Branch validation: 279 suites, 3,640 tests passing. `npm run typecheck`, `npm run lint`, and the production dependency audit pass.
 
 ## [0.9.2] - 2026-07-18
 

@@ -118,7 +118,7 @@ function updateSqlLikeFileContext(editor: vscode.TextEditor | undefined): void {
 
 function hasExecutableSql(sql: string): boolean {
     const { rewritten } = preprocessJinjaTemplates(sql);
-    return stripSqlComments(rewritten).trim().length > 0;
+    return stripSqlComments(rewritten, { preserveHashTempIdentifiers: false }).trim().length > 0;
 }
 
 async function loadWorkspacePanel() {
@@ -224,6 +224,7 @@ export function activate(context: vscode.ExtensionContext) {
     const visualizeCommand = vscode.commands.registerCommand('sql-crack.visualize', async (uri?: vscode.Uri) => {
         let document: vscode.TextDocument;
         let sqlCode: string;
+        let sourceRange: vscode.Range | undefined;
 
         // If URI is provided (from explorer context menu), open the file
         if (uri) {
@@ -253,6 +254,9 @@ export function activate(context: vscode.ExtensionContext) {
             sqlCode = selection.isEmpty
                 ? document.getText()
                 : document.getText(selection);
+            sourceRange = selection.isEmpty
+                ? undefined
+                : new vscode.Range(selection.start, selection.end);
         }
 
         // Track this document
@@ -275,24 +279,40 @@ export function activate(context: vscode.ExtensionContext) {
         VisualizationPanel.createOrShow(context.extensionUri, sqlCode, {
             dialect: defaultDialect,
             fileName: path.basename(document.fileName) || 'Query',
-            documentUri: document.uri
+            documentUri: document.uri,
+            sourceRange,
         });
         VisualizationPanel.setActiveEditorActivity(isSqlLikeDocument(document));
     });
 
     // Command: Refresh visualization
-    const refreshCommand = vscode.commands.registerCommand('sql-crack.refresh', () => {
-        // Use last active SQL document, not current active editor
-        const document = lastActiveSqlDocument;
+    const refreshCommand = vscode.commands.registerCommand('sql-crack.refresh', async () => {
+        // Prefer the panel's source document. The last active SQL document is only
+        // a fallback for legacy/no-source panels and can otherwise refresh the
+        // wrong file after the user changes editors.
+        const sourceUri = VisualizationPanel.sourceDocumentUri;
+        let document = sourceUri
+            ? vscode.workspace.textDocuments.find(doc => doc.uri.toString() === sourceUri.toString())
+            : lastActiveSqlDocument;
+        if (!document && sourceUri) {
+            try {
+                document = await vscode.workspace.openTextDocument(sourceUri);
+            } catch (error) {
+                vscode.window.showErrorMessage(`Could not refresh the visualization source: ${error instanceof Error ? error.message : String(error)}`);
+                return;
+            }
+        }
         if (document) {
-            const sqlCode = document.getText();
+            const sourceRange = VisualizationPanel.sourceRange;
+            const sqlCode = sourceRange ? document.getText(sourceRange) : document.getText();
             const config = getConfig();
             const defaultDialect = normalizeDialect(config.get<string>('defaultDialect') || 'MySQL');
 
             VisualizationPanel.refresh(sqlCode, {
                 dialect: defaultDialect,
                 fileName: path.basename(document.fileName) || 'Query',
-                documentUri: document.uri
+                documentUri: document.uri,
+                sourceRange,
             });
             VisualizationPanel.setActiveEditorActivity(true);
         } else {
@@ -492,7 +512,8 @@ export function activate(context: vscode.ExtensionContext) {
                         document.uri.toString() === currentSourceUri.toString();
 
                     if (document && VisualizationPanel.currentPanel && stillSourceDoc) {
-                        const sqlCode = document.getText();
+                        const sourceRange = VisualizationPanel.sourceRange;
+                        const sqlCode = sourceRange ? document.getText(sourceRange) : document.getText();
                         if (!hasExecutableSql(sqlCode)) {
                             return;
                         }
@@ -501,7 +522,8 @@ export function activate(context: vscode.ExtensionContext) {
                         VisualizationPanel.refresh(sqlCode, {
                             dialect: defaultDialect,
                             fileName: path.basename(document.fileName) || 'Query',
-                            documentUri: document.uri
+                            documentUri: document.uri,
+                            sourceRange,
                         });
                     }
                 }, autoRefreshDelay);

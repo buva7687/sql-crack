@@ -55,12 +55,56 @@ export function escapeForInlineScriptValue(value: unknown): string {
 }
 
 /**
+ * Return whether a hash at the supplied offset is being used as a SQL Server /
+ * Redshift temporary-table identifier instead of a MySQL hash comment.
+ *
+ * A leading `#word` is ambiguous without a dialect.  Treat it as an identifier
+ * only in table-name positions (or when used as a qualified name), so MySQL
+ * comments such as `#CONNECT BY ...` are still removed while `FROM #temp` and
+ * `CREATE TABLE ##temp` remain intact.
+ */
+export function isHashTempTableIdentifierAt(sql: string, offset: number): boolean {
+    // The scanner visits both characters in a global-temp `##name`; normalize
+    // the second hash back to the start of the identifier.
+    if (offset > 0 && sql[offset - 1] === '#') {
+        offset--;
+    }
+    if (sql[offset] !== '#') {
+        return false;
+    }
+
+    let nameStart = offset + 1;
+    if (sql[nameStart] === '#') {
+        nameStart++;
+    }
+    if (!/[A-Za-z_]/.test(sql[nameStart] || '')) {
+        return false;
+    }
+
+    let nameEnd = nameStart + 1;
+    while (nameEnd < sql.length && /[A-Za-z0-9_]/.test(sql[nameEnd])) {
+        nameEnd++;
+    }
+    if (sql[nameEnd] === '.') {
+        return true;
+    }
+
+    const before = sql.slice(Math.max(0, offset - 160), offset);
+    return /(?:\b(?:FROM|JOIN|INTO|UPDATE|INSERT|USING|REFERENCES|TABLE|TRUNCATE)\s+|\bDROP\s+TABLE(?:\s+IF\s+EXISTS)?\s+|\bCREATE\s+(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP(?:ORARY)?\s+)?TABLE\s+)$/i.test(before);
+}
+
+export interface StripSqlCommentsOptions {
+    /** Set false when the caller knows `#` always starts a MySQL-style comment. */
+    preserveHashTempIdentifiers?: boolean;
+}
+
+/**
  * Strip SQL comments while preserving quoted content (strings and identifiers).
  * Handles single-quoted strings (with '' escape), double-quoted identifiers,
  * and backtick-quoted identifiers. Strips --, /* *​/, and # comments.
  * Supports nested block comments used by PostgreSQL.
  */
-export function stripSqlComments(sql: string): string {
+export function stripSqlComments(sql: string, options: StripSqlCommentsOptions = {}): string {
     const len = sql.length;
     let out = '';
     let i = 0;
@@ -153,14 +197,11 @@ export function stripSqlComments(sql: string): string {
             continue;
         }
 
-        // Hash line comment: # (but not #identifier/##identifier temp tables)
+        // Hash line comment: # (but not a contextual #identifier/##identifier temp table)
         if (ch === '#') {
-            const nextCh = i + 1 < len ? sql[i + 1] : '';
-            const afterDoubleHash = i + 2 < len ? sql[i + 2] : '';
-            const isTempIdentifier =
-                /[a-zA-Z0-9_]/.test(nextCh)
-                || (nextCh === '#' && /[a-zA-Z0-9_]/.test(afterDoubleHash));
-            if (!isTempIdentifier) {
+            const preserveTempIdentifier = options.preserveHashTempIdentifiers !== false
+                && isHashTempTableIdentifierAt(sql, i);
+            if (!preserveTempIdentifier) {
                 while (i < len && sql[i] !== '\n' && sql[i] !== '\r') { i++; }
                 out += ' ';
                 continue;

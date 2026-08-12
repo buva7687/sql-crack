@@ -97,8 +97,9 @@ describe('confirmed bug regression anchors from archive/multiple_bugs.txt', () =
 
     it('#24 cancels stale queued parser-client requests before synchronous parsing starts', () => {
         const source = readSource('src/webview/parserClient.ts');
-        expect(source).toContain('function isParseRequestStale(requestId: number): boolean {');
-        expect(source).toContain('return requestId <= cancelledParseRequestId || requestId !== latestParseRequestId;');
+        expect(source).toContain("function isParseRequestStale(requestId: number, mode: ParseRequestMode = 'latest'): boolean {");
+        expect(source).toContain('if (requestId <= cancelledParseRequestId) {');
+        expect(source).toContain("mode === 'latest'");
         expect(source).toContain('return createCancelledParseResult(sql);');
         expect(source).toContain('return createCancelledBatchParseResult(sql);');
     });

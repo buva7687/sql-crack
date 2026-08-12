@@ -188,6 +188,19 @@ describe('detectDialect', () => {
         expect(result.scores.Oracle || 0).toBe(0);
     });
 
+    it('ignores Oracle syntax inside a MySQL #comment without whitespace', () => {
+        const result = detectDialect('#CONNECT BY PRIOR id = parent_id\nSELECT 1');
+
+        expect(result.dialect).toBeNull();
+        expect(result.confidence).toBe('none');
+    });
+
+    it('does not mistake a hash comment after FROM for a temp-table dialect signal', () => {
+        const result = detectDialect('SELECT * FROM\n#CONNECT BY PRIOR id = parent_id\nusers');
+
+        expect(result.scores.Oracle || 0).toBe(0);
+    });
+
     it('treats MINUS alone as low-confidence Oracle signal', () => {
         const result = detectDialect('SELECT 1 MINUS SELECT 2');
         expect(result.dialect).toBeNull();

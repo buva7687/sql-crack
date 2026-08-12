@@ -5,6 +5,20 @@ import { getExportToPngScript } from '../../../src/workspace/ui/scripts/export';
 describe('workspace PNG export (CSP-safe clipboard)', () => {
     const script = getExportToPngScript();
 
+    it('keeps a wide graph inside the total raster pixel budget', () => {
+        const getRasterScale = new Function(`${script}\nreturn getRasterScale;`)() as (
+            width: number,
+            height: number,
+            preferredScale?: number
+        ) => number;
+        const width = 12000;
+        const height = 8000;
+        const scale = getRasterScale(width, height, 2);
+
+        expect(Math.floor(width * scale) * Math.floor(height * scale))
+            .toBeLessThanOrEqual(16 * 1024 * 1024);
+    });
+
     interface PngHarnessOptions {
         clipboardAvailable?: boolean;
         clipboardWrite?: jest.Mock;
@@ -122,11 +136,10 @@ describe('workspace PNG export (CSP-safe clipboard)', () => {
         return { exportToPng, postMessage, clipboardWrite, canvas };
     }
 
-    it('uses canvas.toBlob() for the clipboard path, not fetch(dataURL)', () => {
-        // default-src 'none' (no connect-src) blocks fetch() against data: URLs,
-        // so the clipboard image must be produced with canvas.toBlob().
+    it('uses canvas.toBlob() for both save and clipboard paths', () => {
         expect(script).toContain('canvas.toBlob(');
-        expect(script).not.toContain('fetch(pngDataUrl)');
+        expect(script).toContain('blob.arrayBuffer()');
+        expect(script).not.toContain('toDataURL');
     });
 
     it('writes the blob to the clipboard via ClipboardItem', () => {
@@ -151,12 +164,14 @@ describe('workspace PNG export (CSP-safe clipboard)', () => {
         expect(afterCatch).toContain('saveViaDialog()');
     });
 
-    it('falls back to the save dialog when ClipboardItem throws synchronously', () => {
+    it('falls back to the save dialog when ClipboardItem throws synchronously', async () => {
         const harness = createPngHarness({
             clipboardItemError: new Error('unsupported image type'),
         });
 
         harness.exportToPng(true);
+        await Promise.resolve();
+        await Promise.resolve();
 
         expect(harness.postMessage).toHaveBeenCalledWith(expect.objectContaining({
             command: 'savePng',
@@ -172,6 +187,8 @@ describe('workspace PNG export (CSP-safe clipboard)', () => {
         harness.exportToPng(true);
         await Promise.resolve();
         await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
 
         expect(clipboardWrite).toHaveBeenCalledTimes(1);
         expect(harness.postMessage).toHaveBeenCalledWith(expect.objectContaining({
@@ -180,23 +197,27 @@ describe('workspace PNG export (CSP-safe clipboard)', () => {
         }));
     });
 
-    it('falls back when the Clipboard API is unavailable', () => {
+    it('falls back when the Clipboard API is unavailable', async () => {
         const harness = createPngHarness({ clipboardAvailable: false });
 
         harness.exportToPng(true);
+        await Promise.resolve();
+        await Promise.resolve();
 
         expect(harness.postMessage).toHaveBeenCalledWith(expect.objectContaining({
             command: 'savePng',
+            data: 'cG5n',
         }));
     });
 
-    it('falls back when canvas.toBlob cannot create an image blob', () => {
+    it('reports an error when canvas.toBlob cannot create an image blob', () => {
         const harness = createPngHarness({ blobResult: null });
 
         harness.exportToPng(true);
 
         expect(harness.postMessage).toHaveBeenCalledWith(expect.objectContaining({
-            command: 'savePng',
+            command: 'exportPngError',
+            error: 'Failed to encode PNG image',
         }));
         expect(harness.clipboardWrite).not.toHaveBeenCalled();
     });

@@ -271,7 +271,9 @@ export class SchemaExtractor {
         // Views may have explicit column list
         if (stmt.columns && Array.isArray(stmt.columns)) {
             for (const col of stmt.columns) {
-                const colName = typeof col === 'string' ? col : col.column || col.name;
+                const colName = unwrapIdentifierValue(col)
+                    || unwrapIdentifierValue(col?.column)
+                    || unwrapIdentifierValue(col?.name);
                 if (colName) {
                     columns.push({
                         name: colName,
@@ -406,14 +408,21 @@ export class SchemaExtractor {
 
             const startIndex = match.index + match[0].length;
 
-            // Find the opening parenthesis
-            const afterHeader = sqlNoComments.substring(startIndex);
+            // Restrict body detection to this CREATE statement. Searching the
+            // whole remaining file can assign a later table's columns to CTAS.
+            const afterHeader = this.extractStatementFromIndex(
+                sqlNoComments,
+                startIndex,
+                sourceViews.structuralSql
+            );
             const parenStart = afterHeader.indexOf('(');
+            const asQueryIndex = /\bAS\s*(?:\(\s*)?(?:WITH|SELECT)\b/i.exec(afterHeader)?.index ?? -1;
+            const hasColumnBody = parenStart !== -1
+                && (asQueryIndex === -1 || parenStart < asQueryIndex);
 
-            if (parenStart !== -1) {
+            if (hasColumnBody) {
                 // Find matching closing parenthesis
-                const bodyStart = startIndex + parenStart + 1;
-                const tableBody = this.extractBalancedParens(sqlNoComments, bodyStart);
+                const tableBody = this.extractBalancedParens(afterHeader, parenStart + 1);
                 const columns = this.extractColumnsFromBody(tableBody);
 
                 // Use findCreateStatementLocation on ORIGINAL sql (not sqlNoComments) to get correct line number

@@ -87,7 +87,7 @@ describe('extension hasExecutableSql logic', () => {
     it('preprocesses Jinja and strips comments before checking for executable SQL', () => {
         expect(source).toContain("from './webview/parser/dialects/jinjaPreprocessor'");
         expect(source).toContain('const { rewritten } = preprocessJinjaTemplates(sql);');
-        expect(source).toContain('stripSqlComments(rewritten)');
+        expect(source).toContain('stripSqlComments(rewritten, { preserveHashTempIdentifiers: false })');
         expect(source).toContain('.trim().length > 0');
     });
 });
@@ -133,6 +133,20 @@ describe('extension auto-refresh scoping', () => {
         expect(source).toContain('const stillSourceDoc =');
         expect(source).toContain('document.uri.toString() === currentSourceUri.toString()');
         expect(source).toContain('VisualizationPanel.currentPanel && stillSourceDoc');
+    });
+
+    it('preserves an editor selection for manual and automatic refreshes', () => {
+        expect(source).toContain('sourceRange = selection.isEmpty');
+        expect(source).toContain('new vscode.Range(selection.start, selection.end)');
+        expect(source).toContain('const sourceRange = VisualizationPanel.sourceRange;');
+        expect(source).toContain('sourceRange ? document.getText(sourceRange) : document.getText()');
+        expect(source).toContain('sourceRange,');
+    });
+
+    it('resolves manual refreshes from the panel source URI before legacy active state', () => {
+        expect(source).toContain('const sourceUri = VisualizationPanel.sourceDocumentUri;');
+        expect(source).toContain('vscode.workspace.textDocuments.find');
+        expect(source).toContain('await vscode.workspace.openTextDocument(sourceUri)');
     });
 });
 

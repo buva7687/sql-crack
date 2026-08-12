@@ -2,7 +2,7 @@
 import process from 'process/browser';
 (window as unknown as { process: typeof process }).process = process;
 
-import { parseAsync, parseBatchAsync } from './parserClient';
+import { isCancelledBatchParseResult, parseAsync, parseBatchAsync } from './parserClient';
 import { setMinimapMode, MinimapMode } from './minimapVisibility';
 import { detectDialect, setParseTimeout } from './sqlParser';
 import { getComponentUiColors } from './constants';
@@ -178,6 +178,8 @@ let currentQueryIndex = 0;
 let isStale: boolean = false;
 let toolbarCleanup: ToolbarCleanup | null = null;
 let parseRequestId = 0;
+let queryLoadingToken = 0;
+let queryLoadingVisible = false;
 // Monotonic token guarding async cursor-follow query switches. Rapid cursor
 // movement can fire overlapping switches; only the latest token may complete
 // the highlight, so stale switches don't fight the user's current position.
@@ -196,6 +198,29 @@ const deferredQueryIndexes: Set<number> = new Set();
 const hydrationPromises: Map<number, Promise<void>> = new Map();
 const querySwitchPromises: Map<number, Promise<void>> = new Map();
 const DEFERRED_QUERY_THRESHOLD = 50;
+
+function beginQueryLoading(): number {
+    const token = ++queryLoadingToken;
+    queryLoadingVisible = true;
+    showGlobalLoading('Loading query details...');
+    return token;
+}
+
+function endQueryLoading(token: number): void {
+    if (token !== queryLoadingToken) {
+        return;
+    }
+    queryLoadingVisible = false;
+    hideGlobalLoading();
+}
+
+function cancelQueryLoading(): void {
+    queryLoadingToken++;
+    if (queryLoadingVisible) {
+        queryLoadingVisible = false;
+        hideGlobalLoading();
+    }
+}
 
 // Store view state per query index for zoom/pan persistence
 const queryViewStates: Map<number, TabViewState> = new Map();
@@ -225,7 +250,7 @@ interface PersistedWebviewState {
 
 function hasExecutableSql(sql: string): boolean {
     const { rewritten } = preprocessJinjaTemplates(sql);
-    return stripSqlComments(rewritten).trim().length > 0;
+    return stripSqlComments(rewritten, { preserveHashTempIdentifiers: false }).trim().length > 0;
 }
 
 
@@ -766,10 +791,18 @@ async function reparseStoredQuery(queryIndex: number, fallbackMessage: string): 
             {
                 combineDdlStatements: window.combineDdlStatements === true,
                 allowDialectFallback: isDialectAutoDetectionEnabled(),
-            }
+            },
+            'independent'
         );
 
         if (!batchResult || parseToken !== parseRequestId) {
+            return;
+        }
+        // A newer full parse/interaction may intentionally cancel this
+        // background hydration. Keep the compacted query deferred so a later
+        // visit can retry it; never cache the cancellation sentinel as a query
+        // parse error.
+        if (isCancelledBatchParseResult(hydrated)) {
             return;
         }
 
@@ -814,7 +847,7 @@ function recoverQueryVisualization(queryIndex: number): void {
         ? 'Failed to hydrate deferred query'
         : 'Failed to recover query visualization';
 
-    showGlobalLoading('Loading query details...');
+    const loadingToken = beginQueryLoading();
     void reparseStoredQuery(queryIndex, fallbackMessage)
         .catch((error) => {
             if (!batchResult || parseRequestId !== recoverToken) {
@@ -828,7 +861,7 @@ function recoverQueryVisualization(queryIndex: number): void {
             if (parseRequestId !== recoverToken || currentQueryIndex !== queryIndex) {
                 return;
             }
-            hideGlobalLoading();
+            endQueryLoading(loadingToken);
             updateBatchTabsUI();
             renderCurrentQuery();
         });
@@ -1407,6 +1440,7 @@ function createToolbarCallbacks(): ToolbarCallbacks {
 
 async function visualize(sql: string): Promise<void> {
     const requestId = ++parseRequestId;
+    cancelQueryLoading();
 
     // Clear view states when loading new SQL
     hideCompareView();
@@ -1645,7 +1679,7 @@ async function performSwitchToQueryIndex(newIndex: number): Promise<void> {
     clearUndoHistory();
 
     if (deferredQueryIndexes.has(newIndex)) {
-        showGlobalLoading('Loading query details...');
+        const loadingToken = beginQueryLoading();
         const hydrateToken = parseRequestId;
         try {
             await hydrateQueryIfNeeded(newIndex);
@@ -1658,11 +1692,13 @@ async function performSwitchToQueryIndex(newIndex: number): Promise<void> {
             }
             deferredQueryIndexes.delete(newIndex);
         } finally {
-            hideGlobalLoading();
+            endQueryLoading(loadingToken);
         }
         if (currentQueryIndex !== newIndex) {
             return;
         }
+    } else {
+        cancelQueryLoading();
     }
 
     renderCurrentQuery();

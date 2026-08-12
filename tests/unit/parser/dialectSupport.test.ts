@@ -620,14 +620,16 @@ describe('Dialect Support', () => {
     });
 
     it('parses AT TIME ZONE expressions after compatibility preprocessing', () => {
+      const sql = "SELECT t.date_col AT TIME ZONE 'UTC' AS utc_date FROM test_table t";
       const result = parseSql(
-        "SELECT t.date_col AT TIME ZONE 'UTC' AS utc_date FROM test_table t",
+        sql,
         dialect
       );
 
       expect(result.error).toBeUndefined();
       expect(result.partial).not.toBe(true);
       expect(result.nodes.some(n => n.label === 'test_table')).toBe(true);
+      expect(result.sql).toBe(sql);
     });
 
     it('parses TRY_CAST() after compatibility preprocessing', () => {

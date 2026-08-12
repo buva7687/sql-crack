@@ -46,6 +46,7 @@ export class IndexManager {
     private _persistTimer: NodeJS.Timeout | null = null;
     private _persistDebounceMs: number = 1000;
     private _pendingDeletes: Set<string> = new Set();
+    private _deletedDuringBuild: Set<string> = new Set();
     private _fileWatcherDisposables: vscode.Disposable[] = [];
     private _pendingDialectRebuildVersion: number = 0;
     private _completedDialectRebuildVersion: number = 0;
@@ -117,6 +118,9 @@ export class IndexManager {
             return await this._buildPromise;
         } finally {
             this._buildPromise = null;
+            // Tombstones only describe events concurrent with this build. If the
+            // build failed, the next scan must observe the filesystem afresh.
+            this._deletedDuringBuild.clear();
         }
     }
 
@@ -141,8 +145,12 @@ export class IndexManager {
         // Note: We always use the new analysis since analyzeWorkspace() already re-parsed all files
         // This ensures schema extractor improvements (like column extraction) take effect
         for (const analysis of analyses) {
+            if (this._deletedDuringBuild.has(analysis.filePath)) {
+                continue;
+            }
             this.addFileToIndex(analysis, newIndex);
         }
+        newIndex.fileCount = newIndex.files.size;
 
         this.index = newIndex;
         this._changesSinceIndex = 0;
@@ -190,6 +198,7 @@ export class IndexManager {
         }
 
         const analysis = await this.scanner.analyzeFile(uri);
+        this._deletedDuringBuild.delete(uri.fsPath);
         const oldHash = this.index.fileHashes.get(uri.fsPath);
         const oldAnalysis = this.index.files.get(uri.fsPath);
 
@@ -221,6 +230,9 @@ export class IndexManager {
      * Remove a file from the index
      */
     async removeFile(uri: vscode.Uri): Promise<void> {
+        if (this._buildPromise) {
+            this._deletedDuringBuild.add(uri.fsPath);
+        }
         if (!this.index) {return;}
 
         const analysis = this.index.files.get(uri.fsPath);

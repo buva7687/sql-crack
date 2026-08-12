@@ -263,6 +263,37 @@ describe('ReferenceExtractor behavioral coverage', () => {
         expect(names).not.toContain('enriched');
     });
 
+    it('keeps repeated source references in separate statements with occurrence lines', () => {
+        const refs = extractor.extractReferences(
+            'SELECT * FROM source_table;\nINSERT INTO target_table SELECT * FROM source_table;',
+            'pipeline.sql',
+            'MySQL'
+        );
+
+        const sourceRefs = refs.filter(ref => ref.tableName.toLowerCase() === 'source_table');
+        expect(sourceRefs).toEqual([
+            expect.objectContaining({ statementIndex: 0, lineNumber: 1 }),
+            expect.objectContaining({ statementIndex: 1, lineNumber: 2 }),
+        ]);
+    });
+
+    it('does not let a CTE name hide a physical table in a later statement', () => {
+        const refs = extractor.extractReferences(
+            'WITH orders AS (SELECT * FROM archive_orders) SELECT * FROM orders;\n'
+                + 'INSERT INTO report SELECT * FROM orders;',
+            'pipeline.sql',
+            'MySQL'
+        );
+
+        expect(refs).toEqual(expect.arrayContaining([
+            expect.objectContaining({ tableName: 'archive_orders', statementIndex: 0 }),
+            expect.objectContaining({ tableName: 'orders', statementIndex: 1, lineNumber: 2 }),
+        ]));
+        expect(refs).not.toEqual(expect.arrayContaining([
+            expect.objectContaining({ tableName: 'orders', statementIndex: 0 }),
+        ]));
+    });
+
     it('handles multiple CTEs that shadow real tables correctly', () => {
         const refs = extractor.extractReferences(
             `

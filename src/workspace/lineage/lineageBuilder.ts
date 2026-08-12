@@ -9,7 +9,6 @@ import {
 } from '../types';
 import { ColumnInfo } from '../extraction/types';
 import { getDisplayName, getQualifiedKey, parseQualifiedKey } from '../identifiers';
-import { stripSqlComments } from '../../shared';
 import {
     LineageNode,
     LineageEdge,
@@ -334,8 +333,7 @@ export class LineageBuilder implements LineageGraph {
 
         // Create edges from file references
         for (const [filePath, analysis] of index.files) {
-            const sql = this.resolveFileSql(filePath, analysis, fileSqlByPath, 'warn', 'CTE/alias extraction');
-            this.addFileEdges(filePath, analysis, sql);
+            this.addFileEdges(filePath, analysis);
             this.addColumnEdgesFromTransformations(filePath, analysis);
         }
 
@@ -521,38 +519,15 @@ export class LineageBuilder implements LineageGraph {
      * IMPORTANT: Edges are created per-statement, not per-file
      * This prevents false relationships between unrelated queries in the same file
      */
-    private addFileEdges(filePath: string, analysis: FileAnalysis, sql?: string | null): void {
-        // Collect CTE names from this file to filter them out
-        const fileCteNames = new Set<string>();
-        if (analysis.queries) {
-            for (const query of analysis.queries) {
-                if (query.ctes) {
-                    for (const cte of query.ctes) {
-                        fileCteNames.add(cte.name.toLowerCase());
-                    }
-                }
-            }
-        }
-
-        // ALWAYS extract CTE names and subquery aliases directly from SQL file as a fallback/verification
-        if (sql) {
-            this.extractCTEAndAliasNames(sql, fileCteNames);
-        }
-
+    private addFileEdges(filePath: string, analysis: FileAnalysis): void {
         // Group references by statement index for per-statement lineage
         const statementRefs = new Map<number, { inputs: Set<string>; outputs: Set<string> }>();
 
         for (const ref of analysis.references) {
             const tableKey = getQualifiedKey(ref.tableName, ref.schema);
-            const tableNameLower = ref.tableName.toLowerCase();
 
             // Skip CTE references - they are not real table references
             if (ref.referenceType === 'cte') {
-                continue;
-            }
-
-            // Skip if the table name matches a known CTE or subquery alias
-            if (fileCteNames.has(tableNameLower)) {
                 continue;
             }
 
@@ -1159,12 +1134,13 @@ export class LineageBuilder implements LineageGraph {
     }
 
     private resolveTableNodeId(tableKey: string): string | null {
-        // A referenced object may have been defined as a table, a view, or a CTE
-        // (or already materialized as an external node). Statement edges must
-        // resolve to whichever node already exists; checking only `table:` lets a
-        // view/CTE reference fall through to a fresh `external:` node, leaving the
-        // real `view:`/`cte:` node disconnected from the lineage graph.
-        const candidateTypes = ['table', 'view', 'cte', 'external'];
+        // A referenced object may have been defined as a table or view (or
+        // already materialized as an external node). Statement edges must
+        // resolve to whichever physical relation already exists.
+        // Table references reaching this stage are physical relations; CTE
+        // references are tagged and skipped in addFileEdges. Resolving a later
+        // physical table to an earlier file-scoped CTE would conflate scopes.
+        const candidateTypes = ['table', 'view', 'external'];
 
         const parsed = parseQualifiedKey(tableKey);
         const keysToTry = parsed.schema
@@ -1290,115 +1266,4 @@ export class LineageBuilder implements LineageGraph {
         return reserved.includes(word.toLowerCase());
     }
 
-    /**
-     * Extract CTE names and subquery aliases from SQL content
-     * Consolidates all CTE/alias extraction patterns in one place
-     */
-    private extractCTEAndAliasNames(sql: string, cteNames: Set<string>): void {
-        const reservedWords = new Set(['select', 'from', 'where', 'join', 'inner', 'left', 'right', 'outer', 'on', 'as', 'with', 'recursive']);
-        let match;
-
-        // Strip comments for cleaner pattern matching on CTE detection
-        const sqlNoComments = stripSqlComments(sql);
-
-        // Use regex to find CTE names: WITH name AS or WITH RECURSIVE name AS
-        // Also handle multi-CTE: WITH name1 AS (...), name2 AS (...)
-        const ctePattern = /WITH\s+(?:RECURSIVE\s+)?(\w+)\s+AS\s*\(/gi;
-        while ((match = ctePattern.exec(sqlNoComments)) !== null) {
-            const cteName = match[1];
-            if (cteName && !reservedWords.has(cteName.toLowerCase())) {
-                cteNames.add(cteName.toLowerCase());
-            }
-        }
-
-        // Also check for comma-separated CTEs: WITH name1 AS (...), name2 AS (...)
-        const multiCtePattern = /,\s*(\w+)\s+AS\s*\(/gi;
-        while ((match = multiCtePattern.exec(sqlNoComments)) !== null) {
-            const cteName = match[1];
-            if (cteName && !reservedWords.has(cteName.toLowerCase())) {
-                cteNames.add(cteName.toLowerCase());
-            }
-        }
-
-        // Extract subquery aliases: ) AS alias_name
-        // This catches subqueries in FROM clauses like: FROM (SELECT ...) AS customer_totals
-        // Use original SQL for context checking but stripped SQL for pattern matching
-        const subqueryAliasPattern = /\)\s+AS\s+(\w+)(?=\s|$|,|WHERE|JOIN|ON)/gi;
-        while ((match = subqueryAliasPattern.exec(sqlNoComments)) !== null) {
-            const aliasName = match[1];
-            if (aliasName && !reservedWords.has(aliasName.toLowerCase())) {
-                // Check if this alias appears in a FROM clause context (not a column alias)
-                const beforeMatch = sqlNoComments.substring(Math.max(0, match.index - 300), match.index);
-                const fromBefore = /\bFROM\s+\(/i.test(beforeMatch) || /\bUPDATE\s+\w+\s+FROM\s+\(/i.test(beforeMatch);
-                if (fromBefore) {
-                    cteNames.add(aliasName.toLowerCase());
-                }
-            }
-        }
-
-        // Extract subquery aliases from UPDATE...FROM patterns
-        // Pattern: UPDATE table FROM (SELECT ...) AS alias
-        const updateFromPattern = /UPDATE\s+\w+\s+FROM\s+\([^)]+\)\s+AS\s+(\w+)/gi;
-        while ((match = updateFromPattern.exec(sqlNoComments)) !== null) {
-            const aliasName = match[1];
-            if (aliasName && !reservedWords.has(aliasName.toLowerCase())) {
-                cteNames.add(aliasName.toLowerCase());
-            }
-        }
-
-        // Extract subquery aliases using balanced parenthesis matching for complex subqueries
-        // This handles multi-line and nested subqueries in UPDATE...FROM patterns
-        this.extractSubqueryAliasesWithParenMatching(sqlNoComments, cteNames, reservedWords);
-    }
-
-    /**
-     * Extract subquery aliases using balanced parenthesis matching
-     * Handles complex nested subqueries that regex patterns may miss
-     */
-    private extractSubqueryAliasesWithParenMatching(sql: string, cteNames: Set<string>, reservedWords: Set<string>): void {
-        let updateIndex = 0;
-        while ((updateIndex = sql.indexOf('UPDATE', updateIndex)) !== -1) {
-            const fromIndex = sql.indexOf('FROM', updateIndex);
-            if (fromIndex === -1 || fromIndex > updateIndex + 500) {
-                updateIndex += 6;
-                continue;
-            }
-
-            // Find the opening paren after FROM
-            const openParenIndex = sql.indexOf('(', fromIndex);
-            if (openParenIndex === -1) {
-                updateIndex += 6;
-                continue;
-            }
-
-            // Find the matching closing paren using balanced counting
-            let parenCount = 0;
-            let closeParenIndex = -1;
-            const maxSearchLength = Math.min(sql.length, openParenIndex + 2000);
-            for (let i = openParenIndex; i < maxSearchLength; i++) {
-                if (sql[i] === '(') {parenCount++;}
-                else if (sql[i] === ')') {
-                    parenCount--;
-                    if (parenCount === 0) {
-                        closeParenIndex = i;
-                        break;
-                    }
-                }
-            }
-
-            if (closeParenIndex !== -1) {
-                // Check for AS alias after the closing paren
-                const afterParen = sql.substring(closeParenIndex + 1, closeParenIndex + 50).trim();
-                const asMatch = afterParen.match(/^AS\s+(\w+)/i);
-                if (asMatch) {
-                    const aliasName = asMatch[1].toLowerCase();
-                    if (!reservedWords.has(aliasName)) {
-                        cteNames.add(aliasName);
-                    }
-                }
-            }
-
-            updateIndex = fromIndex + 1;
-        }
-    }
 }

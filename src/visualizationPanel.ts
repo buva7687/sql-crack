@@ -14,6 +14,8 @@ interface VisualizationOptions {
     dialect: string;
     fileName: string;
     documentUri?: vscode.Uri; // Store the document URI for navigation
+    /** Original editor range when the visualization was opened from a selection. */
+    sourceRange?: vscode.Range;
 }
 
 export type { ViewLocation };
@@ -297,6 +299,10 @@ export class VisualizationPanel {
         return VisualizationPanel.currentPanel?._sourceDocumentUri;
     }
 
+    public static get sourceRange(): vscode.Range | undefined {
+        return VisualizationPanel.currentPanel?._currentOptions.sourceRange;
+    }
+
     public static sendViewLocationOptions() {
         if (VisualizationPanel.currentPanel) {
             const config = vscode.workspace.getConfiguration('sqlCrack');
@@ -361,7 +367,7 @@ export class VisualizationPanel {
                         vscode.window.showInformationMessage(message.text);
                         return;
                     case 'requestRefresh':
-                        vscode.commands.executeCommand('sql-crack.refresh');
+                        this._handleRefreshRequest();
                         return;
                     case 'goToLine':
                         this._goToLine(message.line);
@@ -442,6 +448,26 @@ export class VisualizationPanel {
             null,
             this._disposables
         );
+    }
+
+    private _handleRefreshRequest(): void {
+        if (!this._isPinned) {
+            void vscode.commands.executeCommand('sql-crack.refresh');
+            return;
+        }
+
+        // A pinned panel is an intentional SQL snapshot. Reparse that snapshot in
+        // the panel that emitted the request instead of routing through the global
+        // refresh command, which targets only the mutable main panel.
+        this._postMessage({
+            command: 'refresh',
+            sql: this._currentSql,
+            options: {
+                dialect: this._currentOptions.dialect,
+                fileName: this._currentOptions.fileName,
+            },
+        });
+        this._isStale = false;
     }
 
     private async _changeViewLocation(location: ViewLocation) {
