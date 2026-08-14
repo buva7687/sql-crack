@@ -5,17 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.9.2] - 2026-08-13
 
 ### Fixed
 
-- **Workspace lineage and impact completeness**: Transitive impacts now follow valid cross-file graph paths, repeated table references retain their statement-specific locations, and CTE/subquery aliases are scoped to the statement that declares them. Physical tables that reuse an earlier CTE name are no longer hidden from lineage.
+- **Workspace lineage and impact completeness**: Transitive impacts now follow valid cross-file graph paths, repeated table references retain their statement-specific locations, and CTE/subquery aliases are scoped to the statement that declares them. Physical tables that reuse an earlier CTE name are no longer hidden from lineage, and multiline block comments no longer shift table-reference locations or break line-proximity matching.
 - **Workspace table dependencies**: Tables mode now includes same-file view dependencies and `CREATE TABLE AS SELECT` relationships while still suppressing true self-edges.
 - **Workspace index delete races**: Files deleted during a full rebuild are reconciled through build-scoped tombstones, preventing stale analysis or parse errors from resurrecting deleted nodes and keeping index counts accurate.
 - **Workspace schema extraction**: Explicit quoted PostgreSQL view columns are unwrapped correctly, and regex fallback table-body scanning is bounded to the current statement so CTAS definitions cannot inherit columns from later DDL, including parenthesized CTAS queries.
-- **Workspace webview bootstrap security**: Search, graph, lineage, and restored-view state are escaped at the final inline-script boundary, preventing repository-controlled SQL identifiers from terminating the script and injecting HTML or CSS.
+- **Workspace webview bootstrap security**: Search, graph, lineage, and restored-view state are escaped at the final inline-script boundary, preventing repository-controlled SQL identifiers from terminating the script and injecting HTML or CSS. Graph data remains structured until that boundary, and valid Unicode escapes protect HTML-comment/CDATA sequences without creating malformed JSON that can crash the panel.
 - **Deferred query hydration**: Concurrent deferred-tab parses use independently scoped requests, cancellation sentinels are never cached as query failures, and token-owned loading state prevents stale hydrations from hiding an active loader.
-- **SQL source and refresh fidelity**: Parser compatibility rewrites remain internal so preview, copy, pin, and compare use the original SQL. Manual and automatic refresh preserve the originating editor selection, while pinned panels refresh their own immutable snapshot instead of targeting the main panel.
+- **SQL source and refresh fidelity**: Parser compatibility rewrites remain internal so preview, copy, pin, and compare use the original SQL. Manual and automatic refresh preserve the originating editor selection, selection offsets track document edits before or inside the range, and pinned panels refresh their own immutable snapshot instead of targeting the main panel.
 - **SQL comment and statement parsing**: PostgreSQL nested block comments no longer create phantom statements. MySQL `#comment` text without whitespace is treated as a comment while contextual T-SQL/Redshift `#temp` and `##temp` table identifiers remain supported.
 - **Aggregate output details**: Repeated aggregate expressions projected under different aliases remain distinct outputs, while nested visits to the same aggregate are still deduplicated.
 - **Workspace PNG export memory**: Rasterization now enforces both dimension and total-pixel limits and encodes through `toBlob()`, avoiding oversized synchronous data-URL allocations.
@@ -28,6 +28,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Parameterized PostgreSQL limits**: `LIMIT $1` and equivalent wrapped AST values now render their parameter names instead of `[object Object]`.
 - **Dialect detection and warnings**: A lone backtick is now a low-confidence MySQL signal, while combined MySQL syntax remains high confidence. Generic array subscripts such as `arr[5]` no longer produce PostgreSQL-specific warnings.
 - **Dialect preprocessing delimiter handling**: Balanced-parenthesis scanning now handles doubled double-quote and backtick escapes, bracketed identifiers, and nested block comments.
+- **PostgreSQL workspace lineage `CREATE TABLE` crash**: Shared AST identifier unwrapping now handles PostgreSQL's object-wrapped column identifiers, so ordinary PostgreSQL `CREATE TABLE` statements no longer crash lineage building with `columnName.toLowerCase is not a function`.
+- **Workspace CTAS dependency extraction**: `CREATE TABLE AS SELECT` statements now inspect parser `query_expr` bodies, restoring source-table references that were previously missed.
+- **T-SQL aliased update targets**: Workspace reference extraction now resolves `UPDATE <alias> ... FROM <table> AS <alias>` back to the real write target instead of recording only a read/reference from the FROM clause.
+- **Window function details**: Window partition/order fields now read parser `as_window_specification.window_specification` nodes and unwrap PostgreSQL-style identifier objects, so window cards no longer render empty or `[object Object]` details.
+- **Drag-path allocation**: SQL Flow drag edge updates now reuse a provided node map without allocating an unused fallback map on every mousemove.
 
 ### Performance
 
@@ -40,23 +45,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Tests
 
-- Added regression coverage for quoted schema extraction, `CREATE` text inside identifiers, comment/string masking, fallback and recursive CTE locations, target resolution, global temporary tables, T-SQL `OUTPUT` partial parses, parameterized limits, dialect scoring and warnings, delimiter-aware preprocessing, indexed impact analysis, statement-scoped lineage, transitive impact, delete/build races, CTAS graph edges, safe bootstrap serialization, deferred hydration, source-preserving refresh, nested/hash comments, aggregate aliases, and bounded PNG export.
-- Branch validation: 279 suites, 3,640 tests passing. `npm run typecheck`, `npm run lint`, and the production dependency audit pass.
-
-## [0.9.2] - 2026-07-18
-
-### Fixed
-
-- **PostgreSQL workspace lineage `CREATE TABLE` crash**: Shared AST identifier unwrapping now handles PostgreSQL's object-wrapped column identifiers, so ordinary PostgreSQL `CREATE TABLE` statements no longer crash lineage building with `columnName.toLowerCase is not a function`.
-- **Workspace CTAS dependency extraction**: `CREATE TABLE AS SELECT` statements now inspect parser `query_expr` bodies, restoring source-table references that were previously missed.
-- **T-SQL aliased update targets**: Workspace reference extraction now resolves `UPDATE <alias> ... FROM <table> AS <alias>` back to the real write target instead of recording only a read/reference from the FROM clause.
-- **Window function details**: Window partition/order fields now read parser `as_window_specification.window_specification` nodes and unwrap PostgreSQL-style identifier objects, so window cards no longer render empty or `[object Object]` details.
-- **Drag-path allocation**: SQL Flow drag edge updates now reuse a provided node map without allocating an unused fallback map on every mousemove.
-
-### Tests
-
-- Added regression coverage for PostgreSQL column identifier unwrapping, workspace lineage `CREATE TABLE` safety, CTAS `query_expr` references, T-SQL update-alias writes, PostgreSQL-wrapped window identifiers, CASE/ELSE formatting variants, and drag-path map reuse.
-- Branch validation: 278 suites, 3,581 tests passing. `npm run typecheck` and `npm run lint` pass.
+- Added regression coverage for PostgreSQL column identifier unwrapping, workspace lineage `CREATE TABLE` safety, CTAS `query_expr` references, T-SQL update-alias writes, PostgreSQL-wrapped window identifiers, CASE/ELSE formatting variants, drag-path map reuse, quoted schema extraction, `CREATE` text inside identifiers, comment/string masking, fallback and recursive CTE locations, target resolution, global temporary tables, T-SQL `OUTPUT` partial parses, parameterized limits, dialect scoring and warnings, delimiter-aware preprocessing, indexed impact analysis, statement-scoped lineage, transitive impact, delete/build races, CTAS graph edges, safe bootstrap serialization, deferred hydration, source-preserving refresh, edit-adjusted source selections, nested/hash comments, aggregate aliases, and bounded PNG export.
+- Branch validation: 281 suites, 3,667 tests passing. `npm run typecheck`, `npm run lint`, `npm run package`, and the production dependency audit pass.
 
 ## [0.9.1] - 2026-07-01
 

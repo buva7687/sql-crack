@@ -37,7 +37,6 @@ import {
 import {
     formatDurationText,
     escapeHtmlText,
-    escapeForInlineScriptValue,
     generateNonce,
 } from './panel/text';
 import {
@@ -725,8 +724,8 @@ export class WorkspacePanel {
         const nonce = generateNonce();
         const totalIssues = graph.stats.orphanedDefinitions.length + graph.stats.missingDefinitions.length + graph.stats.parseErrors;
 
-        // Generate graph data JSON for client script
-        const graphData = escapeForInlineScriptValue({
+        // Keep graph data structured until the final inline-script boundary.
+        const graphData = {
             nodes: graph.nodes.map(node => {
                 const columnSet = new Set<string>();
                 if (Array.isArray(node.definitions)) {
@@ -750,7 +749,7 @@ export class WorkspacePanel {
                     columns: Array.from(columnSet)
                 };
             })
-        });
+        };
 
         // Get styles and scripts from extracted modules
         const styles = getWebviewStyles(this._isDarkTheme, this._isHighContrast);

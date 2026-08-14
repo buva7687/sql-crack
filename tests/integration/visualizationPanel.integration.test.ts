@@ -1,4 +1,5 @@
 import * as vscodeMock from '../__mocks__/vscode';
+import { transformSelectionOffsets } from '../../src/visualizationPanel';
 
 describe('visualizationPanel.ts integration', () => {
     let VisualizationPanel: any;
@@ -91,6 +92,33 @@ describe('visualizationPanel.ts integration', () => {
             expect(source).toContain('return createCspNonce();');
             expect(source).not.toContain('Math.random()');
         });
+    });
+});
+
+describe('transformSelectionOffsets', () => {
+    it('shifts a saved selection when text is inserted before it', () => {
+        expect(transformSelectionOffsets(
+            { start: 10, end: 20 },
+            [{ rangeOffset: 2, rangeLength: 0, text: 'line\n' }]
+        )).toEqual({ start: 15, end: 25 });
+    });
+
+    it('expands a saved selection for edits inside or at its boundaries', () => {
+        expect(transformSelectionOffsets(
+            { start: 10, end: 20 },
+            [
+                { rangeOffset: 10, rangeLength: 0, text: 'A' },
+                { rangeOffset: 15, rangeLength: 0, text: 'BC' },
+                { rangeOffset: 20, rangeLength: 0, text: 'D' },
+            ]
+        )).toEqual({ start: 10, end: 24 });
+    });
+
+    it('clamps selection boundaries through overlapping replacements', () => {
+        expect(transformSelectionOffsets(
+            { start: 10, end: 20 },
+            [{ rangeOffset: 8, rangeLength: 6, text: 'x' }]
+        )).toEqual({ start: 8, end: 15 });
     });
 });
 

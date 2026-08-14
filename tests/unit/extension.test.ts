@@ -137,7 +137,9 @@ describe('extension auto-refresh scoping', () => {
 
     it('preserves an editor selection for manual and automatic refreshes', () => {
         expect(source).toContain('sourceRange = selection.isEmpty');
+        expect(source).toContain('sourceOffsets = selection.isEmpty');
         expect(source).toContain('new vscode.Range(selection.start, selection.end)');
+        expect(source).toContain('VisualizationPanel.applySourceDocumentChanges(e.document, e.contentChanges)');
         expect(source).toContain('const sourceRange = VisualizationPanel.sourceRange;');
         expect(source).toContain('sourceRange ? document.getText(sourceRange) : document.getText()');
         expect(source).toContain('sourceRange,');

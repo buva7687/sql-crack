@@ -225,6 +225,7 @@ export function activate(context: vscode.ExtensionContext) {
         let document: vscode.TextDocument;
         let sqlCode: string;
         let sourceRange: vscode.Range | undefined;
+        let sourceOffsets: { start: number; end: number } | undefined;
 
         // If URI is provided (from explorer context menu), open the file
         if (uri) {
@@ -257,6 +258,12 @@ export function activate(context: vscode.ExtensionContext) {
             sourceRange = selection.isEmpty
                 ? undefined
                 : new vscode.Range(selection.start, selection.end);
+            sourceOffsets = selection.isEmpty
+                ? undefined
+                : {
+                    start: document.offsetAt(selection.start),
+                    end: document.offsetAt(selection.end),
+                };
         }
 
         // Track this document
@@ -281,6 +288,7 @@ export function activate(context: vscode.ExtensionContext) {
             fileName: path.basename(document.fileName) || 'Query',
             documentUri: document.uri,
             sourceRange,
+            sourceOffsets,
         });
         VisualizationPanel.setActiveEditorActivity(isSqlLikeDocument(document));
     });
@@ -304,6 +312,7 @@ export function activate(context: vscode.ExtensionContext) {
         }
         if (document) {
             const sourceRange = VisualizationPanel.sourceRange;
+            const sourceOffsets = VisualizationPanel.sourceOffsets;
             const sqlCode = sourceRange ? document.getText(sourceRange) : document.getText();
             const config = getConfig();
             const defaultDialect = normalizeDialect(config.get<string>('defaultDialect') || 'MySQL');
@@ -313,6 +322,7 @@ export function activate(context: vscode.ExtensionContext) {
                 fileName: path.basename(document.fileName) || 'Query',
                 documentUri: document.uri,
                 sourceRange,
+                sourceOffsets,
             });
             VisualizationPanel.setActiveEditorActivity(true);
         } else {
@@ -489,6 +499,10 @@ export function activate(context: vscode.ExtensionContext) {
         if (isSourceDoc && VisualizationPanel.currentPanel) {
             const autoRefreshEnabled = config.get<boolean>('autoRefresh', true);
 
+            // Keep a selection-backed visualization attached to the same SQL as
+            // edits insert/remove text before or inside its original range.
+            VisualizationPanel.applySourceDocumentChanges(e.document, e.contentChanges);
+
             // Always mark as stale immediately for visual feedback
             VisualizationPanel.markAsStale();
 
@@ -513,6 +527,7 @@ export function activate(context: vscode.ExtensionContext) {
 
                     if (document && VisualizationPanel.currentPanel && stillSourceDoc) {
                         const sourceRange = VisualizationPanel.sourceRange;
+                        const sourceOffsets = VisualizationPanel.sourceOffsets;
                         const sqlCode = sourceRange ? document.getText(sourceRange) : document.getText();
                         if (!hasExecutableSql(sqlCode)) {
                             return;
@@ -524,6 +539,7 @@ export function activate(context: vscode.ExtensionContext) {
                             fileName: path.basename(document.fileName) || 'Query',
                             documentUri: document.uri,
                             sourceRange,
+                            sourceOffsets,
                         });
                     }
                 }, autoRefreshDelay);

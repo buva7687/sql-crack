@@ -16,6 +16,69 @@ interface VisualizationOptions {
     documentUri?: vscode.Uri; // Store the document URI for navigation
     /** Original editor range when the visualization was opened from a selection. */
     sourceRange?: vscode.Range;
+    /** Mutable character offsets backing sourceRange across document edits. */
+    sourceOffsets?: SelectionOffsets;
+}
+
+export interface SelectionOffsets {
+    start: number;
+    end: number;
+}
+
+interface OffsetTextChange {
+    rangeOffset: number;
+    rangeLength: number;
+    text: string;
+}
+
+/**
+ * Transform saved selection offsets through a VS Code document-change batch.
+ * Change offsets refer to the same pre-change document, so boundaries are
+ * mapped against the sorted original changes rather than updated sequentially.
+ */
+export function transformSelectionOffsets(
+    selection: SelectionOffsets,
+    changes: readonly OffsetTextChange[]
+): SelectionOffsets {
+    const sortedChanges = [...changes].sort((left, right) => left.rangeOffset - right.rangeOffset);
+
+    const transformBoundary = (offset: number, affinity: 'start' | 'end'): number => {
+        let delta = 0;
+
+        for (const change of sortedChanges) {
+            const changeStart = change.rangeOffset;
+            const changeEnd = changeStart + change.rangeLength;
+            const replacementLength = change.text.length;
+
+            if (offset < changeStart) {
+                break;
+            }
+            if (offset > changeEnd || (offset === changeEnd && change.rangeLength > 0)) {
+                delta += replacementLength - change.rangeLength;
+                continue;
+            }
+            if (change.rangeLength === 0 && offset === changeStart) {
+                if (affinity === 'end') {
+                    delta += replacementLength;
+                    continue;
+                }
+                return offset + delta;
+            }
+
+            // A replacement overlaps this boundary. Keep a start boundary at
+            // the replacement start; an end boundary inside the replacement
+            // follows the replacement text.
+            return changeStart + delta + (
+                affinity === 'end' && offset > changeStart ? replacementLength : 0
+            );
+        }
+
+        return offset + delta;
+    };
+
+    const start = Math.max(0, transformBoundary(selection.start, 'start'));
+    const end = Math.max(start, transformBoundary(selection.end, 'end'));
+    return { start, end };
 }
 
 export type { ViewLocation };
@@ -301,6 +364,28 @@ export class VisualizationPanel {
 
     public static get sourceRange(): vscode.Range | undefined {
         return VisualizationPanel.currentPanel?._currentOptions.sourceRange;
+    }
+
+    public static get sourceOffsets(): SelectionOffsets | undefined {
+        return VisualizationPanel.currentPanel?._currentOptions.sourceOffsets;
+    }
+
+    public static applySourceDocumentChanges(
+        document: vscode.TextDocument,
+        changes: readonly vscode.TextDocumentContentChangeEvent[]
+    ): void {
+        const panel = VisualizationPanel.currentPanel;
+        const offsets = panel?._currentOptions.sourceOffsets;
+        if (!panel || !offsets || changes.length === 0) {
+            return;
+        }
+
+        const updated = transformSelectionOffsets(offsets, changes);
+        panel._currentOptions.sourceOffsets = updated;
+        panel._currentOptions.sourceRange = new vscode.Range(
+            document.positionAt(updated.start),
+            document.positionAt(updated.end)
+        );
     }
 
     public static sendViewLocationOptions() {

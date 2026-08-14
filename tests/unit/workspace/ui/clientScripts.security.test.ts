@@ -1,4 +1,5 @@
 import { getWebviewScript } from '../../../../src/workspace/ui/clientScripts';
+import { escapeForInlineScriptValue } from '../../../../src/shared/stringUtils';
 
 function readAssignment(script: string, variableName: string): unknown {
     const match = script.match(new RegExp(`(?:const|let) ${variableName} = (.*?);`));
@@ -13,7 +14,7 @@ describe('workspace client bootstrap serialization', () => {
         const payload = '</script><style id="workspace-bootstrap-injection">body{display:none}</style><!-- -->]]>';
         const script = getWebviewScript({
             nonce: 'test-nonce',
-            graphData: JSON.stringify({ nodes: [{ id: 'node-1', label: payload }] }),
+            graphData: { nodes: [{ id: 'node-1', label: payload }] },
             searchFilterQuery: payload,
             initialView: 'graph',
             currentGraphMode: 'tables',
@@ -45,5 +46,22 @@ describe('workspace client bootstrap serialization', () => {
                 html: `<div>${payload}</div>`,
             },
         });
+    });
+
+    it.each([
+        '<!-- repository label',
+        '--> repository label',
+        'repository-path]]>suffix.sql',
+    ])('accepts already escaped graph data containing %s without a JSON round-trip', payload => {
+        const graph = { nodes: [{ id: 'node-1', label: payload, filePath: payload }] };
+        const graphData = escapeForInlineScriptValue(graph);
+
+        const script = getWebviewScript({
+            nonce: 'test-nonce',
+            graphData,
+            searchFilterQuery: '',
+        });
+
+        expect(readAssignment(script, 'graphData')).toEqual(graph);
     });
 });

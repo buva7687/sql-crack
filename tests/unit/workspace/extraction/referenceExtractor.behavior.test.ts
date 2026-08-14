@@ -88,6 +88,27 @@ describe('ReferenceExtractor behavioral coverage', () => {
         ]));
     });
 
+    it('preserves reference line numbers after multiline block comments', () => {
+        const sql = [
+            '/*',
+            ' * generated model header',
+            ' * dependency documentation',
+            ' * keep these lines',
+            ' */',
+            'SELECT *',
+            'FROM source_table;',
+        ].join('\n');
+
+        const refs = extractor.extractReferences(sql, 'query.sql', 'PostgreSQL');
+
+        expect(refs).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                tableName: 'source_table',
+                lineNumber: 7,
+            }),
+        ]));
+    });
+
     it('captures UPDATE targets and UPDATE ... FROM source tables', () => {
         const refs = extractor.extractReferences(
             `

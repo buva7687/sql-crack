@@ -1,4 +1,4 @@
-import { stripSqlComments } from '../../../src/shared/stringUtils';
+import { maskSqlCommentsPreservingPositions, stripSqlComments } from '../../../src/shared/stringUtils';
 
 describe('stripSqlComments', () => {
     it('strips line comments (--)', () => {
@@ -105,5 +105,27 @@ describe('stripSqlComments', () => {
     it('strips multi-line block comment', () => {
         const sql = 'SELECT\n/* multi\nline\ncomment */\n1';
         expect(stripSqlComments(sql)).toBe('SELECT\n \n1');
+    });
+});
+
+describe('maskSqlCommentsPreservingPositions', () => {
+    it('preserves length and newlines while masking nested comments', () => {
+        const sql = '/* outer\n/* inner */\nstill outer */\nSELECT * FROM "real_table";';
+        const masked = maskSqlCommentsPreservingPositions(sql);
+
+        expect(masked).toHaveLength(sql.length);
+        expect(masked.match(/\n/g)).toHaveLength(sql.match(/\n/g)?.length || 0);
+        expect(masked).not.toContain('outer');
+        expect(masked).toContain('SELECT * FROM "real_table";');
+    });
+
+    it('preserves quoted identifiers and contextual temp tables', () => {
+        const sql = 'SELECT * FROM "quoted_table" JOIN #temp ON 1 = 1; -- comment';
+        const masked = maskSqlCommentsPreservingPositions(sql);
+
+        expect(masked).toContain('"quoted_table"');
+        expect(masked).toContain('#temp');
+        expect(masked).not.toContain('comment');
+        expect(masked).toHaveLength(sql.length);
     });
 });

@@ -12,7 +12,7 @@ import {
     ColumnUsageContext
 } from './types';
 import { ColumnExtractor } from './columnExtractor';
-import { escapeRegex, stripSqlComments, unwrapIdentifierValue } from '../../shared';
+import { escapeRegex, maskSqlCommentsPreservingPositions, unwrapIdentifierValue } from '../../shared';
 import { preprocessSqlForWorkspaceParsing } from '../parserConfig';
 import { REFERENCE_SQL_RESERVED_WORDS, TERADATA_RESERVED_WORDS } from './constants';
 import type {
@@ -87,7 +87,7 @@ export class ReferenceExtractor {
         // Pre-collect CTE names via regex BEFORE attempting AST parse.
         // This ensures the catch block (regex fallback) has CTE names available
         // even when the AST parser fails on complex multi-statement files.
-        const sqlNoComments = stripSqlComments(normalizedSql);
+        const sqlNoComments = maskSqlCommentsPreservingPositions(normalizedSql);
         const reservedWords = new Set(['select', 'from', 'where', 'join', 'inner', 'left', 'right', 'outer', 'on', 'as', 'with', 'recursive']);
         const statementBoundaries = this.getStatementBoundaries(sqlNoComments);
         const getStatementIndex = (charIndex: number): number => this.getStatementIndex(statementBoundaries, charIndex);
@@ -1127,7 +1127,7 @@ export class ReferenceExtractor {
     private buildTableLineLookup(sql: string): TableLineLookup {
         const contextLineByTable = new Map<string, Map<number, number>>();
         const fallbackLineByTable = new Map<string, Map<number, number>>();
-        const searchableSql = stripSqlComments(sql);
+        const searchableSql = maskSqlCommentsPreservingPositions(sql);
         const statementBoundaries = this.getStatementBoundaries(searchableSql);
         const identifier = '["\'`]?([#A-Za-z_][#A-Za-z0-9_$]*)["\'`]?';
         const qualifiedIdentifier = `(?:["'\`]?[#A-Za-z_][#A-Za-z0-9_$]*["'\`]?\\.)?${identifier}`;
@@ -1210,7 +1210,7 @@ export class ReferenceExtractor {
         const functionFromKeywords = ['extract', 'substring', 'trim', 'position'];
 
         // Strip comments to prevent false matches like "UPDATE without WHERE" in comments
-        const sqlNoComments = stripSqlComments(sql);
+        const sqlNoComments = maskSqlCommentsPreservingPositions(sql);
 
         const statementBoundaries = this.getStatementBoundaries(sqlNoComments);
 
@@ -1395,7 +1395,7 @@ export class ReferenceExtractor {
     ): { lineNumber: number; charIndex: number } | null {
         const escaped = escapeRegex(tableName);
         const schemaPart = schema ? `${escapeRegex(schema)}\\.` : '(?:\\w+\\.)?';
-        const searchableSql = stripSqlComments(sql);
+        const searchableSql = maskSqlCommentsPreservingPositions(sql);
         const statementBoundaries = this.getStatementBoundaries(searchableSql);
         
         let pattern: RegExp;

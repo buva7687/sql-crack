@@ -88,27 +88,27 @@ describe('workspace/panel/text.ts', () => {
 
         it('escapes closing script tags', () => {
             const result = escapeForInlineScriptValue('</script>');
-            expect(result).toBe('"<\\/script>"');
+            expect(result).toBe('"\\u003c/script\\u003e"');
         });
 
         it('escapes script tags case-insensitively', () => {
             const result = escapeForInlineScriptValue('</SCRIPT>');
-            expect(result).toBe('"<\\/script>"');
+            expect(result).toBe('"\\u003c/SCRIPT\\u003e"');
         });
 
         it('escapes HTML comment start', () => {
             const result = escapeForInlineScriptValue('<!--');
-            expect(result).toBe('"<\\!--"');
+            expect(result).toBe('"\\u003c!--"');
         });
 
         it('escapes HTML comment end', () => {
             const result = escapeForInlineScriptValue('-->');
-            expect(result).toBe('"--\\>"');
+            expect(result).toBe('"--\\u003e"');
         });
 
         it('escapes CDATA section end', () => {
             const result = escapeForInlineScriptValue(']]>');
-            expect(result).toBe('"]\\]>"');
+            expect(result).toBe('"]]\\u003e"');
         });
 
         it('handles objects', () => {
@@ -139,10 +139,7 @@ describe('workspace/panel/text.ts', () => {
 
         it('escapes multiple patterns in one string', () => {
             const result = escapeForInlineScriptValue('</script><!-- -->]]>');
-            expect(result).toContain('<\\/script');
-            expect(result).toContain('<\\!--');
-            expect(result).toContain('--\\>');
-            expect(result).toContain(']\\]>');
+            expect(result).toBe('"\\u003c/script\\u003e\\u003c!-- --\\u003e]]\\u003e"');
         });
     });
 

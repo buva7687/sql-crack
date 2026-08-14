@@ -52,10 +52,10 @@ describe('VisualizationPanel behavior', () => {
             '</script><!-- -->]]>'
         );
 
-        expect(escaped).toContain('<\\/script>');
-        expect(escaped).toContain('<\\!--');
-        expect(escaped).toContain('--\\>');
-        expect(escaped).toContain(']\\]>');
+        expect(escaped).toContain('\\u003c/script\\u003e');
+        expect(escaped).toContain('\\u003c!--');
+        expect(escaped).toContain('--\\u003e');
+        expect(escaped).toContain(']]\\u003e');
         expect(escaped).not.toContain('</script>');
     });
 

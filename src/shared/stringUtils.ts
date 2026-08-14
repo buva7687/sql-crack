@@ -48,10 +48,14 @@ export function escapeHtml(value: string): string {
  */
 export function escapeForInlineScriptValue(value: unknown): string {
     return JSON.stringify(value)
-        .replace(/<\/script/gi, '<\\/script')
-        .replace(/<!--/g, '<\\!--')
-        .replace(/-->/g, '--\\>')
-        .replace(/\]\]>/g, ']\\]>');
+        // Unicode escapes are valid in both JSON and JavaScript string literals.
+        // Escaping angle brackets prevents script termination, HTML comments,
+        // and CDATA terminators without producing invalid JSON escapes such as
+        // \! or \> that break callers which store the serialized value.
+        .replace(/</g, '\\u003c')
+        .replace(/>/g, '\\u003e')
+        .replace(/\u2028/g, '\\u2028')
+        .replace(/\u2029/g, '\\u2029');
 }
 
 /**
@@ -96,6 +100,94 @@ export function isHashTempTableIdentifierAt(sql: string, offset: number): boolea
 export interface StripSqlCommentsOptions {
     /** Set false when the caller knows `#` always starts a MySQL-style comment. */
     preserveHashTempIdentifiers?: boolean;
+}
+
+/**
+ * Mask SQL comments with spaces while preserving every character position and
+ * newline. Quoted strings and identifiers remain unchanged, so regex matches in
+ * the returned text map directly back to the original SQL.
+ */
+export function maskSqlCommentsPreservingPositions(
+    sql: string,
+    options: StripSqlCommentsOptions = {}
+): string {
+    const len = sql.length;
+    const masked = sql.split('');
+    let i = 0;
+
+    const maskRange = (start: number, end: number): void => {
+        for (let position = start; position < end; position++) {
+            if (masked[position] !== '\n' && masked[position] !== '\r') {
+                masked[position] = ' ';
+            }
+        }
+    };
+
+    while (i < len) {
+        const ch = sql[i];
+
+        if (ch === "'" || ch === '"' || ch === '`' || ch === '[') {
+            const closingQuote = ch === '[' ? ']' : ch;
+            i++;
+            while (i < len) {
+                if (sql[i] === '\\' && ch !== '[' && i + 1 < len) {
+                    i += 2;
+                    continue;
+                }
+                if (sql[i] === closingQuote) {
+                    if (i + 1 < len && sql[i + 1] === closingQuote) {
+                        i += 2;
+                        continue;
+                    }
+                    i++;
+                    break;
+                }
+                i++;
+            }
+            continue;
+        }
+
+        if (ch === '/' && i + 1 < len && sql[i + 1] === '*') {
+            const start = i;
+            let depth = 1;
+            i += 2;
+            while (i < len && depth > 0) {
+                if (sql[i] === '/' && i + 1 < len && sql[i + 1] === '*') {
+                    depth++;
+                    i += 2;
+                } else if (sql[i] === '*' && i + 1 < len && sql[i + 1] === '/') {
+                    depth--;
+                    i += 2;
+                } else {
+                    i++;
+                }
+            }
+            maskRange(start, i);
+            continue;
+        }
+
+        if (ch === '-' && i + 1 < len && sql[i + 1] === '-') {
+            const start = i;
+            while (i < len && sql[i] !== '\n' && sql[i] !== '\r') { i++; }
+            maskRange(start, i);
+            continue;
+        }
+
+        if (ch === '#') {
+            const preserveTempIdentifier = options.preserveHashTempIdentifiers !== false
+                && isHashTempTableIdentifierAt(sql, i);
+            if (!preserveTempIdentifier) {
+                const start = i;
+                while (i < len && sql[i] !== '\n' && sql[i] !== '\r') { i++; }
+                maskRange(start, i);
+                continue;
+            }
+        }
+
+        i++;
+    }
+
+    return masked.join('');
 }
 
 /**

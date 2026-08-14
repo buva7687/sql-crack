@@ -246,7 +246,7 @@ describe('WorkspacePanel lineage guards and config defaults', () => {
         expect(html).toContain('const initialLineageDetailNodeId = "table:orders";');
         expect(html).toContain('const initialLineageDetailDirection = "downstream";');
         expect(html).toContain('const initialLineageDetailExpandedNodes = ["table:orders","view:daily_orders"];');
-        expect(html).toContain('const initialWorkspaceRestoreState = {"impact":{"hasReport":true,"html":"<div>impact-report</div>"}};');
+        expect(html).toContain('const initialWorkspaceRestoreState = {"impact":{"hasReport":true,"html":"\\u003cdiv\\u003eimpact-report\\u003c/div\\u003e"}};');
     });
 
     it('clears derived lineage detail and impact state when the index is invalidated', () => {
