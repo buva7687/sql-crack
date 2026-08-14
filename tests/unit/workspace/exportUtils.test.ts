@@ -80,4 +80,23 @@ describe('workspace exportUtils', () => {
         expect(mermaid).toContain('%% Graph Mode: tables');
         expect(mermaid).toContain('%% Filters: query="orders"');
     });
+
+    it('keeps multiline backtick labels inside the Mermaid Markdown fence', () => {
+        const fence = String.fromCharCode(96).repeat(3);
+        const hostileGraph: WorkspaceDependencyGraph = {
+            ...graph,
+            nodes: [{
+                ...graph.nodes[0],
+                label: ['orders', fence, '[click](javascript:alert(1))'].join('\n'),
+            }],
+            edges: [],
+        };
+
+        const mermaid = generateWorkspaceMermaid(hostileGraph, 'TD');
+
+        expect(mermaid.split(fence)).toHaveLength(3);
+        expect(mermaid).not.toContain(['', fence, ''].join('\n'));
+        expect(mermaid).not.toContain('[click](javascript:alert(1))');
+        expect(mermaid).toContain('#96;#96;#96;');
+    });
 });

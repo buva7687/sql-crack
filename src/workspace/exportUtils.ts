@@ -17,6 +17,22 @@ export const WORKSPACE_EXPORT_OPTIONS: WorkspaceExportOption[] = [
     { format: 'dot', label: 'DOT (Graphviz)', group: 'advanced' },
 ];
 
+function escapeWorkspaceMermaidLabel(label: string): string {
+    return (label ?? '')
+        .replace(/\\/g, ' ')
+        .replace(/[\r\n]+/g, ' ')
+        .replace(/`/g, '#96;')
+        .replace(/"/g, '#34;')
+        .replace(/\[/g, '#91;')
+        .replace(/\]/g, '#93;')
+        .replace(/\(/g, '#40;')
+        .replace(/\)/g, '#41;')
+        .replace(/\{/g, '#123;')
+        .replace(/\}/g, '#125;')
+        .replace(/</g, '#60;')
+        .replace(/>/g, '#62;');
+}
+
 export function generateWorkspaceMermaid(
     graph: WorkspaceDependencyGraph,
     direction: 'TD' | 'BT',
@@ -29,7 +45,7 @@ export function generateWorkspaceMermaid(
     mermaid += `graph ${direction}\n`;
 
     for (const node of graph.nodes) {
-        const label = node.label.replace(/"/g, '\\"');
+        const label = escapeWorkspaceMermaidLabel(node.label);
         const shape = node.type === 'file' ? '[' : node.type === 'external' ? '((' : '[]';
         const endShape = node.type === 'file' ? ']' : node.type === 'external' ? '))' : ']';
         mermaid += `    ${node.id}${shape}"${label}"${endShape}\n`;

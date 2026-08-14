@@ -38,4 +38,12 @@ describe('sqlFormatter comment edge cases', () => {
         const result = formatSql(sql);
         expect(result).toContain('/* pick columns */');
     });
+
+    it('restores a multiline block comment containing line-comment syntax', () => {
+        const comment = '/* explanation\n * -- example only\n * still block text\n */';
+        const result = formatSql('SELECT a\n' + comment + '\nFROM t');
+
+        expect(result).toContain(comment);
+        expect(result).not.toMatch(/__COMMENT_\d+__/);
+    });
 });

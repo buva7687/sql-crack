@@ -28,11 +28,15 @@ describe('Dialect Support', () => {
     it('parses LIMIT with offset syntax', () => {
       const result = parseSql('SELECT * FROM users LIMIT 10, 20', dialect);
       expect(result.error).toBeUndefined();
+      expect(result.nodes.find(node => node.type === 'limit')?.details)
+        .toContain('20 rows (offset 10)');
     });
 
     it('parses LIMIT with OFFSET keyword', () => {
       const result = parseSql('SELECT * FROM users LIMIT 20 OFFSET 10', dialect);
       expect(result.error).toBeUndefined();
+      expect(result.nodes.find(node => node.type === 'limit')?.details)
+        .toContain('20 rows (offset 10)');
     });
 
     it('parses IF() function', () => {
