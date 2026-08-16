@@ -34,8 +34,8 @@ export interface WorkspaceIndex {
     fileCount: number;
     files: Map<string, FileAnalysis>;
     fileHashes: Map<string, string>;   // filePath -> contentHash for incremental parsing
-    definitionMap: Map<string, SchemaDefinition[]>;  // qualifiedName (lowercase) -> definitions
-    referenceMap: Map<string, TableReference[]>;     // qualifiedName (lowercase) -> references
+    definitionMap: Map<string, SchemaDefinition[]>;  // canonical catalog.schema.name -> definitions
+    referenceMap: Map<string, TableReference[]>;     // canonical catalog.schema.name -> references
 }
 
 /**
@@ -134,6 +134,7 @@ export interface WorkspaceStats {
     missingDefinitions: string[];   // Tables referenced but not defined
     circularDependencies: string[]; // Files with circular dependencies
     parseErrors: number;            // Files that failed to parse
+    parseWarnings?: number;         // Files analyzed through a partial/fallback parser path
 }
 
 /**
@@ -201,6 +202,7 @@ export interface DetailedWorkspaceStats extends WorkspaceStats {
     orphanedDetails: DefinitionDetail[];
     missingDetails: MissingDefinitionDetail[];
     parseErrorDetails: ParseErrorDetail[];
+    parseWarningDetails?: ParseWarningDetail[];
 }
 
 /**
@@ -230,4 +232,13 @@ export interface ParseErrorDetail {
     filePath: string;
     fileName: string;
     error: string;
+}
+
+/**
+ * Detail for a file whose primary SQL parser failed but fallback extraction ran.
+ */
+export interface ParseWarningDetail {
+    filePath: string;
+    fileName: string;
+    warnings: string[];
 }

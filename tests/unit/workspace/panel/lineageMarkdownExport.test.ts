@@ -47,4 +47,34 @@ describe('workspace/panel/lineageMarkdownExport.ts', () => {
         expect(payload.markdown).toContain('## Downstream');
         expect(payload.markdown).toContain('`order_summary` (view)');
     });
+
+    it('keeps hostile legal identifiers and paths inside their Markdown fields', () => {
+        const injectedHeading = '## Forged section';
+        const graph = createGraph();
+        const center = graph.nodes.get('table:orders')!;
+        center.name = `orders\`\`\`\n${injectedHeading}`;
+        center.filePath = '/repo/[orders](javascript:alert(1)).sql\r\n- forged';
+        graph.nodes.get('table:customers')!.name = '`customers` [click](javascript:alert(1))';
+        graph.nodes.get('table:customers')!.filePath = '/repo/<img src=x>.sql\n## path heading';
+
+        const payload = buildLineageMarkdownExport({
+            flowAnalyzer: new FlowAnalyzer(graph),
+            node: center,
+            direction: 'both',
+            depth: 5,
+            scopeUri: '/repo/[scope](javascript:alert(1))\n## scope heading',
+        });
+
+        expect(payload.markdown.match(/^## .+$/gm)).toEqual([
+            '## Upstream',
+            '## Downstream',
+        ]);
+        expect(payload.markdown).not.toContain(`\n${injectedHeading}`);
+        expect(payload.markdown).not.toContain('[scope](javascript:alert(1))');
+        expect(payload.markdown).toContain('- `` `customers` [click](javascript:alert(1)) `` (table)');
+        expect(payload.markdown).toContain('\\[scope\\](javascript:alert(1))');
+        expect(payload.markdown).toContain('## Forged section');
+        expect(payload.markdown).toContain('## path heading');
+        expect(payload.markdown).toContain('## scope heading');
+    });
 });

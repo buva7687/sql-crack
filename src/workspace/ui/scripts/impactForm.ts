@@ -226,6 +226,7 @@ export function getImpactFormScriptFragment(): string {
                         command: 'analyzeImpact',
                         type: selectedType,
                         name: tableName,
+                        nodeId: tableIdInput.value,
                         changeType: changeType
                     });
                 });

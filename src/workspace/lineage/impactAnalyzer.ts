@@ -2,7 +2,7 @@
 
 import { ColumnLineageEdge, LineageGraph, LineageNode } from './types';
 import { FlowAnalyzer } from './flowAnalyzer';
-import { normalizeIdentifier, parseQualifiedKey } from '../identifiers';
+import { getColumnKey, normalizeIdentifier, parseQualifiedKey, splitLastQualifiedKeyComponent } from '../identifiers';
 
 /**
  * Type of change being analyzed
@@ -18,6 +18,7 @@ export interface ImpactReport {
         type: 'table' | 'view' | 'column';
         name: string;
         tableName?: string;
+        nodeId?: string;
     };
 
     // Direct impacts (immediate dependents)
@@ -91,9 +92,12 @@ export class ImpactAnalyzer {
     analyzeTableChange(
         tableName: string,
         changeType: ChangeType = 'modify',
-        targetType: 'table' | 'view' = 'table'
+        targetType: 'table' | 'view' = 'table',
+        requestedNodeId?: string
     ): ImpactReport {
-        const nodeId = this.getRelationNodeId(tableName, targetType);
+        const nodeId = requestedNodeId && this.graph.nodes.has(requestedNodeId)
+            ? requestedNodeId
+            : this.getRelationNodeId(tableName, targetType);
         const node = this.graph.nodes.get(nodeId);
 
         if (!node) {
@@ -134,8 +138,11 @@ export class ImpactAnalyzer {
         if (this.graph.columnEdges) {
             for (const colEdge of this.graph.columnEdges) {
                 // Add both source and target columns as having data flow
-                const sourceColId = `column:${colEdge.sourceTableId.replace(/^(table|view):/, '')}.${colEdge.sourceColumnName.toLowerCase()}`;
-                const targetColId = `column:${colEdge.targetTableId.replace(/^(table|view):/, '')}.${colEdge.targetColumnName.toLowerCase()}`;
+                const sourceColId = colEdge.sourceColumnId
+                    || this.resolveColumnNodeId(colEdge.sourceTableId, colEdge.sourceColumnName);
+                const targetColId = colEdge.targetColumnId
+                    || this.resolveColumnNodeId(colEdge.targetTableId, colEdge.targetColumnName);
+                if (!sourceColId || !targetColId) {continue;}
                 columnsWithDataFlow.add(sourceColId);
                 columnsWithDataFlow.add(targetColId);
                 if (!columnFlowByTargetId.has(targetColId)) {
@@ -241,7 +248,7 @@ export class ImpactAnalyzer {
         }
 
         // Calculate summary
-        const summary = this.calculateSummary(directImpacts, transitiveImpacts);
+        const summary = this.calculateSummary(directImpacts, transitiveImpacts, nodeId);
 
         // Calculate overall severity
         const severity = this.calculateSeverity({
@@ -258,7 +265,8 @@ export class ImpactAnalyzer {
             changeType,
             target: {
                 type: actualType,
-                name: tableName
+                name: tableName,
+                nodeId,
             },
             directImpacts,
             transitiveImpacts,
@@ -319,7 +327,7 @@ export class ImpactAnalyzer {
             }
         }
 
-        const summary = this.calculateSummary(directImpacts, transitiveImpacts);
+        const summary = this.calculateSummary(directImpacts, transitiveImpacts, columnId);
         const severity = this.calculateSeverity({
             directImpacts,
             transitiveImpacts,
@@ -405,13 +413,17 @@ export class ImpactAnalyzer {
      */
     private calculateSummary(
         directImpacts: ImpactItem[],
-        transitiveImpacts: ImpactItem[]
+        transitiveImpacts: ImpactItem[],
+        targetNodeId: string
     ): ImpactReport['summary'] {
         const allImpacts = [...directImpacts, ...transitiveImpacts];
 
         const tables = new Set<string>();
         const views = new Set<string>();
         const files = new Set<string>();
+        const affectedNodeIds = new Set(allImpacts.map(impact => impact.node.id));
+        const pathNodeIds = new Set([targetNodeId, ...affectedNodeIds]);
+        const affectedStatements = new Set<string>();
 
         for (const impact of allImpacts) {
             if (impact.node.type === 'table') {tables.add(impact.node.name);}
@@ -419,11 +431,25 @@ export class ImpactAnalyzer {
             if (impact.filePath) {files.add(impact.filePath);}
         }
 
+        // Query statements are not graph nodes. Count only statements that are
+        // explicitly identified on data-flow edges within the affected path;
+        // never infer a query count from the number of impacted objects.
+        for (const edge of this.graph.edges) {
+            if (!pathNodeIds.has(edge.sourceId) || !affectedNodeIds.has(edge.targetId)) {
+                continue;
+            }
+            const filePath = edge.metadata?.filePath;
+            const statementIndex = edge.metadata?.statementIndex;
+            if (typeof filePath === 'string' && filePath.length > 0 && Number.isInteger(statementIndex)) {
+                affectedStatements.add(`${filePath}\u0000${statementIndex}`);
+            }
+        }
+
         return {
             totalAffected: allImpacts.length,
             tablesAffected: tables.size,
             viewsAffected: views.size,
-            queriesAffected: allImpacts.length,
+            queriesAffected: affectedStatements.size,
             filesAffected: files.size
         };
     }
@@ -551,11 +577,20 @@ export class ImpactAnalyzer {
      * Resolve table/view node ID based on requested type, with compatibility fallback.
      */
     private getRelationNodeId(tableName: string, targetType: 'table' | 'view' = 'table'): string {
-        const normalizedName = tableName.toLowerCase();
+        const exactName = tableName.trim();
+        const normalizedName = exactName.toLowerCase();
+        const exactTableId = `table:${exactName}`;
+        const exactViewId = `view:${exactName}`;
         const tableId = `table:${normalizedName}`;
         const viewId = `view:${normalizedName}`;
 
         if (targetType === 'view') {
+            if (this.graph.nodes.has(exactViewId)) {
+                return exactViewId;
+            }
+            if (this.graph.nodes.has(exactTableId)) {
+                return exactTableId;
+            }
             if (this.graph.nodes.has(viewId)) {
                 return viewId;
             }
@@ -565,6 +600,12 @@ export class ImpactAnalyzer {
             return viewId;
         }
 
+        if (this.graph.nodes.has(exactTableId)) {
+            return exactTableId;
+        }
+        if (this.graph.nodes.has(exactViewId)) {
+            return exactViewId;
+        }
         if (this.graph.nodes.has(tableId)) {
             return tableId;
         }
@@ -578,7 +619,29 @@ export class ImpactAnalyzer {
      * Generate column node ID
      */
     private getColumnNodeId(tableName: string, columnName: string): string {
-        return `column:${tableName.toLowerCase()}.${columnName.toLowerCase()}`;
+        return this.resolveColumnNodeId(tableName, columnName)
+            || `column:${getColumnKey(tableName.trim().toLowerCase(), columnName)}`;
+    }
+
+    private resolveColumnNodeId(tableNameOrId: string, columnName: string): string | undefined {
+        const explicitParentId = /^(?:table|view|external|cte):/.test(tableNameOrId)
+            ? tableNameOrId
+            : undefined;
+        const relationKey = tableNameOrId.replace(/^(?:table|view|external|cte):/, '');
+        const parentIds = explicitParentId
+            ? new Set([explicitParentId])
+            : new Set(['table', 'view', 'external', 'cte'].map(type => `${type}:${relationKey}`));
+        const exact = [...this.graph.nodes.values()].find(node =>
+            node.type === 'column' && parentIds.has(node.parentId || '') && node.name === columnName
+        );
+        if (exact) {return exact.id;}
+
+        const folded = [...this.graph.nodes.values()].filter(node =>
+            node.type === 'column'
+            && parentIds.has(node.parentId || '')
+            && node.name.toLowerCase() === columnName.toLowerCase()
+        );
+        return folded.length === 1 ? folded[0].id : undefined;
     }
 
     private getTableDisplayName(tableId: string | undefined): string {
@@ -620,11 +683,10 @@ export class ImpactAnalyzer {
             return columnId || 'unknown_table';
         }
         const withoutPrefix = columnId.substring(7);
-        const dotIndex = withoutPrefix.lastIndexOf('.');
-        if (dotIndex <= 0) {
+        const { prefix } = splitLastQualifiedKeyComponent(withoutPrefix);
+        if (!prefix) {
             return withoutPrefix || 'unknown_table';
         }
-        const tableName = withoutPrefix.substring(0, dotIndex);
-        return tableName || 'unknown_table';
+        return prefix;
     }
 }

@@ -4,6 +4,7 @@ import * as path from 'path';
 import { ImpactReport, ImpactItem } from '../lineage/impactAnalyzer';
 import { LineageGraph, LineageNode } from '../lineage/types';
 import { ICONS } from '../../shared';
+import { splitLastQualifiedKeyComponent } from '../identifiers';
 
 /**
  * Generates HTML for impact analysis reports
@@ -191,7 +192,7 @@ export class ImpactView {
             ? (report.target.tableName || report.target.name)
             : report.target.name;
         const targetType = report.target.type === 'view' ? 'view' : 'table';
-        const targetNodeId = `${targetType}:${targetTableName.toLowerCase()}`;
+        const targetNodeId = report.target.nodeId || `${targetType}:${targetTableName.toLowerCase()}`;
 
         const html = `
             <div class="impact-report">
@@ -389,9 +390,10 @@ export class ImpactView {
             let parentTable = 'Other';
             if (item.node.type === 'column' && item.node.id.startsWith('column:')) {
                 const withoutPrefix = item.node.id.substring(7); // Remove 'column:'
-                const dotIndex = withoutPrefix.lastIndexOf('.');
-                if (dotIndex > 0) {
-                    parentTable = withoutPrefix.substring(0, dotIndex);
+                const parentId = item.node.parentId?.replace(/^(?:table|view|external|cte):/, '');
+                const { prefix } = splitLastQualifiedKeyComponent(withoutPrefix);
+                if (parentId || prefix) {
+                    parentTable = parentId || prefix;
                 }
             } else if (item.node.type === 'table' || item.node.type === 'view') {
                 parentTable = item.node.name;

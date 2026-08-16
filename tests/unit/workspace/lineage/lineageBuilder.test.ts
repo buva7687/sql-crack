@@ -16,6 +16,7 @@ jest.mock('fs', () => ({
 import * as fs from 'fs';
 import * as path from 'path';
 import { LineageBuilder } from '../../../../src/workspace/lineage/lineageBuilder';
+import { getQualifiedKey } from '../../../../src/workspace/identifiers';
 import { logger } from '../../../../src/logger';
 import { SchemaExtractor } from '../../../../src/workspace/extraction/schemaExtractor';
 import type { WorkspaceIndex, SchemaDefinition, FileAnalysis, TableReference } from '../../../../src/workspace/types';
@@ -73,7 +74,7 @@ function makeIndex(
 ): WorkspaceIndex {
     const definitionMap = new Map<string, SchemaDefinition[]>();
     for (const def of defs) {
-        const key = (def.schema ? `${def.schema}.` : '') + def.name.toLowerCase();
+        const key = getQualifiedKey(def.name, def.schema, def);
         if (!definitionMap.has(key)) {
             definitionMap.set(key, []);
         }
@@ -136,6 +137,35 @@ describe('LineageBuilder', () => {
             expect(builder.nodes.get('view:active_users')!.type).toBe('view');
         });
 
+        it('preserves quoted case and catalog-schema relation identities', () => {
+            const definitions = [
+                makeDef('Users', 'table', [], { nameQuoted: true }),
+                makeDef('users', 'table', [], { nameQuoted: true }),
+                makeDef('orders', 'table', [], {
+                    catalog: 'db1',
+                    schema: 'sales',
+                    catalogQuoted: true,
+                    schemaQuoted: true,
+                    nameQuoted: true,
+                }),
+                makeDef('orders', 'table', [], {
+                    catalog: 'db1',
+                    schema: 'finance',
+                    catalogQuoted: true,
+                    schemaQuoted: true,
+                    nameQuoted: true,
+                }),
+            ];
+            const builder = new LineageBuilder();
+
+            builder.buildFromIndex(makeIndex(definitions));
+
+            expect(builder.nodes.has('table:Users')).toBe(true);
+            expect(builder.nodes.has('table:users')).toBe(true);
+            expect(builder.nodes.get('table:db1.sales.orders')?.name).toBe('db1.sales.orders');
+            expect(builder.nodes.get('table:db1.finance.orders')?.name).toBe('db1.finance.orders');
+        });
+
         it('creates column nodes when includeColumns is true', () => {
             const cols = [makeColumn('id', 'int'), makeColumn('email', 'varchar')];
             const def = makeDef('users', 'table', cols);
@@ -161,6 +191,29 @@ describe('LineageBuilder', () => {
             expect(() => builder.buildFromIndex(index)).not.toThrow();
             expect(builder.nodes.has('column:accounts.id')).toBe(true);
             expect(builder.nodes.has('column:accounts.name')).toBe(true);
+        });
+
+        it('keeps quoted case-distinct and dotted PostgreSQL columns separate', () => {
+            const defs = new SchemaExtractor().extractDefinitions(
+                'CREATE TABLE t ("OrderID" INT, "orderid" INT, "customer.id" INT);',
+                'quoted-columns.sql',
+                'PostgreSQL'
+            );
+            const fileAnalysis = makeFileAnalysis('quoted-columns.sql', defs, []);
+            const index = makeIndex(defs, new Map([['quoted-columns.sql', fileAnalysis]]));
+            const builder = new LineageBuilder({ includeExternal: true, includeColumns: true });
+
+            expect(defs[0].columns).toEqual([
+                expect.objectContaining({ name: 'OrderID', nameQuoted: true }),
+                expect.objectContaining({ name: 'orderid', nameQuoted: true }),
+                expect.objectContaining({ name: 'customer.id', nameQuoted: true }),
+            ]);
+            builder.buildFromIndex(index);
+
+            expect(builder.nodes.has('column:t.OrderID')).toBe(true);
+            expect(builder.nodes.has('column:t.orderid')).toBe(true);
+            expect(builder.nodes.has('column:t.customer\\.id')).toBe(true);
+            expect([...builder.nodes.values()].filter(node => node.type === 'column')).toHaveLength(3);
         });
 
         it('skips column nodes when includeColumns is false', () => {
@@ -191,6 +244,30 @@ describe('LineageBuilder', () => {
                 e.sourceId === 'table:source_table' && e.targetId === 'table:target_table'
             );
             expect(edge).toBeDefined();
+        });
+
+        it('treats a MERGE target as an output destination', () => {
+            const sourceDef = makeDef('staging_orders', 'table', [], { filePath: 'merge.sql' });
+            const targetDef = makeDef('orders', 'table', [], { filePath: 'merge.sql' });
+            const refs = [
+                makeRef('staging_orders', 'select', { filePath: 'merge.sql', statementIndex: 0 }),
+                makeRef('orders', 'merge', { filePath: 'merge.sql', statementIndex: 0 }),
+            ];
+            const analysis = makeFileAnalysis('merge.sql', [sourceDef, targetDef], refs);
+            const index = makeIndex(
+                [sourceDef, targetDef],
+                new Map([['merge.sql', analysis]])
+            );
+
+            const builder = new LineageBuilder();
+            builder.buildFromIndex(index);
+
+            expect(builder.edges).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    sourceId: 'table:staging_orders',
+                    targetId: 'table:orders',
+                }),
+            ]));
         });
 
         it('creates external nodes for unknown references', () => {
@@ -451,6 +528,18 @@ describe('LineageBuilder', () => {
     });
 
     describe('resolveTableId', () => {
+        it('does not fold an unresolved relation onto a different quoted-case node', () => {
+            const quotedDef = makeDef('Users', 'table', [], {
+                nameQuoted: true,
+                filePath: 'quoted.sql',
+            });
+            const builder = new LineageBuilder();
+            builder.buildFromIndex(makeIndex([quotedDef]));
+
+            expect((builder as any).resolveTableId('users', 'query.sql')).toBeNull();
+            expect((builder as any).resolveTableId('Users', 'query.sql')).toBe('table:Users');
+        });
+
         it('resolves table: prefix', () => {
             const def = makeDef('orders');
             const index = makeIndex([def]);

@@ -129,9 +129,11 @@ export class WorkspaceScanner {
                     fileName,
                     lastModified: stat.mtime,
                     contentHash: '',
+                    fileSize: stat.size,
                     definitions: [],
                     references: [],
-                    parseError: `File too large (${Math.round(stat.size / 1024 / 1024)}MB > ${Math.round(this.maxFileSize / 1024 / 1024)}MB limit)`
+                    parseError: `File too large (${Math.round(stat.size / 1024 / 1024)}MB > ${Math.round(this.maxFileSize / 1024 / 1024)}MB limit)`,
+                    skippedReason: 'tooLarge'
                 };
             }
 
@@ -142,18 +144,36 @@ export class WorkspaceScanner {
             const contentHash = this.generateContentHash(sql);
 
             // Extract definitions and references
-            const definitions = this.schemaExtractor.extractDefinitions(sql, filePath, this.dialect);
-            const references = this.referenceExtractor.extractReferences(sql, filePath, this.dialect);
+            const definitionResult = this.schemaExtractor.extractDefinitionsWithStatus(
+                sql,
+                filePath,
+                this.dialect
+            );
+            const referenceResult = this.referenceExtractor.extractReferencesWithStatus(
+                sql,
+                filePath,
+                this.dialect
+            );
+            const parseWarnings = [
+                ...definitionResult.warnings,
+                ...referenceResult.warnings,
+            ];
 
             return {
                 filePath,
                 fileName,
                 lastModified: stat.mtime,
                 contentHash,
-                definitions,
-                references
+                fileSize: stat.size,
+                definitions: definitionResult.definitions,
+                references: referenceResult.references,
+                ...(parseWarnings.length > 0 ? { parseWarnings } : {})
             };
         } catch (error) {
+            const readError = error instanceof Error ? error.message : 'Unknown error';
+            const readErrorCode = error && typeof error === 'object' && 'code' in error
+                ? String(error.code)
+                : undefined;
             return {
                 filePath,
                 fileName,
@@ -161,7 +181,9 @@ export class WorkspaceScanner {
                 contentHash: '',
                 definitions: [],
                 references: [],
-                parseError: error instanceof Error ? error.message : 'Unknown error'
+                parseError: readError,
+                readError,
+                ...(readErrorCode ? { readErrorCode } : {})
             };
         }
     }

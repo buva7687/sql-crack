@@ -722,7 +722,10 @@ export class WorkspacePanel {
      */
     private getWebviewHtml(graph: WorkspaceDependencyGraph, searchFilter: SearchFilter = { query: '', nodeTypes: undefined, useRegex: false, caseSensitive: false }): string {
         const nonce = generateNonce();
-        const totalIssues = graph.stats.orphanedDefinitions.length + graph.stats.missingDefinitions.length + graph.stats.parseErrors;
+        const totalIssues = graph.stats.orphanedDefinitions.length
+            + graph.stats.missingDefinitions.length
+            + graph.stats.parseErrors
+            + (graph.stats.parseWarnings || 0);
 
         // Keep graph data structured until the final inline-script boundary.
         const graphData = {
@@ -1024,7 +1027,10 @@ ${bodyContent}
         const detailedStats = this._currentGraph
             ? buildDetailedWorkspaceStats(this._currentGraph, this._indexManager.getIndex())
             : null;
-        const totalIssues = (detailedStats?.orphanedDetails.length || 0) + (detailedStats?.missingDetails.length || 0) + (detailedStats?.parseErrorDetails.length || 0);
+        const totalIssues = (detailedStats?.orphanedDetails.length || 0)
+            + (detailedStats?.missingDetails.length || 0)
+            + (detailedStats?.parseErrorDetails.length || 0)
+            + (detailedStats?.parseWarningDetails?.length || 0);
         const styles = getIssuesStyles(this._isDarkTheme, this._isHighContrast);
         const script = getIssuesScript(nonce);
         return createIssuesPageHtml({

@@ -9,8 +9,9 @@ import {
     ExtractionOptions,
     DEFAULT_EXTRACTION_OPTIONS,
 } from './types';
-import { escapeRegex, stripSqlComments, unwrapIdentifierValue } from '../../shared';
+import { escapeRegex, maskSqlCommentsPreservingPositions, stripSqlComments, unwrapIdentifierValue } from '../../shared';
 import { preprocessSqlForWorkspaceParsing } from '../parserConfig';
+import { getIdentifierSemantics } from '../identifiers';
 import { SCHEMA_SQL_RESERVED_WORDS } from './constants';
 
 const SQL_IDENTIFIER_PATTERN =
@@ -19,6 +20,21 @@ const SQL_IDENTIFIER_PATTERN =
 interface SqlSearchViews {
     searchableSql: string;
     structuralSql: string;
+}
+
+interface IdentifierMetadata {
+    nameQuoted: boolean;
+    schemaQuoted: boolean;
+    catalogQuoted: boolean;
+}
+
+interface QualifiedIdentifierParts {
+    name: string;
+    schema?: string;
+    catalog?: string;
+    rawName: string;
+    rawSchema?: string;
+    rawCatalog?: string;
 }
 
 /**
@@ -41,7 +57,21 @@ export class SchemaExtractor {
         filePath: string,
         dialect: SqlDialect = this.options.dialect
     ): SchemaDefinition[] {
+        return this.extractDefinitionsWithStatus(sql, filePath, dialect).definitions;
+    }
+
+    /**
+     * Extract definitions and report when the primary AST parser had to fall
+     * back to the less-complete regex path. Status is returned per invocation
+     * so concurrent workspace scans cannot leak warnings between files.
+     */
+    extractDefinitionsWithStatus(
+        sql: string,
+        filePath: string,
+        dialect: SqlDialect = this.options.dialect
+    ): { definitions: SchemaDefinition[]; warnings: string[] } {
         const definitions: SchemaDefinition[] = [];
+        const warnings: string[] = [];
         const { sql: normalizedSql } = preprocessSqlForWorkspaceParsing(sql, dialect);
         const sourceViews = this.createSqlSearchViews(sql);
 
@@ -76,13 +106,85 @@ export class SchemaExtractor {
             }
         } catch (error) {
             // Fallback to regex-based extraction for unsupported dialects or parse errors
+            warnings.push(this.formatParserWarning('Schema', error));
+            definitions.length = 0;
             const fallbackViews = normalizedSql === sql
                 ? sourceViews
                 : this.createSqlSearchViews(normalizedSql);
             definitions.push(...this.extractWithRegex(normalizedSql, filePath, fallbackViews));
         }
 
-        return definitions;
+        // SELECT ... INTO is a table-producing statement in SQL Server,
+        // PostgreSQL/Redshift, and compatible engines. Some parser dialects
+        // reject it while others expose an `into` AST shape that the CREATE-only
+        // dispatch above does not visit, so scan the original offset-preserving
+        // SQL view and merge the result with any preprocessed Redshift CTAS.
+        for (const definition of this.extractSelectIntoDefinitions(sql, filePath, sourceViews, dialect)) {
+            const alreadyExtracted = definitions.some(existing =>
+                existing.statementIndex === definition.statementIndex
+                && existing.name.toLowerCase() === definition.name.toLowerCase()
+                && (existing.schema || '').toLowerCase() === (definition.schema || '').toLowerCase()
+                && (existing.catalog || '').toLowerCase() === (definition.catalog || '').toLowerCase()
+            );
+            if (!alreadyExtracted) {
+                definitions.push(definition);
+            }
+        }
+
+        const identifierSemantics = getIdentifierSemantics(dialect);
+        for (const definition of definitions) {
+            Object.assign(definition, identifierSemantics);
+            const quoteFlags = this.getDeclaredColumnQuoteFlags(definition);
+            for (const column of definition.columns) {
+                column.name = this.unquoteIdentifier(column.name);
+                const exactFlag = quoteFlags.get(column.name);
+                const foldedFlag = exactFlag === undefined
+                    ? [...quoteFlags.entries()].find(([name]) => name.toLowerCase() === column.name.toLowerCase())?.[1]
+                    : undefined;
+                column.nameQuoted = exactFlag ?? foldedFlag ?? column.nameQuoted ?? false;
+                Object.assign(column, identifierSemantics);
+            }
+        }
+
+        return { definitions, warnings };
+    }
+
+    private formatParserWarning(scope: string, error: unknown): string {
+        const message = error instanceof Error ? error.message : String(error || 'Unknown parser error');
+        const compactMessage = message.replace(/\s+/g, ' ').trim().slice(0, 500);
+        return `${scope} parser failed; regex fallback used: ${compactMessage || 'Unknown parser error'}`;
+    }
+
+    /** Recover delimiter metadata that node-sql-parser omits from column ASTs. */
+    private getDeclaredColumnQuoteFlags(definition: SchemaDefinition): Map<string, boolean> {
+        const result = new Map<string, boolean>();
+        if (!definition.sql || definition.columns.length === 0) {return result;}
+
+        const searchableSql = maskSqlCommentsPreservingPositions(definition.sql);
+        const header = this.createHeaderRegex(definition.type).exec(searchableSql);
+        if (!header) {return result;}
+        const openingIndex = searchableSql.indexOf('(', header.index + header[0].length);
+        if (openingIndex < 0) {return result;}
+
+        if (definition.type === 'view') {
+            const asIndex = /\bAS\b/i.exec(searchableSql.slice(header.index + header[0].length))?.index;
+            if (asIndex !== undefined && openingIndex >= header.index + header[0].length + asIndex) {
+                return result;
+            }
+        }
+
+        const body = this.extractBalancedParens(definition.sql, openingIndex + 1);
+        for (const part of this.splitColumnDefinitions(body)) {
+            const trimmed = part.trim();
+            if (!trimmed || (definition.type === 'table' &&
+                /^(?:PRIMARY\s+KEY|FOREIGN\s+KEY|UNIQUE|CHECK|CONSTRAINT)\b/i.test(trimmed))) {
+                continue;
+            }
+            const match = new RegExp(`^(${SQL_IDENTIFIER_PATTERN})(?:\\s|$)`).exec(trimmed);
+            if (!match) {continue;}
+            result.set(this.unquoteIdentifier(match[1]), this.isQuotedIdentifier(match[1]));
+        }
+        return result;
     }
 
     /**
@@ -139,13 +241,21 @@ export class SchemaExtractor {
         sourceViews: SqlSearchViews
     ): SchemaDefinition | null {
         try {
-            const { name: tableName, schema } = this.extractTableName(stmt);
+            const { name: tableName, schema, catalog } = this.extractTableName(stmt);
             const columns = this.extractColumns(stmt);
+            const identifierMetadata = this.findDefinitionIdentifierMetadata(
+                sourceViews.searchableSql,
+                tableName,
+                'table',
+                statementIndex
+            );
 
             return {
                 type: 'table',
                 name: tableName,
                 schema,
+                catalog,
+                ...identifierMetadata,
                 statementIndex,
                 columns,
                 filePath,
@@ -163,7 +273,8 @@ export class SchemaExtractor {
                 )
             };
         } catch (error) {
-            return null;
+            const message = error instanceof Error ? error.message : String(error);
+            throw new Error(`CREATE TABLE extraction failed: ${message}`);
         }
     }
 
@@ -178,13 +289,21 @@ export class SchemaExtractor {
         sourceViews: SqlSearchViews
     ): SchemaDefinition | null {
         try {
-            const { name: viewName, schema } = this.extractTableName(stmt);
+            const { name: viewName, schema, catalog } = this.extractTableName(stmt);
             const columns = this.extractViewColumns(stmt);
+            const identifierMetadata = this.findDefinitionIdentifierMetadata(
+                sourceViews.searchableSql,
+                viewName,
+                'view',
+                statementIndex
+            );
 
             return {
                 type: 'view',
                 name: viewName,
                 schema,
+                catalog,
+                ...identifierMetadata,
                 statementIndex,
                 columns,
                 filePath,
@@ -203,27 +322,33 @@ export class SchemaExtractor {
                 // Note: sourceQuery will be populated by lineage builder
             };
         } catch (error) {
-            return null;
+            const message = error instanceof Error ? error.message : String(error);
+            throw new Error(`CREATE VIEW extraction failed: ${message}`);
         }
     }
 
     /**
      * Extract table/view name from AST
      */
-    private extractTableName(stmt: any): { name: string; schema?: string } {
+    private extractTableName(stmt: any): { name: string; schema?: string; catalog?: string } {
         let name = 'unknown';
         let schema: string | undefined;
+        let catalog: string | undefined;
+
+        const qualifiers = (item: any): { schema?: string; catalog?: string } => item?.schema
+            ? { schema: item.schema, catalog: item.db || undefined }
+            : { schema: item?.db || undefined };
 
         if (stmt.view) {
             if (Array.isArray(stmt.view) && stmt.view.length > 0) {
                 name = stmt.view[0].view || stmt.view[0].table || stmt.view[0].name || 'unknown';
-                schema = stmt.view[0].db || stmt.view[0].schema;
-                return { name, schema };
+                ({ schema, catalog } = qualifiers(stmt.view[0]));
+                return { name, schema, catalog };
             }
             if (typeof stmt.view === 'object') {
                 name = stmt.view.view || stmt.view.table || stmt.view.name || 'unknown';
-                schema = stmt.view.db || stmt.view.schema;
-                return { name, schema };
+                ({ schema, catalog } = qualifiers(stmt.view));
+                return { name, schema, catalog };
             }
             if (typeof stmt.view === 'string') {
                 return { name: stmt.view };
@@ -233,16 +358,16 @@ export class SchemaExtractor {
         if (stmt.table) {
             if (Array.isArray(stmt.table) && stmt.table.length > 0) {
                 name = stmt.table[0].table || stmt.table[0].name || 'unknown';
-                schema = stmt.table[0].db || stmt.table[0].schema;
+                ({ schema, catalog } = qualifiers(stmt.table[0]));
             } else if (typeof stmt.table === 'object') {
                 name = stmt.table.table || stmt.table.name || 'unknown';
-                schema = stmt.table.db || stmt.table.schema;
+                ({ schema, catalog } = qualifiers(stmt.table));
             } else if (typeof stmt.table === 'string') {
                 name = stmt.table;
             }
         }
 
-        return { name, schema };
+        return { name, schema, catalog };
     }
 
     /**
@@ -370,12 +495,61 @@ export class SchemaExtractor {
         return trimmed;
     }
 
+    private isQuotedIdentifier(identifier: string | undefined): boolean {
+        if (!identifier) {return false;}
+        const trimmed = identifier.trim();
+        return (trimmed.startsWith('"') && trimmed.endsWith('"'))
+            || (trimmed.startsWith('`') && trimmed.endsWith('`'))
+            || (trimmed.startsWith('[') && trimmed.endsWith(']'));
+    }
+
+    private findDefinitionIdentifierMetadata(
+        searchableSql: string,
+        identifier: string,
+        type: 'table' | 'view',
+        statementIndex: number
+    ): IdentifierMetadata {
+        const regex = this.createHeaderRegex(type);
+        let match: RegExpExecArray | null;
+        while ((match = regex.exec(searchableSql)) !== null) {
+            const parts = this.getQualifiedIdentifierParts(match);
+            if (parts.name.toLowerCase() !== identifier.toLowerCase()) {
+                continue;
+            }
+            const matchStatementIndex = searchableSql.slice(0, match.index).split(';').length - 1;
+            if (matchStatementIndex !== statementIndex) {
+                continue;
+            }
+            return {
+                nameQuoted: this.isQuotedIdentifier(parts.rawName),
+                schemaQuoted: this.isQuotedIdentifier(parts.rawSchema),
+                catalogQuoted: this.isQuotedIdentifier(parts.rawCatalog),
+            };
+        }
+        return { nameQuoted: false, schemaQuoted: false, catalogQuoted: false };
+    }
+
+    private getQualifiedIdentifierParts(match: RegExpExecArray): QualifiedIdentifierParts {
+        const rawCatalog = match[3] ? match[1] : undefined;
+        const rawSchema = match[3] ? match[2] : (match[2] ? match[1] : undefined);
+        const rawName = match[3] || match[2] || match[1];
+        return {
+            rawName,
+            rawSchema,
+            rawCatalog,
+            name: this.unquoteIdentifier(rawName),
+            schema: rawSchema ? this.unquoteIdentifier(rawSchema) : undefined,
+            catalog: rawCatalog ? this.unquoteIdentifier(rawCatalog) : undefined,
+        };
+    }
+
     private createHeaderRegex(type: 'table' | 'view'): RegExp {
         const keyword = type === 'table' ? 'TABLE' : 'VIEW';
         return new RegExp(
             `(?<![\\w$#@])CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:TEMP(?:ORARY)?\\s+)?` +
             `(?:MATERIALIZED\\s+)?${keyword}\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?` +
-            `(${SQL_IDENTIFIER_PATTERN})(?:\\s*\\.\\s*(${SQL_IDENTIFIER_PATTERN}))?`,
+            `(${SQL_IDENTIFIER_PATTERN})(?:\\s*\\.\\s*(${SQL_IDENTIFIER_PATTERN}))?`
+                + `(?:\\s*\\.\\s*(${SQL_IDENTIFIER_PATTERN}))?`,
             'gi'
         );
     }
@@ -398,11 +572,16 @@ export class SchemaExtractor {
         const tableHeaderRegex = this.createHeaderRegex('table');
         let match;
         while ((match = tableHeaderRegex.exec(sqlNoComments)) !== null) {
-            const tableName = this.unquoteIdentifier(match[2] || match[1]);
-            const schema = match[2] ? this.unquoteIdentifier(match[1]) : undefined;
+            const parts = this.getQualifiedIdentifierParts(match);
+            const tableName = parts.name;
+            const schema = parts.schema;
+            const catalog = parts.catalog;
+            const nameQuoted = this.isQuotedIdentifier(parts.rawName);
+            const schemaQuoted = this.isQuotedIdentifier(parts.rawSchema);
+            const catalogQuoted = this.isQuotedIdentifier(parts.rawCatalog);
 
             // Skip if table name is a SQL reserved word
-            if (this.isReservedWord(tableName)) {
+            if (this.isReservedWord(tableName) && !nameQuoted) {
                 continue;
             }
 
@@ -438,6 +617,10 @@ export class SchemaExtractor {
                     type: 'table',
                     name: tableName,
                     schema,
+                    catalog,
+                    nameQuoted,
+                    schemaQuoted,
+                    catalogQuoted,
                     columns,
                     filePath,
                     lineNumber: loc.lineNumber,
@@ -460,6 +643,10 @@ export class SchemaExtractor {
                     type: 'table',
                     name: tableName,
                     schema,
+                    catalog,
+                    nameQuoted,
+                    schemaQuoted,
+                    catalogQuoted,
                     columns: [],
                     filePath,
                     lineNumber: loc.lineNumber,
@@ -475,11 +662,16 @@ export class SchemaExtractor {
         // CREATE VIEW pattern
         const viewRegex = this.createHeaderRegex('view');
         while ((match = viewRegex.exec(sqlNoComments)) !== null) {
-            const viewName = this.unquoteIdentifier(match[2] || match[1]);
-            const schema = match[2] ? this.unquoteIdentifier(match[1]) : undefined;
+            const parts = this.getQualifiedIdentifierParts(match);
+            const viewName = parts.name;
+            const schema = parts.schema;
+            const catalog = parts.catalog;
+            const nameQuoted = this.isQuotedIdentifier(parts.rawName);
+            const schemaQuoted = this.isQuotedIdentifier(parts.rawSchema);
+            const catalogQuoted = this.isQuotedIdentifier(parts.rawCatalog);
 
             // Skip if view name is a SQL reserved word
-            if (this.isReservedWord(viewName)) {
+            if (this.isReservedWord(viewName) && !nameQuoted) {
                 continue;
             }
 
@@ -494,6 +686,10 @@ export class SchemaExtractor {
                 type: 'view',
                 name: viewName,
                 schema,
+                catalog,
+                nameQuoted,
+                schemaQuoted,
+                catalogQuoted,
                 columns: [],
                 filePath,
                 lineNumber: loc.lineNumber,
@@ -506,6 +702,86 @@ export class SchemaExtractor {
         }
 
         return definitions;
+    }
+
+    private extractSelectIntoDefinitions(
+        sql: string,
+        filePath: string,
+        sourceViews: SqlSearchViews,
+        dialect: SqlDialect
+    ): SchemaDefinition[] {
+        if (!(['TransactSQL', 'PostgreSQL', 'Redshift'] as SqlDialect[]).includes(dialect)) {
+            return [];
+        }
+        const definitions: SchemaDefinition[] = [];
+        const intoRegex = new RegExp(
+            `\\bINTO\\s+(?:(?:TEMP(?:ORARY)?|UNLOGGED)(?:\\s+TABLE)?\\s+|TABLE\\s+)?`
+                + `(${SQL_IDENTIFIER_PATTERN})(?:\\s*\\.\\s*(${SQL_IDENTIFIER_PATTERN}))?`
+                + `(?:\\s*\\.\\s*(${SQL_IDENTIFIER_PATTERN}))?`,
+            'gi'
+        );
+        let match: RegExpExecArray | null;
+
+        while ((match = intoRegex.exec(sourceViews.searchableSql)) !== null) {
+            const parts = this.getQualifiedIdentifierParts(match);
+            const name = parts.name;
+            if (/^(?:OUTFILE|DUMPFILE)$/i.test(name)) {
+                continue;
+            }
+
+            const statementStart = sourceViews.structuralSql.lastIndexOf(
+                ';',
+                Math.max(0, match.index - 1)
+            ) + 1;
+            if (!this.isTopLevelSelectInto(sourceViews.structuralSql, statementStart, match.index)) {
+                continue;
+            }
+
+            let sqlStart = statementStart;
+            while (sqlStart < sql.length && /\s/.test(sql[sqlStart])) {
+                sqlStart++;
+            }
+            const statementIndex = sourceViews.structuralSql.slice(0, statementStart).split(';').length - 1;
+            definitions.push({
+                type: 'table',
+                name,
+                schema: parts.schema,
+                catalog: parts.catalog,
+                nameQuoted: this.isQuotedIdentifier(parts.rawName),
+                schemaQuoted: this.isQuotedIdentifier(parts.rawSchema),
+                catalogQuoted: this.isQuotedIdentifier(parts.rawCatalog),
+                statementIndex,
+                columns: [],
+                filePath,
+                lineNumber: this.getLineNumberAtIndex(sql, sqlStart),
+                sql: this.extractStatementFromIndex(
+                    sql,
+                    sqlStart,
+                    sourceViews.structuralSql,
+                    true
+                ),
+            });
+        }
+
+        return definitions;
+    }
+
+    private isTopLevelSelectInto(structuralSql: string, start: number, intoIndex: number): boolean {
+        const prefix = structuralSql.slice(start, intoIndex);
+        let depth = 0;
+        let lastTopLevelStatementKeyword = '';
+        const tokenRegex = /\b(?:SELECT|WITH|INSERT|UPDATE|DELETE|MERGE|CREATE)\b|[()]/gi;
+        let token: RegExpExecArray | null;
+        while ((token = tokenRegex.exec(prefix)) !== null) {
+            if (token[0] === '(') {
+                depth++;
+            } else if (token[0] === ')') {
+                depth = Math.max(0, depth - 1);
+            } else if (depth === 0 && token[0].toUpperCase() !== 'WITH') {
+                lastTopLevelStatementKeyword = token[0].toUpperCase();
+            }
+        }
+        return depth === 0 && lastTopLevelStatementKeyword === 'SELECT';
     }
 
     /**
@@ -588,6 +864,7 @@ export class SchemaExtractor {
 
                 const column: ColumnInfo = {
                     name,
+                    nameQuoted: this.isQuotedIdentifier(colMatch[1]),
                     dataType: dataType.toUpperCase(),
                     nullable: !isNotNull && !isPrimaryKey,
                     primaryKey: isPrimaryKey,
@@ -761,6 +1038,17 @@ export class SchemaExtractor {
                 continue;
             }
 
+            if (maskStrings && char === '$') {
+                const delimiter = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i))?.[0];
+                if (delimiter) {
+                    const start = i;
+                    const close = sql.indexOf(delimiter, i + delimiter.length);
+                    i = close === -1 ? sql.length : close + delimiter.length;
+                    blankRange(start, i);
+                    continue;
+                }
+            }
+
             if (char === "'" || char === '"' || char === '`' || char === '[') {
                 const start = i;
                 const closing = char === '[' ? ']' : char;
@@ -850,7 +1138,7 @@ export class SchemaExtractor {
         let match: RegExpExecArray | null;
 
         while ((match = re.exec(searchableSql)) !== null) {
-            const matchedName = this.unquoteIdentifier(match[2] || match[1]);
+            const matchedName = this.getQualifiedIdentifierParts(match).name;
             if (matchedName.toLowerCase() === identifier.toLowerCase()) {
                 return match.index;
             }

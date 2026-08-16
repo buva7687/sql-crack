@@ -77,6 +77,29 @@ describe('workspace cross-view linking', () => {
         expect(tableHtml).toContain('aria-label="Explore view daily_orders"');
     });
 
+    it('uses the analyzed node identity in impact cross-view actions', () => {
+        const report: ImpactReport = {
+            changeType: 'modify',
+            target: { type: 'table', name: 'Users', nodeId: 'table:Users' },
+            directImpacts: [],
+            transitiveImpacts: [],
+            summary: {
+                totalAffected: 0,
+                tablesAffected: 0,
+                viewsAffected: 0,
+                queriesAffected: 0,
+                filesAffected: 0,
+            },
+            severity: 'low',
+            suggestions: [],
+        };
+
+        const html = new ImpactView().generateImpactReport(report);
+
+        expect(html).toContain('data-node-id="table:Users"');
+        expect(html).not.toContain('data-node-id="table:users"');
+    });
+
     it('handles cross-view actions through delegated client script logic', () => {
         const script = getWebviewScript({
             nonce: 'test',

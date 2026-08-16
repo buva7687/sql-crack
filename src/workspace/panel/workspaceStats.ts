@@ -7,6 +7,7 @@ import {
     DetailedWorkspaceStats,
     MissingDefinitionDetail,
     ParseErrorDetail,
+    ParseWarningDetail,
     WorkspaceDependencyGraph,
     WorkspaceIndex,
 } from '../types';
@@ -57,6 +58,7 @@ export function buildDetailedWorkspaceStats(
             orphanedDetails: [],
             missingDetails: [],
             parseErrorDetails: [],
+            parseWarningDetails: [],
         };
     }
 
@@ -68,7 +70,7 @@ export function buildDetailedWorkspaceStats(
         }
         for (const def of defs) {
             orphanedDetails.push({
-                name: getDisplayName(def.name, def.schema),
+                name: getDisplayName(def.name, def.schema, def.catalog),
                 type: def.type,
                 filePath: def.filePath,
                 lineNumber: def.lineNumber,
@@ -81,7 +83,7 @@ export function buildDetailedWorkspaceStats(
         const refs = index.referenceMap.get(tableKey) || [];
         const referencingFiles = [...new Set(refs.map(r => r.filePath))];
         const displayName = refs[0]
-            ? getDisplayName(refs[0].tableName, refs[0].schema)
+            ? getDisplayName(refs[0].tableName, refs[0].schema, refs[0].catalog)
             : tableKey;
 
         missingDetails.push({
@@ -93,12 +95,20 @@ export function buildDetailedWorkspaceStats(
     }
 
     const parseErrorDetails: ParseErrorDetail[] = [];
+    const parseWarningDetails: ParseWarningDetail[] = [];
     for (const [, file] of index.files) {
         if (file.parseError) {
             parseErrorDetails.push({
                 filePath: file.filePath,
                 fileName: path.basename(file.filePath),
                 error: file.parseError,
+            });
+        }
+        if (file.parseWarnings && file.parseWarnings.length > 0) {
+            parseWarningDetails.push({
+                filePath: file.filePath,
+                fileName: path.basename(file.filePath),
+                warnings: file.parseWarnings,
             });
         }
     }
@@ -108,5 +118,6 @@ export function buildDetailedWorkspaceStats(
         orphanedDetails,
         missingDetails,
         parseErrorDetails,
+        parseWarningDetails,
     };
 }

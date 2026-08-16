@@ -19,6 +19,25 @@ describe('SchemaExtractor.extractDefinitions', () => {
             expect(defs[0].columns.length).toBeGreaterThanOrEqual(2);
         });
 
+        it('reports and recovers through fallback when AST definition processing fails', () => {
+            jest.spyOn(extractor as any, 'extractColumns').mockImplementationOnce(() => {
+                throw new Error('unexpected AST shape');
+            });
+
+            const result = extractor.extractDefinitionsWithStatus(
+                'CREATE TABLE orders (id INT);',
+                '/sql/orders.sql',
+                'MySQL'
+            );
+
+            expect(result.definitions).toEqual([
+                expect.objectContaining({ name: 'orders', type: 'table' }),
+            ]);
+            expect(result.warnings).toEqual([
+                expect.stringContaining('CREATE TABLE extraction failed: unexpected AST shape'),
+            ]);
+        });
+
         it('extracts schema-qualified CREATE TABLE', () => {
             const sql = 'CREATE TABLE public.users (id INT, name VARCHAR(100));';
             const defs = extractor.extractDefinitions(sql, '/sql/users.sql', 'PostgreSQL');
@@ -26,6 +45,25 @@ describe('SchemaExtractor.extractDefinitions', () => {
             expect(defs).toHaveLength(1);
             expect(defs[0].name).toBe('users');
             expect(defs[0].schema).toBe('public');
+        });
+
+        it('preserves catalog, schema, and quoting for three-part SQL Server names', () => {
+            const defs = extractor.extractDefinitions(
+                'CREATE TABLE [warehouse].[sales].[orders] (id INT);',
+                '/sql/orders.sql',
+                'TransactSQL'
+            );
+
+            expect(defs).toEqual([
+                expect.objectContaining({
+                    catalog: 'warehouse',
+                    schema: 'sales',
+                    name: 'orders',
+                    catalogQuoted: true,
+                    schemaQuoted: true,
+                    nameQuoted: true,
+                }),
+            ]);
         });
 
         it('extracts multiple CREATE TABLE statements', () => {
@@ -339,6 +377,101 @@ describe('SchemaExtractor.extractDefinitions', () => {
 
             expect(defs.length).toBe(1);
             expect(defs[0].name).toBe('logs');
+        });
+
+        it.each([
+            ['TransactSQL' as const, 'SELECT id INTO dbo.report FROM dbo.source_table;', 'dbo', 'report'],
+            ['PostgreSQL' as const, 'SELECT id INTO TEMP report FROM source_table;', undefined, 'report'],
+        ])('extracts SELECT INTO output definitions for %s', (dialect, sql, schema, name) => {
+            const defs = extractor.extractDefinitions(sql, '/sql/select-into.sql', dialect);
+
+            expect(defs).toEqual([
+                expect.objectContaining({
+                    type: 'table',
+                    name,
+                    schema,
+                    statementIndex: 0,
+                    sql,
+                }),
+            ]);
+        });
+
+        it('does not treat MySQL SELECT INTO variable syntax as a table definition', () => {
+            const defs = extractor.extractDefinitions(
+                'SELECT id INTO report FROM source_table;',
+                '/sql/select-into-variable.sql',
+                'MySQL'
+            );
+
+            expect(defs).toEqual([]);
+        });
+
+        it('preserves quotedness metadata for definitions and SELECT INTO targets', () => {
+            const defs = extractor.extractDefinitions(
+                'CREATE TABLE "Sales"."Orders" (id INT);\n'
+                    + 'SELECT id INTO "Sales"."select" FROM source_table;',
+                '/sql/quoted-definitions.sql',
+                'PostgreSQL'
+            );
+
+            expect(defs).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    name: 'Orders',
+                    schema: 'Sales',
+                    nameQuoted: true,
+                    schemaQuoted: true,
+                }),
+                expect.objectContaining({
+                    name: 'select',
+                    schema: 'Sales',
+                    nameQuoted: true,
+                    schemaQuoted: true,
+                    statementIndex: 1,
+                }),
+            ]));
+        });
+
+        it('preserves three-part SELECT INTO target qualifiers', () => {
+            const defs = extractor.extractDefinitions(
+                'SELECT id INTO [warehouse].[sales].[report] FROM [warehouse].[raw].[source_table];',
+                '/sql/select-into.sql',
+                'TransactSQL'
+            );
+
+            expect(defs).toEqual([
+                expect.objectContaining({
+                    catalog: 'warehouse',
+                    schema: 'sales',
+                    name: 'report',
+                    catalogQuoted: true,
+                    schemaQuoted: true,
+                    nameQuoted: true,
+                }),
+            ]);
+        });
+
+        it('does not treat SELECT INTO OUTFILE as a table definition', () => {
+            const defs = extractor.extractDefinitions(
+                "SELECT id INTO OUTFILE '/tmp/export.csv' FROM source_table;",
+                '/sql/export.sql',
+                'MySQL'
+            );
+
+            expect(defs).toEqual([]);
+        });
+
+        it('does not treat procedural SELECT INTO inside a dollar-quoted body as table creation', () => {
+            const sql = [
+                'CREATE FUNCTION f() RETURNS void AS $$',
+                'BEGIN',
+                '  SELECT id INTO selected_id FROM users;',
+                'END;',
+                '$$ LANGUAGE plpgsql;',
+            ].join('\n');
+
+            const defs = extractor.extractDefinitions(sql, '/sql/function.sql', 'PostgreSQL');
+
+            expect(defs).toEqual([]);
         });
     });
 

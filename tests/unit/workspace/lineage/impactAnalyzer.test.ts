@@ -73,6 +73,25 @@ describe('ImpactAnalyzer', () => {
             expect(report.directImpacts[0].impactType).toBe('direct');
         });
 
+        it('uses the selected case-sensitive node identity for impact analysis', () => {
+            const nodes = [
+                makeNode('table:Users', 'table', 'Users'),
+                makeNode('table:users', 'table', 'users'),
+                makeNode('view:upper_report', 'view', 'upper_report'),
+                makeNode('view:lower_report', 'view', 'lower_report'),
+            ];
+            const edges = [
+                makeEdge('table:Users', 'view:upper_report'),
+                makeEdge('table:users', 'view:lower_report'),
+            ];
+            const { analyzer } = makeAnalyzer(nodes, edges);
+
+            const report = analyzer.analyzeTableChange('Users', 'modify', 'table', 'table:Users');
+
+            expect(report.target.nodeId).toBe('table:Users');
+            expect(report.directImpacts.map(impact => impact.node.id)).toEqual(['view:upper_report']);
+        });
+
         it('resolves view targets when requested type is view', () => {
             const nodes = [
                 makeNode('view:daily_orders', 'view', 'daily_orders'),
@@ -119,6 +138,43 @@ describe('ImpactAnalyzer', () => {
             const report = analyzer.analyzeTableChange('orders');
             expect(report.directImpacts).toHaveLength(1);
             expect(report.transitiveImpacts.map(impact => impact.node.id)).toContain('table:report');
+        });
+
+        it('counts unique affected statements instead of affected graph nodes', () => {
+            const nodes = [
+                makeNode('table:orders', 'table', 'orders'),
+                makeNode('table:staging', 'table', 'staging', { filePath: 'pipeline.sql' }),
+                makeNode('table:audit', 'table', 'audit', { filePath: 'pipeline.sql' }),
+                makeNode('view:report', 'view', 'report', { filePath: 'report.sql' }),
+                makeNode('table:unrelated', 'table', 'unrelated'),
+            ];
+            const edges = [
+                makeEdge('table:orders', 'table:staging', 'direct', { filePath: 'pipeline.sql', statementIndex: 0 }),
+                makeEdge('table:orders', 'table:audit', 'direct', { filePath: 'pipeline.sql', statementIndex: 0 }),
+                makeEdge('table:staging', 'view:report', 'direct', { filePath: 'report.sql', statementIndex: 0 }),
+                // This statement also writes an affected node, but it is not on a path from orders.
+                makeEdge('table:unrelated', 'view:report', 'direct', { filePath: 'other.sql', statementIndex: 0 }),
+            ];
+            const { analyzer } = makeAnalyzer(nodes, edges);
+
+            const report = analyzer.analyzeTableChange('orders');
+
+            expect(report.summary.totalAffected).toBe(3);
+            expect(report.summary.queriesAffected).toBe(2);
+        });
+
+        it('does not guess a query count when statement identity is unavailable', () => {
+            const nodes = [
+                makeNode('table:orders', 'table', 'orders'),
+                makeNode('view:report', 'view', 'report', { filePath: 'report.sql' }),
+            ];
+            const edges = [makeEdge('table:orders', 'view:report')];
+            const { analyzer } = makeAnalyzer(nodes, edges);
+
+            const report = analyzer.analyzeTableChange('orders');
+
+            expect(report.summary.totalAffected).toBe(1);
+            expect(report.summary.queriesAffected).toBe(0);
         });
 
         it('respects changeType in report', () => {

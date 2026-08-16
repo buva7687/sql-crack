@@ -15,6 +15,9 @@ export type { SqlDialect };
  */
 export interface ColumnInfo {
     name: string;
+    nameQuoted?: boolean;
+    identifierCaseFolding?: 'lower' | 'upper' | 'preserve';
+    quotedIdentifiersCaseSensitive?: boolean;
     dataType: string;
     nullable: boolean;
     primaryKey: boolean;
@@ -75,6 +78,12 @@ export interface SchemaDefinition {
     type: 'table' | 'view';
     name: string;
     schema?: string;            // Database schema (e.g., dbo, public)
+    catalog?: string;           // Database/catalog qualifier in three-part names
+    nameQuoted?: boolean;       // Original identifier was delimited/quoted
+    schemaQuoted?: boolean;     // Original schema identifier was delimited/quoted
+    catalogQuoted?: boolean;    // Original catalog identifier was delimited/quoted
+    identifierCaseFolding?: 'lower' | 'upper' | 'preserve'; // Dialect folding for ordinary identifiers
+    quotedIdentifiersCaseSensitive?: boolean; // Whether delimiters preserve case identity
     statementIndex?: number;    // Statement index within file for precise per-definition scoping
     columns: ColumnInfo[];
     filePath: string;
@@ -92,6 +101,12 @@ export interface TableReference {
     tableName: string;
     alias?: string;             // Table alias (e.g., "customers AS c")
     schema?: string;
+    catalog?: string;           // Database/catalog qualifier in three-part names
+    nameQuoted?: boolean;       // Original identifier was delimited/quoted
+    schemaQuoted?: boolean;     // Original schema identifier was delimited/quoted
+    catalogQuoted?: boolean;    // Original catalog identifier was delimited/quoted
+    identifierCaseFolding?: 'lower' | 'upper' | 'preserve'; // Dialect folding for ordinary identifiers
+    quotedIdentifiersCaseSensitive?: boolean; // Whether delimiters preserve case identity
     referenceType: ReferenceType;
     filePath: string;
     lineNumber: number;
@@ -212,6 +227,7 @@ export interface FileAnalysis {
     fileName: string;
     lastModified: number;
     contentHash: string;         // SHA-256 hash for change detection
+    fileSize?: number;           // Supports validation of intentionally skipped files
 
     // Schema definitions (CREATE TABLE/VIEW)
     definitions: SchemaDefinition[];
@@ -225,6 +241,16 @@ export interface FileAnalysis {
     // Parse status
     parseError?: string;
     parseWarnings?: string[];
+
+    /**
+     * Set when the SQL source could not be read or stat'ed. Incremental indexing
+     * uses this to retain the last-known-good dependencies while still exposing
+     * the file error to the Issues view through parseError.
+     */
+    readError?: string;
+    /** Original filesystem/provider error code, when available. */
+    readErrorCode?: string;
+    skippedReason?: 'tooLarge';
 }
 
 // =============================================================================

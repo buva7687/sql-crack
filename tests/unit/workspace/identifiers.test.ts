@@ -8,7 +8,10 @@ import {
     normalizeIdentifier,
     getQualifiedKey,
     getDisplayName,
-    parseQualifiedKey
+    parseQualifiedKey,
+    getIdentifierSemantics,
+    getColumnKey,
+    splitLastQualifiedKeyComponent,
 } from '../../../src/workspace/identifiers';
 
 describe('Identifier Utilities', () => {
@@ -43,6 +46,39 @@ describe('Identifier Utilities', () => {
             expect(normalizeIdentifier('user-table')).toBe('user-table');
             expect(normalizeIdentifier('user.table')).toBe('user.table');
         });
+
+        it('preserves case for quoted identifiers', () => {
+            expect(normalizeIdentifier('Users', true)).toBe('Users');
+            expect(normalizeIdentifier('users', true)).toBe('users');
+        });
+
+        it('preserves BigQuery table-name case', () => {
+            const semantics = getIdentifierSemantics('BigQuery');
+            expect(getQualifiedKey('Events', undefined, semantics)).toBe('Events');
+            expect(getQualifiedKey('events', undefined, semantics)).toBe('events');
+        });
+    });
+
+    describe('column keys', () => {
+        it('keeps quoted case distinct and parses dotted column components safely', () => {
+            expect(getColumnKey('orders', 'OrderID', {
+                nameQuoted: true,
+                identifierCaseFolding: 'lower',
+                quotedIdentifiersCaseSensitive: true,
+            })).toBe('orders.OrderID');
+            expect(getColumnKey('orders', 'orderid', {
+                nameQuoted: true,
+                identifierCaseFolding: 'lower',
+                quotedIdentifiersCaseSensitive: true,
+            })).toBe('orders.orderid');
+
+            const dotted = getColumnKey('orders', 'customer.id', { nameQuoted: true });
+            expect(dotted).toBe('orders.customer\\.id');
+            expect(splitLastQualifiedKeyComponent(dotted)).toEqual({
+                prefix: 'orders',
+                component: 'customer.id',
+            });
+        });
     });
 
     describe('getQualifiedKey', () => {
@@ -73,6 +109,43 @@ describe('Identifier Utilities', () => {
             expect(getQualifiedKey('', 'public')).toBe('public.');
             expect(getQualifiedKey('')).toBe('');
         });
+
+        it('keeps quoted names distinct and retains catalog plus schema', () => {
+            expect(getQualifiedKey('Users', undefined, { nameQuoted: true })).toBe('Users');
+            expect(getQualifiedKey('users', undefined, { nameQuoted: true })).toBe('users');
+            expect(getQualifiedKey('orders', 'sales', { catalog: 'db1' })).toBe('db1.sales.orders');
+            expect(getQualifiedKey('Orders', 'Sales', {
+                catalog: 'Db1',
+                nameQuoted: true,
+                schemaQuoted: true,
+                catalogQuoted: true,
+            })).toBe('Db1.Sales.Orders');
+        });
+
+        it('escapes component dots so quoted names cannot collide with qualification', () => {
+            const dottedName = getQualifiedKey('a.b', undefined, { nameQuoted: true });
+            const qualifiedName = getQualifiedKey('b', 'a');
+
+            expect(dottedName).toBe('a\\.b');
+            expect(qualifiedName).toBe('a.b');
+            expect(dottedName).not.toBe(qualifiedName);
+            expect(parseQualifiedKey(dottedName)).toEqual({ name: 'a.b' });
+            expect(parseQualifiedKey(qualifiedName)).toEqual({ schema: 'a', name: 'b' });
+        });
+
+        it('uses dialect-provided folding and quote sensitivity', () => {
+            expect(getQualifiedKey('users', undefined, {
+                identifierCaseFolding: 'upper',
+            })).toBe('USERS');
+            expect(getQualifiedKey('USERS', undefined, {
+                nameQuoted: true,
+                identifierCaseFolding: 'upper',
+            })).toBe('USERS');
+            expect(getQualifiedKey('Users', undefined, {
+                nameQuoted: true,
+                quotedIdentifiersCaseSensitive: false,
+            })).toBe('users');
+        });
     });
 
     describe('getDisplayName', () => {
@@ -96,6 +169,10 @@ describe('Identifier Utilities', () => {
         it('handles empty schema', () => {
             expect(getDisplayName('users', '')).toBe('users');
         });
+
+        it('renders catalog.schema.name', () => {
+            expect(getDisplayName('orders', 'sales', 'db1')).toBe('db1.sales.orders');
+        });
     });
 
     describe('parseQualifiedKey', () => {
@@ -110,9 +187,9 @@ describe('Identifier Utilities', () => {
             expect(result).toEqual({ schema: 'public', name: 'users' });
         });
 
-        it('handles multiple dots (schema.table)', () => {
+        it('parses catalog.schema.table', () => {
             const result = parseQualifiedKey('catalog.schema.table');
-            expect(result).toEqual({ schema: 'catalog', name: 'schema.table' });
+            expect(result).toEqual({ catalog: 'catalog', schema: 'schema', name: 'table' });
         });
 
         it('handles empty string', () => {

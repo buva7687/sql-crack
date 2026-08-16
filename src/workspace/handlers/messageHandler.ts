@@ -326,6 +326,7 @@ export class MessageHandler {
                         message.name,
                         message.tableName,
                         message.changeType,
+                        message.nodeId,
                         getWorkspaceRequestId(message)
                     );
                     break;
@@ -697,6 +698,7 @@ export class MessageHandler {
         name: string,
         tableName?: string,
         changeType: 'modify' | 'rename' | 'drop' | 'addColumn' = 'modify',
+        nodeId?: string,
         requestId?: number
     ): Promise<void> {
         const trimmedName = name?.trim() || '';
@@ -725,7 +727,10 @@ export class MessageHandler {
         if (type === 'column') {
             report = impactAnalyzer.analyzeColumnChange(tableName!.trim(), trimmedName, changeType);
         } else {
-            report = impactAnalyzer.analyzeTableChange(trimmedName, changeType, type === 'view' ? 'view' : 'table');
+            const targetType = type === 'view' ? 'view' : 'table';
+            report = nodeId
+                ? impactAnalyzer.analyzeTableChange(trimmedName, changeType, targetType, nodeId)
+                : impactAnalyzer.analyzeTableChange(trimmedName, changeType, targetType);
         }
 
         this._context.setCurrentImpactReport(report);
@@ -751,8 +756,12 @@ export class MessageHandler {
 
         // Fallback: try different node types if not found
         if (!node) {
-            const nameLower = tableName.toLowerCase();
-            node = lineageGraph.nodes.get(`table:${nameLower}`) ||
+            const exactName = tableName.trim();
+            const nameLower = exactName.toLowerCase();
+            node = lineageGraph.nodes.get(`table:${exactName}`) ||
+                   lineageGraph.nodes.get(`view:${exactName}`) ||
+                   lineageGraph.nodes.get(`cte:${exactName}`) ||
+                   lineageGraph.nodes.get(`table:${nameLower}`) ||
                    lineageGraph.nodes.get(`view:${nameLower}`) ||
                    lineageGraph.nodes.get(`cte:${nameLower}`);
         }

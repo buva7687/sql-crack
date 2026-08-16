@@ -163,6 +163,7 @@ export function getContextMenuScriptFragment(): string {
                             command: 'analyzeImpact',
                             type: impactType,
                             name: nodeName,
+                            nodeId: contextMenuTarget.id,
                             changeType: 'modify'
                         });
                         break;

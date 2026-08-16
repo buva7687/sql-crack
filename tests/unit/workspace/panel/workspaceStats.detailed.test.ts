@@ -129,6 +129,30 @@ describe('buildDetailedWorkspaceStats', () => {
         expect(result.parseErrorDetails[1].fileName).toBe('also_broken.sql');
     });
 
+    it('collects partial-parser warning details separately from fatal file errors', () => {
+        const graph = { stats: { ...baseStats, parseWarnings: 1 } } as any;
+        const index = {
+            definitionMap: new Map(),
+            referenceMap: new Map(),
+            files: new Map([
+                ['partial', {
+                    filePath: '/sql/partial.sql',
+                    parseWarnings: ['Reference parser failed; regex fallback used: Unexpected token'],
+                }],
+                ['good', { filePath: '/sql/good.sql' }],
+            ]),
+        } as any;
+
+        const result = buildDetailedWorkspaceStats(graph, index);
+
+        expect(result.parseErrorDetails).toEqual([]);
+        expect(result.parseWarningDetails).toEqual([{
+            filePath: '/sql/partial.sql',
+            fileName: 'partial.sql',
+            warnings: ['Reference parser failed; regex fallback used: Unexpected token'],
+        }]);
+    });
+
     it('deduplicates referencing files for missing definitions', () => {
         const graph = {
             stats: {

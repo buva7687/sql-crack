@@ -54,13 +54,20 @@ describe('IndexManager', () => {
         filePath,
         fileName: path.basename(filePath),
         lastModified: MOCK_MTIME,
-        contentHash: `hash-${filePath}`,
+        // Default mocked file bytes are empty. Keeping the synthetic analysis
+        // hash aligned with those bytes lets cache tests exercise real hash
+        // verification rather than relying on mtime shortcuts.
+        contentHash: hashSql(''),
         definitions: definitions.map(d => ({
             name: d.name || 'unknown',
             type: d.type || 'table',
             filePath: d.filePath || filePath,
             lineNumber: d.lineNumber || 1,
             schema: d.schema,
+            catalog: d.catalog,
+            nameQuoted: d.nameQuoted,
+            schemaQuoted: d.schemaQuoted,
+            catalogQuoted: d.catalogQuoted,
             columns: d.columns || []
         })) as SchemaDefinition[],
         references: references.map(r => ({
@@ -68,7 +75,11 @@ describe('IndexManager', () => {
             filePath: r.filePath || filePath,
             lineNumber: r.lineNumber || 1,
             referenceType: r.referenceType || 'select',
-            schema: r.schema
+            schema: r.schema,
+            catalog: r.catalog,
+            nameQuoted: r.nameQuoted,
+            schemaQuoted: r.schemaQuoted,
+            catalogQuoted: r.catalogQuoted,
         })) as TableReference[]
     });
 
@@ -333,6 +344,52 @@ describe('IndexManager', () => {
             expect(indexManager.findDefinition('deleted_table')).toBeUndefined();
             expect(indexManager.findDefinition('keep_table')).toBeDefined();
         });
+
+        it('preserves last-known-good dependencies on a transient read failure during a full rebuild', async () => {
+            const original = createMockAnalysis(
+                '/orders.sql',
+                [{ name: 'orders' }],
+                [{ tableName: 'customers' }]
+            );
+            mockScanner.analyzeWorkspace.mockResolvedValueOnce([original]);
+            await indexManager.buildIndex();
+
+            mockScanner.analyzeWorkspace.mockResolvedValueOnce([{
+                filePath: '/orders.sql',
+                fileName: 'orders.sql',
+                lastModified: MOCK_MTIME + 1,
+                contentHash: '',
+                definitions: [],
+                references: [],
+                parseError: 'Provider unavailable',
+                readError: 'Provider unavailable',
+            }]);
+            await indexManager.buildIndex();
+
+            expect(indexManager.findDefinition('orders')).toBeDefined();
+            expect(indexManager.findReferences('customers')).toHaveLength(1);
+            expect(indexManager.getIndex()?.files.get('/orders.sql')).toMatchObject({
+                parseError: 'Provider unavailable',
+                readError: 'Provider unavailable',
+            });
+        });
+
+        it('does not replace a complete index with partial results from a cancelled rebuild', async () => {
+            mockScanner.analyzeWorkspace.mockResolvedValueOnce([
+                createMockAnalysis('/orders.sql', [{ name: 'orders' }]),
+            ]);
+            const originalIndex = await indexManager.buildIndex();
+            const token = { isCancellationRequested: false };
+            mockScanner.analyzeWorkspace.mockImplementationOnce(async () => {
+                token.isCancellationRequested = true;
+                return [];
+            });
+
+            const result = await indexManager.buildIndex(undefined, token);
+
+            expect(result).toBe(originalIndex);
+            expect(indexManager.findDefinition('orders')).toBeDefined();
+        });
     });
 
     // =========================================================================
@@ -409,6 +466,56 @@ describe('IndexManager', () => {
 
             expect(def).toBeDefined();
             expect(def?.name).toBe('orders');
+        });
+
+        it('indexes quoted case and catalog-schema identities independently', async () => {
+            mockScanner.analyzeWorkspace.mockResolvedValue([
+                createMockAnalysis('/quoted.sql', [
+                    { name: 'Users', type: 'table', nameQuoted: true },
+                    { name: 'users', type: 'table', nameQuoted: true },
+                    {
+                        name: 'orders',
+                        type: 'table',
+                        catalog: 'db1',
+                        schema: 'sales',
+                        catalogQuoted: true,
+                        schemaQuoted: true,
+                        nameQuoted: true,
+                    },
+                    {
+                        name: 'orders',
+                        type: 'table',
+                        catalog: 'db1',
+                        schema: 'finance',
+                        catalogQuoted: true,
+                        schemaQuoted: true,
+                        nameQuoted: true,
+                    },
+                ])
+            ]);
+
+            await indexManager.buildIndex();
+
+            expect(indexManager.getDefinedTables()).toEqual(expect.arrayContaining([
+                'Users',
+                'users',
+                'db1.sales.orders',
+                'db1.finance.orders',
+            ]));
+            expect(indexManager.findDefinition('Users', undefined, { nameQuoted: true })?.name).toBe('Users');
+            expect(indexManager.findDefinition('users', undefined, { nameQuoted: true })?.name).toBe('users');
+            expect(indexManager.findDefinition('orders', 'sales', {
+                catalog: 'db1',
+                catalogQuoted: true,
+                schemaQuoted: true,
+                nameQuoted: true,
+            })?.schema).toBe('sales');
+            expect(indexManager.findDefinition('orders', 'finance', {
+                catalog: 'db1',
+                catalogQuoted: true,
+                schemaQuoted: true,
+                nameQuoted: true,
+            })?.schema).toBe('finance');
         });
 
         it('should return undefined when no index exists', () => {
@@ -631,6 +738,84 @@ describe('IndexManager', () => {
             expect(indexManager.findDefinition('old_table')).toBeUndefined();
         });
 
+        it('preserves the last-known-good analysis when an incremental read fails', async () => {
+            const original = createMockAnalysis(
+                '/test.sql',
+                [{ name: 'orders' }],
+                [{ tableName: 'customers' }]
+            );
+            mockScanner.analyzeWorkspace.mockResolvedValue([original]);
+            await indexManager.buildIndex();
+
+            mockScanner.analyzeFile.mockResolvedValue({
+                filePath: '/test.sql',
+                fileName: 'test.sql',
+                lastModified: MOCK_MTIME + 1,
+                contentHash: '',
+                definitions: [],
+                references: [],
+                parseError: 'EIO: transient read failure',
+                readError: 'EIO: transient read failure'
+            });
+
+            await indexManager.updateFile(vscode.Uri.file('/test.sql'));
+
+            expect(indexManager.findDefinition('orders')).toBeDefined();
+            expect(indexManager.findReferences('customers')).toHaveLength(1);
+            expect(indexManager.getIndex()?.fileHashes.get('/test.sql')).toBe(original.contentHash);
+            expect(indexManager.getIndex()?.files.get('/test.sql')).toMatchObject({
+                parseError: 'EIO: transient read failure',
+                readError: 'EIO: transient read failure'
+            });
+        });
+
+        it('removes an indexed file when analysis reports FileNotFound', async () => {
+            const original = createMockAnalysis('/test.sql', [{ name: 'orders' }]);
+            mockScanner.analyzeWorkspace.mockResolvedValue([original]);
+            await indexManager.buildIndex();
+            mockScanner.analyzeFile.mockResolvedValue({
+                filePath: '/test.sql',
+                fileName: 'test.sql',
+                lastModified: MOCK_MTIME + 1,
+                contentHash: '',
+                definitions: [],
+                references: [],
+                parseError: 'File not found',
+                readError: 'File not found',
+                readErrorCode: 'FileNotFound',
+            });
+
+            await indexManager.updateFile(vscode.Uri.file('/test.sql'));
+
+            expect(indexManager.findDefinition('orders')).toBeUndefined();
+            expect(indexManager.getIndex()?.files.has('/test.sql')).toBe(false);
+        });
+
+        it('clears a preserved read error after recovery even when content is unchanged', async () => {
+            const original = createMockAnalysis('/test.sql', [{ name: 'orders' }]);
+            mockScanner.analyzeWorkspace.mockResolvedValue([original]);
+            await indexManager.buildIndex();
+
+            mockScanner.analyzeFile.mockResolvedValueOnce({
+                filePath: '/test.sql',
+                fileName: 'test.sql',
+                lastModified: MOCK_MTIME + 1,
+                contentHash: '',
+                definitions: [],
+                references: [],
+                parseError: 'Permission denied',
+                readError: 'Permission denied'
+            });
+            await indexManager.updateFile(vscode.Uri.file('/test.sql'));
+
+            mockScanner.analyzeFile.mockResolvedValueOnce(original);
+            await indexManager.updateFile(vscode.Uri.file('/test.sql'));
+
+            expect(indexManager.findDefinition('orders')).toBeDefined();
+            expect(indexManager.getIndex()?.files.get('/test.sql')?.parseError).toBeUndefined();
+            expect(indexManager.getIndex()?.files.get('/test.sql')?.readError).toBeUndefined();
+        });
+
         it('should skip update if content hash unchanged', async () => {
             const analysis = createMockAnalysis('/test.sql', [{ name: 'users' }]);
 
@@ -797,16 +982,16 @@ describe('IndexManager', () => {
     describe('caching', () => {
         it('should load cached index on initialize', async () => {
             // Pre-populate cache. The identity must match computeCacheIdentity()
-            // for this manager (schema 4, no scope, MySQL dialect, no extra
+            // for this manager (schema 5, no scope, MySQL dialect, no extra
             // extensions) or the cache is rejected as belonging to a different
             // scope/dialect/config.
             const cachedIndex = {
-                version: 4, // Must match INDEX_VERSION
-                identity: JSON.stringify({ schema: 4, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                version: 5, // Must match INDEX_VERSION
+                identity: JSON.stringify({ schema: 5, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
                 lastUpdated: Date.now(),
                 fileCount: 1,
                 filesArray: [['/cached.sql', createMockAnalysis('/cached.sql', [{ name: 'cached_table' }])]],
-                fileHashesArray: [['/cached.sql', 'hash-123']],
+                fileHashesArray: [['/cached.sql', hashSql('')]],
                 definitionArray: [['cached_table', [{ name: 'cached_table', type: 'table', filePath: '/cached.sql', lineNumber: 1, columns: [] }]]],
                 referenceArray: []
             };
@@ -824,10 +1009,103 @@ describe('IndexManager', () => {
             expect(mockScanner.analyzeWorkspace).not.toHaveBeenCalled();
         });
 
+        it('reuses a cache containing an unchanged intentionally oversized file', async () => {
+            const oversizedSize = 15 * 1024 * 1024;
+            const oversizedAnalysis: FileAnalysis = {
+                ...createMockAnalysis('/large.sql'),
+                lastModified: MOCK_MTIME,
+                contentHash: '',
+                fileSize: oversizedSize,
+                parseError: 'File too large',
+                skippedReason: 'tooLarge',
+            };
+            await mockContext.workspaceState.update('sqlWorkspaceIndex', {
+                version: 5,
+                identity: JSON.stringify({ schema: 5, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                lastUpdated: Date.now(),
+                fileCount: 1,
+                filesArray: [['/large.sql', oversizedAnalysis]],
+                fileHashesArray: [['/large.sql', '']],
+                definitionArray: [],
+                referenceArray: [],
+            });
+            mockScanner.getFileCount.mockResolvedValue(1);
+            (vscode.workspace.fs.stat as jest.Mock).mockResolvedValue({
+                type: 1,
+                ctime: MOCK_MTIME,
+                mtime: MOCK_MTIME,
+                size: oversizedSize,
+            });
+
+            const result = await indexManager.initialize(0);
+
+            expect(result.cacheState).toBe('valid');
+            expect(mockScanner.analyzeWorkspace).not.toHaveBeenCalled();
+            expect(vscode.workspace.fs.readFile).not.toHaveBeenCalled();
+        });
+
+        it('validates a preserved read-error cache entry using its last-known-good hash', async () => {
+            const preservedAnalysis: FileAnalysis = {
+                ...createMockAnalysis('/preserved.sql', [{ name: 'orders' }]),
+                parseError: 'Provider unavailable',
+                readError: 'Provider unavailable',
+            };
+            await mockContext.workspaceState.update('sqlWorkspaceIndex', {
+                version: 5,
+                identity: JSON.stringify({ schema: 5, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                lastUpdated: Date.now(),
+                fileCount: 1,
+                filesArray: [['/preserved.sql', preservedAnalysis]],
+                fileHashesArray: [['/preserved.sql', preservedAnalysis.contentHash]],
+                definitionArray: [['orders', preservedAnalysis.definitions]],
+                referenceArray: [],
+            });
+            mockScanner.getFileCount.mockResolvedValue(1);
+            (vscode.workspace.fs.stat as jest.Mock).mockRejectedValueOnce(
+                Object.assign(new Error('Provider unavailable'), { code: 'Unavailable' })
+            );
+
+            const result = await indexManager.initialize(0);
+
+            expect(result.cacheState).toBe('valid');
+            expect(indexManager.findDefinition('orders')).toBeDefined();
+            expect(indexManager.getIndex()?.files.get('/preserved.sql')?.readError).toBe('Provider unavailable');
+            expect(mockScanner.analyzeWorkspace).not.toHaveBeenCalled();
+            expect(vscode.workspace.fs.readFile).not.toHaveBeenCalled();
+        });
+
+        it('rejects a preserved-error cache entry when the file is now missing', async () => {
+            const preservedAnalysis: FileAnalysis = {
+                ...createMockAnalysis('/deleted.sql', [{ name: 'orders' }]),
+                parseError: 'Provider unavailable',
+                readError: 'Provider unavailable',
+            };
+            await mockContext.workspaceState.update('sqlWorkspaceIndex', {
+                version: 5,
+                identity: JSON.stringify({ schema: 5, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                lastUpdated: Date.now(),
+                fileCount: 1,
+                filesArray: [['/deleted.sql', preservedAnalysis]],
+                fileHashesArray: [['/deleted.sql', preservedAnalysis.contentHash]],
+                definitionArray: [['orders', preservedAnalysis.definitions]],
+                referenceArray: [],
+            });
+            mockScanner.getFileCount.mockResolvedValue(1);
+            mockScanner.analyzeWorkspace.mockResolvedValue([]);
+            (vscode.workspace.fs.stat as jest.Mock).mockRejectedValueOnce(
+                Object.assign(new Error('File not found'), { code: 'FileNotFound' })
+            );
+
+            const result = await indexManager.initialize(0);
+
+            expect(result.cacheState).toBe('stale');
+            expect(indexManager.findDefinition('orders')).toBeUndefined();
+        });
+
         it('should ignore cache when a cached file changed while the extension was offline', async () => {
             const cachedIndex = {
-                version: 4,
-                identity: JSON.stringify({ schema: 4, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                version: 5,
+                identity: JSON.stringify({ schema: 5, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
                 lastUpdated: Date.now(),
                 fileCount: 1,
                 filesArray: [['/cached.sql', createMockAnalysis('/cached.sql', [{ name: 'cached_table' }])]],
@@ -859,10 +1137,52 @@ describe('IndexManager', () => {
             expect(indexManager.findDefinition('fresh_table')).toBeDefined();
         });
 
+        it('should ignore cache when content changed but the file mtime was preserved', async () => {
+            const cachedSql = 'CREATE TABLE cached_table (id INT);';
+            const currentSql = 'CREATE TABLE fresh_table (id INT);';
+            const cachedHash = hashSql(cachedSql);
+            const cachedAnalysis = {
+                ...createMockAnalysis('/cached.sql', [{ name: 'cached_table' }]),
+                contentHash: cachedHash
+            };
+            const cachedIndex = {
+                version: 5,
+                identity: JSON.stringify({ schema: 5, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                lastUpdated: Date.now(),
+                fileCount: 1,
+                filesArray: [['/cached.sql', cachedAnalysis]],
+                fileHashesArray: [['/cached.sql', cachedHash]],
+                definitionArray: [['cached_table', [{ name: 'cached_table', type: 'table', filePath: '/cached.sql', lineNumber: 1, columns: [] }]]],
+                referenceArray: []
+            };
+
+            await mockContext.workspaceState.update('sqlWorkspaceIndex', cachedIndex);
+            mockScanner.getFileCount.mockResolvedValue(1);
+            mockScanner.analyzeWorkspace.mockResolvedValue([
+                createMockAnalysis('/cached.sql', [{ name: 'fresh_table' }])
+            ]);
+            (vscode.workspace.fs.stat as jest.Mock).mockResolvedValue({
+                type: 1,
+                ctime: MOCK_MTIME,
+                mtime: MOCK_MTIME,
+                size: currentSql.length
+            });
+            (vscode.workspace.fs.readFile as jest.Mock).mockResolvedValue(
+                new TextEncoder().encode(currentSql)
+            );
+
+            const result = await indexManager.initialize();
+
+            expect(result.cacheState).toBe('stale');
+            expect(mockScanner.analyzeWorkspace).toHaveBeenCalled();
+            expect(indexManager.findDefinition('cached_table')).toBeUndefined();
+            expect(indexManager.findDefinition('fresh_table')).toBeDefined();
+        });
+
         it('should ignore cache when the workspace file count changed while offline', async () => {
             const cachedIndex = {
-                version: 4,
-                identity: JSON.stringify({ schema: 4, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                version: 5,
+                identity: JSON.stringify({ schema: 5, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
                 lastUpdated: Date.now(),
                 fileCount: 1,
                 filesArray: [['/cached.sql', createMockAnalysis('/cached.sql', [{ name: 'cached_table' }])]],
@@ -893,8 +1213,8 @@ describe('IndexManager', () => {
                 contentHash
             };
             const cachedIndex = {
-                version: 4,
-                identity: JSON.stringify({ schema: 4, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                version: 5,
+                identity: JSON.stringify({ schema: 5, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
                 lastUpdated: Date.now(),
                 fileCount: 1,
                 filesArray: [['/cached.sql', cachedAnalysis]],
@@ -918,6 +1238,42 @@ describe('IndexManager', () => {
             expect(result.cacheState).toBe('valid');
             expect(mockScanner.analyzeWorkspace).not.toHaveBeenCalled();
             expect(indexManager.findDefinition('cached_table')).toBeDefined();
+        });
+
+        it('bounds concurrent content verification while validating a cache', async () => {
+            const fileCount = 9;
+            const emptyHash = hashSql('');
+            const filesArray: [string, FileAnalysis][] = Array.from({ length: fileCount }, (_, index) => {
+                const filePath = `/cached-${index}.sql`;
+                return [filePath, createMockAnalysis(filePath)];
+            });
+            await mockContext.workspaceState.update('sqlWorkspaceIndex', {
+                version: 5,
+                identity: JSON.stringify({ schema: 5, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                lastUpdated: Date.now(),
+                fileCount,
+                filesArray,
+                fileHashesArray: filesArray.map(([filePath]) => [filePath, emptyHash]),
+                definitionArray: [],
+                referenceArray: []
+            });
+            mockScanner.getFileCount.mockResolvedValue(fileCount);
+
+            let activeReads = 0;
+            let peakReads = 0;
+            (vscode.workspace.fs.readFile as jest.Mock).mockImplementation(async () => {
+                activeReads++;
+                peakReads = Math.max(peakReads, activeReads);
+                await new Promise<void>(resolve => setImmediate(resolve));
+                activeReads--;
+                return new Uint8Array();
+            });
+
+            const result = await indexManager.initialize(0);
+
+            expect(result.cacheState).toBe('valid');
+            expect(vscode.workspace.fs.readFile).toHaveBeenCalledTimes(fileCount);
+            expect(peakReads).toBeLessThanOrEqual(4);
         });
 
         it('should ignore cache with wrong version', async () => {
@@ -945,8 +1301,8 @@ describe('IndexManager', () => {
             // Same schema version but an identity that does not match this manager
             // (e.g. a cache built for a different dialect). It must not be reused.
             const foreignCache = {
-                version: 4,
-                identity: JSON.stringify({ schema: 4, scope: '<workspace>', dialect: 'PostgreSQL', extensions: [] }),
+                version: 5,
+                identity: JSON.stringify({ schema: 5, scope: '<workspace>', dialect: 'PostgreSQL', extensions: [] }),
                 lastUpdated: Date.now(),
                 fileCount: 1,
                 filesArray: [],
@@ -1046,7 +1402,7 @@ describe('IndexManager', () => {
             // Caches persisted before identity tracking have no identity field and
             // must be rebuilt rather than served against an unknown scope/dialect.
             const legacyCache = {
-                version: 4,
+                version: 5,
                 lastUpdated: Date.now(),
                 fileCount: 1,
                 filesArray: [],
@@ -1066,7 +1422,7 @@ describe('IndexManager', () => {
 
         it('should ignore expired cache', async () => {
             const expiredCache = {
-                version: 4,
+                version: 5,
                 lastUpdated: Date.now() - (25 * 60 * 60 * 1000), // 25 hours ago (default TTL is 24h)
                 fileCount: 1,
                 filesArray: [],
@@ -1091,7 +1447,7 @@ describe('IndexManager', () => {
             });
 
             const cache = {
-                version: 4,
+                version: 5,
                 lastUpdated: Date.now(),
                 fileCount: 1,
                 filesArray: [],
@@ -1130,12 +1486,12 @@ describe('IndexManager', () => {
 
     describe('cache state distinction', () => {
         const validCache = () => ({
-            version: 4,
-            identity: JSON.stringify({ schema: 4, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+            version: 5,
+            identity: JSON.stringify({ schema: 5, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
             lastUpdated: Date.now(),
             fileCount: 1,
             filesArray: [['/cached.sql', createMockAnalysis('/cached.sql', [{ name: 'cached_table' }])]],
-            fileHashesArray: [['/cached.sql', 'hash-1']],
+            fileHashesArray: [['/cached.sql', hashSql('')]],
             definitionArray: [['cached_table', [{ name: 'cached_table', type: 'table', filePath: '/cached.sql', lineNumber: 1, columns: [] }]]],
             referenceArray: []
         });
@@ -1173,7 +1529,7 @@ describe('IndexManager', () => {
         it('reports identity-mismatch for a different dialect/scope/config', async () => {
             await mockContext.workspaceState.update('sqlWorkspaceIndex', {
                 ...validCache(),
-                identity: JSON.stringify({ schema: 4, scope: '<workspace>', dialect: 'PostgreSQL', extensions: [] }),
+                identity: JSON.stringify({ schema: 5, scope: '<workspace>', dialect: 'PostgreSQL', extensions: [] }),
             });
             mockScanner.getFileCount.mockResolvedValue(100);
 
@@ -1210,8 +1566,8 @@ describe('IndexManager', () => {
         it('persists an oversized marker and reports oversized on next load', async () => {
             // Manually store an oversized marker (as persistIndex would on overflow).
             await mockContext.workspaceState.update('sqlWorkspaceIndex', {
-                version: 4,
-                identity: JSON.stringify({ schema: 4, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                version: 5,
+                identity: JSON.stringify({ schema: 5, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
                 oversized: true,
                 lastUpdated: Date.now(),
                 fileCount: 9999,
@@ -1232,8 +1588,8 @@ describe('IndexManager', () => {
 
         it('reports an expired oversized marker as oversized rather than stale', async () => {
             await mockContext.workspaceState.update('sqlWorkspaceIndex', {
-                version: 4,
-                identity: JSON.stringify({ schema: 4, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                version: 5,
+                identity: JSON.stringify({ schema: 5, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
                 oversized: true,
                 lastUpdated: Date.now() - (25 * 60 * 60 * 1000),
                 fileCount: 9999,
@@ -1356,6 +1712,47 @@ describe('IndexManager', () => {
             expect(indexManager.getChangesSinceIndex()).toBe(1);
 
             await flushWatcherDebounce();
+            expect(indexManager.getChangesSinceIndex()).toBe(0);
+        });
+
+        it('preserves indexed dependencies when the watcher preflight stat has a transient error', async () => {
+            const watcher = __getFileSystemWatcher();
+            (vscode.workspace.fs.stat as jest.Mock).mockRejectedValueOnce(
+                Object.assign(new Error('Provider unavailable'), { code: 'Unavailable' })
+            );
+            mockScanner.analyzeFile.mockResolvedValue({
+                filePath: '/test.sql',
+                fileName: 'test.sql',
+                lastModified: MOCK_MTIME + 1,
+                contentHash: '',
+                definitions: [],
+                references: [],
+                parseError: 'Provider unavailable',
+                readError: 'Provider unavailable'
+            });
+
+            watcher?.__triggerChange(vscode.Uri.file('/test.sql'));
+            await flushWatcherDebounce();
+
+            expect(indexManager.findDefinition('users')).toBeDefined();
+            expect(indexManager.getIndex()?.files.get('/test.sql')).toMatchObject({
+                parseError: 'Provider unavailable',
+                readError: 'Provider unavailable'
+            });
+            expect(indexManager.getChangesSinceIndex()).toBe(0);
+        });
+
+        it('removes a queued file only when preflight stat explicitly reports it missing', async () => {
+            const watcher = __getFileSystemWatcher();
+            (vscode.workspace.fs.stat as jest.Mock).mockRejectedValueOnce(
+                Object.assign(new Error('File not found'), { code: 'FileNotFound' })
+            );
+
+            watcher?.__triggerChange(vscode.Uri.file('/test.sql'));
+            await flushWatcherDebounce();
+
+            expect(indexManager.findDefinition('users')).toBeUndefined();
+            expect(mockScanner.analyzeFile).not.toHaveBeenCalled();
             expect(indexManager.getChangesSinceIndex()).toBe(0);
         });
 

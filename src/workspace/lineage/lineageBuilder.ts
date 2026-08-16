@@ -5,10 +5,11 @@ import { logger } from '../../logger';
 import {
     WorkspaceIndex,
     SchemaDefinition,
-    FileAnalysis
+    FileAnalysis,
+    TableReference
 } from '../types';
 import { ColumnInfo } from '../extraction/types';
-import { getDisplayName, getQualifiedKey, parseQualifiedKey } from '../identifiers';
+import { getColumnKey, getDisplayName, getQualifiedKey, parseQualifiedKey } from '../identifiers';
 import {
     LineageNode,
     LineageEdge,
@@ -24,6 +25,14 @@ type NodeSqlParserCtor = new () => NodeSqlParserInstance;
 
 let cachedSqlParserCtor: NodeSqlParserCtor | null | undefined;
 const MAX_PRELOAD_CONCURRENCY = 20;
+
+function getDefinitionKey(definition: SchemaDefinition): string {
+    return getQualifiedKey(definition.name, definition.schema, definition);
+}
+
+function getReferenceKey(reference: TableReference): string {
+    return getQualifiedKey(reference.tableName, reference.schema, reference);
+}
 
 function skipQuotedSqlToken(sql: string, startIndex: number): number {
     const quote = sql[startIndex];
@@ -219,7 +228,6 @@ export class LineageBuilder implements LineageGraph {
     private columnEdgeIds = new Set<string>();
     private incomingEdgesByNodeId: Map<string, LineageEdge[]> = new Map();
     private outgoingEdgesByNodeId: Map<string, LineageEdge[]> = new Map();
-    private nodeIdsByNormalizedName: Map<string, string[]> = new Map();
     private options: { includeExternal: boolean; includeColumns: boolean };
 
     constructor(options = { includeExternal: true, includeColumns: true }) {
@@ -246,13 +254,12 @@ export class LineageBuilder implements LineageGraph {
         this.columnEdgeIds.clear();
         this.incomingEdgesByNodeId.clear();
         this.outgoingEdgesByNodeId.clear();
-        this.nodeIdsByNormalizedName.clear();
 
         // Add all table/view definitions as nodes
         const seenNodes = new Set<string>();
         for (const defs of index.definitionMap.values()) {
             for (const def of defs) {
-                const tableKey = getQualifiedKey(def.name, def.schema);
+                const tableKey = getDefinitionKey(def);
                 const nodeId = this.getTableNodeId(def.type, tableKey);
                 if (seenNodes.has(nodeId)) {continue;}
                 seenNodes.add(nodeId);
@@ -316,14 +323,13 @@ export class LineageBuilder implements LineageGraph {
             };
             
             this.nodes.set(nodeId, cteNode);
-            this.registerNodeName(nodeId, cteNode.name);
         }
 
         // Add column nodes if enabled
         if (this.options.includeColumns) {
             for (const [key, defs] of index.definitionMap.entries()) {
                 for (const def of defs) {
-                    const tableKey = getQualifiedKey(def.name, def.schema);
+                    const tableKey = getDefinitionKey(def);
                     const nodeId = this.getTableNodeId(def.type, tableKey);
                     if (!this.nodes.has(nodeId)) {continue;}
                     this.addColumnNodes(tableKey, def.columns, def.type);
@@ -419,9 +425,9 @@ export class LineageBuilder implements LineageGraph {
      * Add table/view definition as node
      */
     addDefinitionNode(def: SchemaDefinition): LineageNode {
-        const tableKey = getQualifiedKey(def.name, def.schema);
+        const tableKey = getDefinitionKey(def);
         const nodeId = this.getTableNodeId(def.type, tableKey);
-        const schemaPrefix = def.schema ? `${def.schema}.` : '';
+        const fullName = getDisplayName(def.name, def.schema, def.catalog);
         const existing = this.nodes.get(nodeId);
         if (existing) {
             const existingFiles = new Set<string>(existing.metadata.definitionFiles || []);
@@ -436,12 +442,13 @@ export class LineageBuilder implements LineageGraph {
         const node: LineageNode = {
             id: nodeId,
             type: def.type,
-            name: getDisplayName(def.name, def.schema),
+            name: fullName,
             filePath: def.filePath,
             lineNumber: def.lineNumber,
             metadata: {
                 schema: def.schema,
-                fullName: `${schemaPrefix}${def.name}`,
+                catalog: def.catalog,
+                fullName,
                 columnCount: def.columns.length,
                 definitionFiles: [def.filePath],
                 definitionLocations: [{ filePath: def.filePath, lineNumber: def.lineNumber }]
@@ -449,7 +456,6 @@ export class LineageBuilder implements LineageGraph {
         };
 
         this.nodes.set(nodeId, node);
-        this.registerNodeName(nodeId, node.name);
         return node;
     }
 
@@ -464,7 +470,7 @@ export class LineageBuilder implements LineageGraph {
         }
 
         for (const column of columns) {
-            const columnId = this.getColumnNodeId(tableKey, column.name);
+            const columnId = this.getColumnNodeId(tableKey, column.name, column);
             const existingColumn = this.nodes.get(columnId);
             if (existingColumn) {
                 const existingFiles = new Set<string>(existingColumn.metadata.definitionFiles || []);
@@ -495,7 +501,6 @@ export class LineageBuilder implements LineageGraph {
             };
 
             this.nodes.set(columnId, columnNode);
-            this.registerNodeName(columnId, columnNode.name);
 
             // Add edge from table to column
             this.addEdge({
@@ -524,7 +529,7 @@ export class LineageBuilder implements LineageGraph {
         const statementRefs = new Map<number, { inputs: Set<string>; outputs: Set<string> }>();
 
         for (const ref of analysis.references) {
-            const tableKey = getQualifiedKey(ref.tableName, ref.schema);
+            const tableKey = getReferenceKey(ref);
 
             // Skip CTE references - they are not real table references
             if (ref.referenceType === 'cte') {
@@ -543,8 +548,8 @@ export class LineageBuilder implements LineageGraph {
                 stmtBucket.inputs.add(tableKey);
             }
 
-            // INSERT, UPDATE, DELETE targets are data destinations (outputs)
-            if (ref.referenceType === 'insert' || ref.referenceType === 'update' || ref.referenceType === 'delete') {
+            // Data-modification targets are destinations (outputs).
+            if (ref.referenceType === 'insert' || ref.referenceType === 'update' || ref.referenceType === 'delete' || ref.referenceType === 'merge') {
                 stmtBucket.outputs.add(tableKey);
             }
         }
@@ -564,7 +569,7 @@ export class LineageBuilder implements LineageGraph {
         }
 
         for (const def of analysis.definitions) {
-            const tableKey = getQualifiedKey(def.name, def.schema);
+            const tableKey = getDefinitionKey(def);
             const isView = def.type === 'view';
             const isCtas = def.type === 'table'
                 && def.sql
@@ -707,6 +712,8 @@ export class LineageBuilder implements LineageGraph {
                         sourceColumnName: inputCol.columnName,
                         targetTableId,
                         targetColumnName: transform.outputColumn,
+                        sourceColumnId: this.resolveColumnNodeId(sourceTableId, inputCol.columnName),
+                        targetColumnId: this.resolveColumnNodeId(targetTableId, transform.outputColumn),
                         transformationType: this.mapTransformationType(transform.operation),
                         expression: transform.expression,
                         filePath,
@@ -731,7 +738,22 @@ export class LineageBuilder implements LineageGraph {
     private resolveTableId(tableName: string | undefined, filePath: string): string | null {
         if (!tableName) {return null;}
 
-        const normalizedName = tableName.toLowerCase();
+        const exactName = tableName.trim();
+        const normalizedName = exactName.toLowerCase();
+
+        for (const type of ['table', 'view', 'cte', 'external']) {
+            const exactId = `${type}:${exactName}`;
+            if (this.nodes.has(exactId)) {
+                return exactId;
+            }
+        }
+
+        // Mixed-case canonical keys represent delimited identifiers. If their
+        // exact node is absent, folding them would attach lineage to a different
+        // physical relation (for example PostgreSQL users vs "Users").
+        if (exactName !== normalizedName) {
+            return null;
+        }
 
         // Try with table: prefix (most common)
         const tableId = `table:${normalizedName}`;
@@ -757,17 +779,6 @@ export class LineageBuilder implements LineageGraph {
             return externalId;
         }
 
-        // Try to find by node name (without prefix)
-        const matchingNodeIds = this.nodeIdsByNormalizedName.get(normalizedName);
-        if (matchingNodeIds) {
-            for (const nodeId of matchingNodeIds) {
-                const node = this.nodes.get(nodeId);
-                if (node && node.name.toLowerCase() === normalizedName) {
-                    return nodeId;
-                }
-            }
-        }
-
         return null;
     }
 
@@ -784,12 +795,12 @@ export class LineageBuilder implements LineageGraph {
         // 1. Check statement type from QueryAnalysis
         const statementType = query.statementType;
 
-        // 2. For INSERT/UPDATE/DELETE, find the target from references
-        if (statementType === 'insert' || statementType === 'update' || statementType === 'delete') {
+        // 2. For data-modification statements, find the target from references.
+        if (statementType === 'insert' || statementType === 'update' || statementType === 'delete' || statementType === 'merge') {
             for (const ref of analysis.references) {
                 if (ref.referenceType === statementType &&
                     (ref.statementIndex === queryIndex || ref.statementIndex === undefined)) {
-                    const tableKey = getQualifiedKey(ref.tableName, ref.schema);
+                    const tableKey = getReferenceKey(ref);
                     return this.resolveTableId(tableKey, filePath);
                 }
             }
@@ -816,9 +827,10 @@ export class LineageBuilder implements LineageGraph {
         // 6. Try to find target from statement-level references
         for (const ref of analysis.references) {
             if ((ref.referenceType === 'insert' ||
-                 ref.referenceType === 'update') &&
+                 ref.referenceType === 'update' ||
+                 ref.referenceType === 'merge') &&
                 (ref.statementIndex === queryIndex || ref.statementIndex === undefined)) {
-                const tableKey = getQualifiedKey(ref.tableName, ref.schema);
+                const tableKey = getReferenceKey(ref);
                 const resolved = this.resolveTableId(tableKey, filePath);
                 if (resolved) {return resolved;}
             }
@@ -827,7 +839,7 @@ export class LineageBuilder implements LineageGraph {
         // 7. Fallback: If this file has exactly one definition and this is a data modification query
         if (analysis.definitions.length === 1) {
             const def = analysis.definitions[0];
-            const tableKey = getQualifiedKey(def.name, def.schema);
+            const tableKey = getDefinitionKey(def);
             const resolved = this.resolveTableId(tableKey, filePath);
             if (resolved) {return resolved;}
         }
@@ -867,7 +879,7 @@ export class LineageBuilder implements LineageGraph {
         }
         if (matchingDefs.length === 1) {
             const onlyDef = matchingDefs[0];
-            return this.resolveTableId(getQualifiedKey(onlyDef.name, onlyDef.schema), filePath);
+            return this.resolveTableId(getDefinitionKey(onlyDef), filePath);
         }
 
         const queryLineNumber = typeof query?.lineNumber === 'number' ? query.lineNumber : undefined;
@@ -896,7 +908,7 @@ export class LineageBuilder implements LineageGraph {
         if (!bestDef) {
             return null;
         }
-        return this.resolveTableId(getQualifiedKey(bestDef.name, bestDef.schema), filePath);
+        return this.resolveTableId(getDefinitionKey(bestDef), filePath);
     }
 
     /**
@@ -927,35 +939,21 @@ export class LineageBuilder implements LineageGraph {
      * Resolve external references (tables not defined in workspace)
      */
     addExternalNode(tableKey: string): LineageNode {
-        const normalizedKey = getQualifiedKey(tableKey);
+        const normalizedKey = tableKey;
         const parsed = parseQualifiedKey(normalizedKey);
         const nodeId = this.getTableNodeId('external', normalizedKey);
 
         const node: LineageNode = {
             id: nodeId,
             type: 'external',
-            name: getDisplayName(parsed.name, parsed.schema),
+            name: getDisplayName(parsed.name, parsed.schema, parsed.catalog),
             metadata: {
                 isExternal: true
             }
         };
 
         this.nodes.set(nodeId, node);
-        this.registerNodeName(nodeId, node.name);
         return node;
-    }
-
-    private registerNodeName(nodeId: string, nodeName: string): void {
-        const normalizedName = nodeName.toLowerCase();
-        const existing = this.nodeIdsByNormalizedName.get(normalizedName);
-        if (existing) {
-            if (!existing.includes(nodeId)) {
-                existing.push(nodeId);
-            }
-            return;
-        }
-
-        this.nodeIdsByNormalizedName.set(normalizedName, [nodeId]);
     }
 
     private addEdge(edge: LineageEdge): void {
@@ -1090,7 +1088,8 @@ export class LineageBuilder implements LineageGraph {
      * Get column lineage path
      */
     getColumnLineage(tableId: string, columnName: string): LineagePath[] {
-        const columnId = this.getColumnNodeId(tableId, columnName);
+        const columnId = this.resolveColumnNodeId(tableId, columnName)
+            || this.getColumnNodeId(tableId.replace(/^(?:table|view|external|cte):/, ''), columnName);
         const columnNode = this.nodes.get(columnId);
 
         if (!columnNode) {return [];}
@@ -1129,8 +1128,33 @@ export class LineageBuilder implements LineageGraph {
     /**
      * Generate unique column node ID
      */
-    private getColumnNodeId(tableKey: string, columnName: string): string {
-        return `column:${tableKey}.${columnName.toLowerCase()}`;
+    private getColumnNodeId(tableKey: string, columnName: string, qualification: ColumnInfo = {
+        name: columnName,
+        dataType: 'unknown',
+        nullable: true,
+        primaryKey: false,
+    }): string {
+        return `column:${getColumnKey(tableKey, columnName, qualification)}`;
+    }
+
+    private resolveColumnNodeId(tableId: string, columnName: string): string | undefined {
+        const relationKey = tableId.replace(/^(?:table|view|external|cte):/, '');
+        const parentIds = new Set(
+            tableId.includes(':')
+                ? [tableId]
+                : ['table', 'view', 'external', 'cte'].map(type => `${type}:${relationKey}`)
+        );
+        const exact = [...this.nodes.values()].find(node =>
+            node.type === 'column' && parentIds.has(node.parentId || '') && node.name === columnName
+        );
+        if (exact) {return exact.id;}
+
+        const folded = [...this.nodes.values()].filter(node =>
+            node.type === 'column'
+            && parentIds.has(node.parentId || '')
+            && node.name.toLowerCase() === columnName.toLowerCase()
+        );
+        return folded.length === 1 ? folded[0].id : undefined;
     }
 
     private resolveTableNodeId(tableKey: string): string | null {
@@ -1143,8 +1167,8 @@ export class LineageBuilder implements LineageGraph {
         const candidateTypes = ['table', 'view', 'external'];
 
         const parsed = parseQualifiedKey(tableKey);
-        const keysToTry = parsed.schema
-            ? [tableKey, getQualifiedKey(parsed.name)]
+        const keysToTry = parsed.schema || parsed.catalog
+            ? [tableKey, parsed.name]
             : [tableKey];
 
         for (const key of keysToTry) {
