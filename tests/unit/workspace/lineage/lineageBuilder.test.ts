@@ -677,6 +677,56 @@ describe('LineageBuilder', () => {
 
             expect(targetId).toBeNull();
         });
+
+        it('preserves BigQuery case in the SELECT INTO target fallback', () => {
+            const target = makeDef('MixedTarget', 'table', [], {
+                filePath: 'bigquery.sql',
+                identifierCaseFolding: 'preserve',
+                quotedIdentifiersCaseSensitive: false,
+            });
+            const unrelated = makeDef('OtherTarget', 'table', [], {
+                filePath: 'bigquery.sql',
+                identifierCaseFolding: 'preserve',
+                quotedIdentifiersCaseSensitive: false,
+            });
+            const analysis = makeFileAnalysis('bigquery.sql', [target, unrelated], []);
+            const builder = new LineageBuilder();
+            builder.buildFromIndex(makeIndex([target, unrelated]));
+
+            const targetId = (builder as any).resolveTargetTableId(
+                { statementType: 'select', sql: 'SELECT 1 INTO MixedTarget' },
+                0,
+                analysis,
+                'bigquery.sql'
+            );
+
+            expect(targetId).toBe('table:MixedTarget');
+        });
+
+        it('applies Snowflake upper folding in the INSERT target fallback', () => {
+            const target = makeDef('MixedTarget', 'table', [], {
+                filePath: 'snowflake.sql',
+                identifierCaseFolding: 'upper',
+                quotedIdentifiersCaseSensitive: true,
+            });
+            const unrelated = makeDef('OtherTarget', 'table', [], {
+                filePath: 'snowflake.sql',
+                identifierCaseFolding: 'upper',
+                quotedIdentifiersCaseSensitive: true,
+            });
+            const analysis = makeFileAnalysis('snowflake.sql', [target, unrelated], []);
+            const builder = new LineageBuilder();
+            builder.buildFromIndex(makeIndex([target, unrelated]));
+
+            const targetId = (builder as any).resolveTargetTableId(
+                { statementType: 'insert', sql: 'INSERT INTO MixedTarget SELECT 1' },
+                0,
+                analysis,
+                'snowflake.sql'
+            );
+
+            expect(targetId).toBe('table:MIXEDTARGET');
+        });
     });
 
     describe('extractCTEsWithRegex', () => {

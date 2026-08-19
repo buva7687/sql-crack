@@ -846,19 +846,25 @@ export class LineageBuilder implements LineageGraph {
 
         // 8. Fallback: Check for SELECT INTO or INSERT patterns in SQL
         if (query.sql) {
-            const sql = maskSqlCommentsPreservingPositions(query.sql).toUpperCase();
+            const sql = maskSqlCommentsPreservingPositions(query.sql);
+            const identitySource = analysis.definitions.find(def => def.identifierCaseFolding)
+                || analysis.references.find(ref => ref.identifierCaseFolding);
+            const identifierSemantics = {
+                identifierCaseFolding: identitySource?.identifierCaseFolding,
+                quotedIdentifiersCaseSensitive: identitySource?.quotedIdentifiersCaseSensitive,
+            };
 
             // SELECT INTO pattern
-            const intoMatch = sql.match(/INTO\s+(?:TEMP(?:ORARY)?(?:\s+TABLE)?\s+)?(?:(\w+)\.)?([A-Z_][A-Z0-9_$#]*)/);
+            const intoMatch = sql.match(/INTO\s+(?:TEMP(?:ORARY)?(?:\s+TABLE)?\s+)?(?:(\w+)\.)?([A-Z_][A-Z0-9_$#]*)/i);
             if (intoMatch) {
-                const tableKey = getQualifiedKey(intoMatch[2], intoMatch[1]);
+                const tableKey = getQualifiedKey(intoMatch[2], intoMatch[1], identifierSemantics);
                 return this.resolveTableId(tableKey, filePath);
             }
 
             // INSERT INTO pattern
-            const insertMatch = sql.match(/INSERT\s+INTO\s+(?:(\w+)\.)?([A-Z_][A-Z0-9_$#]*)/);
+            const insertMatch = sql.match(/INSERT\s+INTO\s+(?:(\w+)\.)?([A-Z_][A-Z0-9_$#]*)/i);
             if (insertMatch) {
-                const tableKey = getQualifiedKey(insertMatch[2], insertMatch[1]);
+                const tableKey = getQualifiedKey(insertMatch[2], insertMatch[1], identifierSemantics);
                 return this.resolveTableId(tableKey, filePath);
             }
         }
