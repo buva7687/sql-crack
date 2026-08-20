@@ -58,6 +58,20 @@ function skipQuotedSqlToken(sql: string, startIndex: number): number {
     return sql.length;
 }
 
+function skipDollarQuotedSqlToken(sql: string, startIndex: number): number | null {
+    if (sql[startIndex] !== '$') {
+        return null;
+    }
+
+    const delimiter = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(startIndex))?.[0];
+    if (!delimiter) {
+        return null;
+    }
+
+    const closingIndex = sql.indexOf(delimiter, startIndex + delimiter.length);
+    return closingIndex === -1 ? sql.length : closingIndex + delimiter.length;
+}
+
 /**
  * Replace comment contents with spaces while retaining every newline and string
  * index. Regex consumers can then safely map matches back to the original SQL.
@@ -76,6 +90,14 @@ function maskSqlCommentsPreservingPositions(sql: string): string {
 
     while (index < sql.length) {
         const char = sql[index];
+
+        const dollarQuotedEnd = skipDollarQuotedSqlToken(sql, index);
+        if (dollarQuotedEnd !== null) {
+            const tokenStart = index;
+            index = dollarQuotedEnd;
+            maskRange(tokenStart, index);
+            continue;
+        }
 
         if (char === "'" || char === '"' || char === '`' || char === '[') {
             const tokenStart = index;
@@ -139,6 +161,11 @@ function findMatchingSqlParenthesis(sql: string, openingIndex: number): number {
 
     for (let index = openingIndex; index < sql.length; index++) {
         const char = sql[index];
+        const dollarQuotedEnd = skipDollarQuotedSqlToken(sql, index);
+        if (dollarQuotedEnd !== null) {
+            index = dollarQuotedEnd - 1;
+            continue;
+        }
         if (char === "'" || char === '"' || char === '`' || char === '[') {
             index = skipQuotedSqlToken(sql, index) - 1;
             continue;

@@ -102,6 +102,21 @@ export interface StripSqlCommentsOptions {
     preserveHashTempIdentifiers?: boolean;
 }
 
+/** Return the exclusive end of a PostgreSQL dollar-quoted token at `offset`. */
+function getDollarQuotedTokenEnd(sql: string, offset: number): number | null {
+    if (sql[offset] !== '$') {
+        return null;
+    }
+
+    const delimiter = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(offset))?.[0];
+    if (!delimiter) {
+        return null;
+    }
+
+    const closingOffset = sql.indexOf(delimiter, offset + delimiter.length);
+    return closingOffset === -1 ? sql.length : closingOffset + delimiter.length;
+}
+
 /**
  * Mask SQL comments with spaces while preserving every character position and
  * newline. Quoted strings and identifiers remain unchanged, so regex matches in
@@ -125,6 +140,12 @@ export function maskSqlCommentsPreservingPositions(
 
     while (i < len) {
         const ch = sql[i];
+
+        const dollarQuotedEnd = getDollarQuotedTokenEnd(sql, i);
+        if (dollarQuotedEnd !== null) {
+            i = dollarQuotedEnd;
+            continue;
+        }
 
         if (ch === "'" || ch === '"' || ch === '`' || ch === '[') {
             const closingQuote = ch === '[' ? ']' : ch;
@@ -203,6 +224,15 @@ export function stripSqlComments(sql: string, options: StripSqlCommentsOptions =
 
     while (i < len) {
         const ch = sql[i];
+
+        // PostgreSQL dollar-quoted string: pass through verbatim. Comment-like
+        // text inside the token is literal content, not SQL comments.
+        const dollarQuotedEnd = getDollarQuotedTokenEnd(sql, i);
+        if (dollarQuotedEnd !== null) {
+            out += sql.slice(i, dollarQuotedEnd);
+            i = dollarQuotedEnd;
+            continue;
+        }
 
         // Single-quoted string: pass through verbatim ('' escape)
         if (ch === "'") {

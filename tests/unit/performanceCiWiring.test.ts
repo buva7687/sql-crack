@@ -65,4 +65,21 @@ describe('performance CI wiring', () => {
         expect(marketplacePublishIndex).toBeGreaterThan(githubReleaseIndex);
         expect(openVsxPublishIndex).toBeGreaterThan(githubReleaseIndex);
     });
+
+    it('supports targeted publication retries from the exact existing tag', () => {
+        expect(releaseWorkflowSource).toContain('release_target:');
+        expect(releaseWorkflowSource).toContain('- github-release');
+        expect(releaseWorkflowSource).toContain('- vscode-marketplace');
+        expect(releaseWorkflowSource).toContain('- open-vsx');
+        expect(releaseWorkflowSource).toContain('git rev-parse "refs/tags/v$VERSION"');
+        expect(releaseWorkflowSource).toContain('REQUESTED_VERSION: ${{ github.event.inputs.version }}');
+        expect(releaseWorkflowSource).not.toContain('REQUESTED_VERSION="${{ github.event.inputs.version }}"');
+        expect(releaseWorkflowSource).toContain('Invalid release version: $VERSION');
+        expect(releaseWorkflowSource).toContain('checkout_ref=refs/tags/v$VERSION');
+        expect(releaseWorkflowSource).toContain('ref: ${{ needs.check.outputs.checkout_ref }}');
+        expect(releaseWorkflowSource).toContain('does not match requested release $VERSION');
+        expect(releaseWorkflowSource).toContain("env.RELEASE_MODE == 'github-release'");
+        expect(releaseWorkflowSource).toContain("env.RELEASE_MODE == 'vscode-marketplace'");
+        expect(releaseWorkflowSource).toContain("env.RELEASE_MODE == 'open-vsx'");
+    });
 });

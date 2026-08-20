@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.2] - 2026-08-16
+## [0.9.2] - 2026-08-19
 
 ### Fixed
 
@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Deferred query hydration**: Concurrent deferred-tab parses use independently scoped requests, cancellation sentinels are never cached as query failures, and token-owned loading state prevents stale hydrations from hiding an active loader.
 - **SQL source and refresh fidelity**: Parser compatibility rewrites remain internal so preview, copy, pin, and compare use the original SQL. Manual and automatic refresh preserve the originating editor selection, selection offsets track document edits before or inside the range, and pinned panels refresh their own immutable snapshot instead of targeting the main panel.
 - **SQL comment and statement parsing**: PostgreSQL nested block comments no longer create phantom statements. MySQL `#comment` text without whitespace is treated as a comment while contextual T-SQL/Redshift `#temp` and `##temp` table identifiers remain supported.
+- **PostgreSQL dollar-quoted fallback parsing**: Comment markers inside `$$...$$` and `$tag$...$tag$` strings remain literal content across shared comment masking and lineage fallback scanning, so valid statements that require regex fallback no longer lose later table dependencies or invent CTEs.
 - **Aggregate output details**: Repeated aggregate expressions projected under different aliases remain distinct outputs, while nested visits to the same aggregate are still deduplicated.
 - **Workspace PNG export memory**: Rasterization now enforces both dimension and total-pixel limits and encodes through `toBlob()`, avoiding oversized synchronous data-URL allocations.
 - **Quoted workspace schema fallback parsing**: Regex fallback extraction now supports double-quoted, backtick-quoted, bracketed, and schema-qualified table and column identifiers, including quoted foreign-key references. Parenthesis and comma scanning is quote-aware, so delimiters inside identifiers no longer corrupt definitions.
@@ -58,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added regression coverage for PostgreSQL column identifier unwrapping, quote-aware/dotted column IDs, case-distinct quoted CTEs, BigQuery table-name case, filesystem deletion codes and stale-cache rejection, workspace lineage `CREATE TABLE` safety, CTAS `query_expr` references, T-SQL update-alias writes, PostgreSQL-wrapped window identifiers, CASE/ELSE formatting variants, drag-path map reuse, quoted schema extraction, `CREATE` text inside identifiers, comment/string masking, fallback and recursive CTE locations, target resolution, global temporary tables, T-SQL `OUTPUT` partial parses, parameterized limits, dialect scoring and warnings, delimiter-aware preprocessing, indexed impact analysis, statement-scoped lineage, transitive impact, delete/build races, CTAS graph edges, safe bootstrap serialization, deferred hydration, source-preserving refresh, edit-adjusted source selections, nested/hash comments, aggregate aliases, and bounded PNG export.
 - Added focused regression coverage for Mermaid fence-breaking labels and metadata, block comments containing line-comment markers, and MySQL LIMIT row-count/offset rendering.
-- Branch validation: 281 suites, 3,735 tests passing. `npm run typecheck`, `npm run lint`, `npm run package`, and the production dependency audit pass.
+- Branch validation: 281 suites, 3,741 tests passing. `npm run typecheck`, `npm run lint`, `npm run package`, and the production dependency audit pass.
 
 ## [0.9.1] - 2026-07-01
 
@@ -81,7 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Workspace lineage view/CTE resolution**: Statement lineage edges now resolve existing `view:`, `cte:`, and `external:` nodes instead of checking only `table:`, preventing valid view references from falling through to stray external nodes.
 - **Dead-column CTE output hints**: Dead-column detection keeps scoped CTE-body analysis while also recognizing downstream CTE output usage, including outer `SELECT` projections and table aliases.
 - **Workspace index cache freshness**: Cached workspace indexes are validated against current file count, file stats, and content hashes before reuse, so offline file edits, additions, and deletions trigger a rebuild instead of serving stale definitions.
-- **Release workflow ordering and concurrency**: The release workflow now creates the GitHub release/tag before external Marketplace/Open VSX publishing and serializes release attempts with workflow-level concurrency.
+- **Release workflow ordering, concurrency, and recovery**: The release workflow creates the GitHub release/tag before external Marketplace/Open VSX publishing and serializes release attempts. Manual targeted retries now rebuild the exact tagged source and can resume GitHub, Marketplace, or Open VSX publication independently after a partial failure. The release checklist now documents the actual push-to-`main` automation instead of manual tag and duplicate-publish steps.
 - **Performance baseline CI wiring**: Hard perf baseline suites are excluded from normal Jest/coverage runs and are executed through the dedicated `test:perf` script.
 - **Validation byte counting**: SQL size-limit validation uses `TextEncoder` byte length instead of `Blob`, for correct sizing in Node-like contexts.
 - **MySQL backslash escapes in statement splitting**: The statement splitter no longer splits on semicolons inside MySQL backslash-escaped string literals (`\'` / `\"`).

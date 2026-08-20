@@ -834,6 +834,24 @@ describe('LineageBuilder', () => {
             expect(Array.from(cteNames.keys())).toEqual(['real_cte']);
             expect(cteNames.get('real_cte')?.lineNumber).toBe(3);
         });
+
+        it('ignores CTE-like text inside PostgreSQL dollar-quoted strings', () => {
+            const sql = [
+                'SELECT $body$WITH dollar_phantom AS (SELECT 1) -- literal$body$ AS note;',
+                'WITH real_cte AS (SELECT 2) SELECT * FROM real_cte'
+            ].join('\n');
+            const cteNames = new Map<string, {
+                name: string;
+                filePath: string;
+                lineNumber: number;
+            }>();
+            const builder = new LineageBuilder();
+
+            (builder as any).extractCTEsWithRegex(sql, 'dollar-quoted.sql', cteNames);
+
+            expect(Array.from(cteNames.keys())).toEqual(['real_cte']);
+            expect(cteNames.get('real_cte')?.lineNumber).toBe(2);
+        });
     });
 
     describe('getUpstream / getDownstream delegation', () => {

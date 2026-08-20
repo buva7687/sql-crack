@@ -1540,6 +1540,56 @@ export class ReferenceExtractor {
         const getStatementIndex = (charIndex: number): number =>
             this.getStatementIndex(statementBoundaries, charIndex);
 
+        const hasPriorTopLevelStatementVerb = (charIndex: number): boolean => {
+            const statementIndex = getStatementIndex(charIndex);
+            const statementStart = statementBoundaries[statementIndex] ?? 0;
+            let depth = 0;
+
+            for (let index = statementStart; index < charIndex;) {
+                const char = sqlNoComments[index];
+                if (char === '"' || char === '`' || char === '[') {
+                    const closingQuote = char === '[' ? ']' : char;
+                    index++;
+                    while (index < charIndex) {
+                        if (sqlNoComments[index] === closingQuote) {
+                            if (sqlNoComments[index + 1] === closingQuote) {
+                                index += 2;
+                                continue;
+                            }
+                            index++;
+                            break;
+                        }
+                        index++;
+                    }
+                    continue;
+                }
+                if (char === '(') {
+                    depth++;
+                    index++;
+                    continue;
+                }
+                if (char === ')') {
+                    depth = Math.max(0, depth - 1);
+                    index++;
+                    continue;
+                }
+                if (depth === 0 && /[A-Za-z_]/.test(char)) {
+                    const tokenStart = index++;
+                    while (index < charIndex && /[A-Za-z0-9_$#@]/.test(sqlNoComments[index])) {
+                        index++;
+                    }
+                    const token = sqlNoComments.slice(tokenStart, index).toUpperCase();
+                    if (['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'MERGE'].includes(token)) {
+                        return true;
+                    }
+                    continue;
+                }
+                index++;
+            }
+
+            return false;
+        };
+
         const isFunctionFrom = (matchIndex: number): boolean => {
             // matchIndex comes from regex matches against sqlNoComments, so line slicing
             // must use sqlNoComments too. Mixing with original SQL causes index drift.
@@ -1577,6 +1627,9 @@ export class ReferenceExtractor {
             let match: RegExpExecArray | null;
             while ((match = pattern.exec(sqlNoComments)) !== null) {
                 if (skipFunctionFrom && isFunctionFrom(match.index)) {
+                    continue;
+                }
+                if (referenceType === 'update' && hasPriorTopLevelStatementVerb(match.index)) {
                     continue;
                 }
                 const rawCatalog = match[3] ? match[1] : undefined;

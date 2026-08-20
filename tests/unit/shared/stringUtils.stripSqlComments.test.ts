@@ -46,6 +46,14 @@ describe('stripSqlComments', () => {
         expect(stripSqlComments(sql)).toBe(sql);
     });
 
+    it('preserves comment markers inside PostgreSQL dollar-quoted strings', () => {
+        const sql = "SELECT $$-- literal /* text */$$, $body$# still literal$body$ FROM t -- comment";
+
+        expect(stripSqlComments(sql)).toBe(
+            "SELECT $$-- literal /* text */$$, $body$# still literal$body$ FROM t  "
+        );
+    });
+
     it('preserves -- inside double-quoted identifiers', () => {
         const sql = 'SELECT "col--name" FROM t';
         expect(stripSqlComments(sql)).toBe(sql);
@@ -127,5 +135,14 @@ describe('maskSqlCommentsPreservingPositions', () => {
         expect(masked).toContain('#temp');
         expect(masked).not.toContain('comment');
         expect(masked).toHaveLength(sql.length);
+    });
+
+    it('preserves PostgreSQL dollar-quoted strings before masking real comments', () => {
+        const sql = 'SELECT $tag$-- literal /* text */$tag$ FROM source_table; -- comment';
+        const masked = maskSqlCommentsPreservingPositions(sql);
+
+        expect(masked).toHaveLength(sql.length);
+        expect(masked).toContain('$tag$-- literal /* text */$tag$ FROM source_table;');
+        expect(masked).not.toContain('comment');
     });
 });

@@ -147,6 +147,42 @@ describe('ReferenceExtractor behavioral coverage', () => {
         ]));
     });
 
+    it('keeps fallback references after inline comment markers in PostgreSQL dollar strings', () => {
+        const result = extractor.extractReferencesWithStatus(
+            'SELECT $$-- literal$$ AS x FROM source_table FOR NO KEY UPDATE SKIP LOCKED;',
+            'dollar-quoted.sql',
+            'PostgreSQL'
+        );
+
+        expect(result.warnings).toHaveLength(1);
+        expect(result.references).toEqual([
+            expect.objectContaining({
+                tableName: 'source_table',
+                referenceType: 'select',
+                lineNumber: 1,
+                statementIndex: 0,
+            }),
+        ]);
+    });
+
+    it('keeps a real top-level UPDATE after fallback CTE declarations', () => {
+        jest.spyOn((extractor as any).parser, 'astify').mockImplementation(() => {
+            throw new Error('force regex fallback');
+        });
+
+        const refs = extractor.extractReferences(
+            'WITH staged AS (SELECT * FROM source_table) '
+                + 'UPDATE target_table SET value = 1 FROM staged WHERE target_table.id = staged.id;',
+            'cte-update.sql',
+            'PostgreSQL'
+        );
+
+        expect(refs).toEqual(expect.arrayContaining([
+            expect.objectContaining({ tableName: 'source_table', referenceType: 'select' }),
+            expect.objectContaining({ tableName: 'target_table', referenceType: 'update' }),
+        ]));
+    });
+
     it('captures UPDATE targets and UPDATE ... FROM source tables', () => {
         const refs = extractor.extractReferences(
             `
