@@ -1,5 +1,6 @@
 import type { SqlDialect } from '../../types';
 import { maskStringsAndComments, stripSqlComments } from './preprocessing';
+import { getDollarQuoteDelimiterAt } from '../../../shared/stringUtils';
 
 export interface DialectDetectionResult {
     dialect: SqlDialect | null;
@@ -68,9 +69,10 @@ function hasPostgresDollarQuoteLiteral(sql: string): boolean {
             continue;
         }
         if (sql[i] === '$') {
-            const delimiterMatch = sql.slice(i).match(/^\$([A-Za-z_][A-Za-z0-9_]*)?\$/);
-            if (delimiterMatch) {
-                const delimiter = delimiterMatch[0];
+            // Identifier-embedded dollars and MySQL `DELIMITER $$` are not
+            // dollar quotes, so they must not score PostgreSQL.
+            const delimiter = getDollarQuoteDelimiterAt(sql, i);
+            if (delimiter) {
                 const closePos = sql.indexOf(delimiter, i + delimiter.length);
                 if (closePos !== -1) {
                     return true;

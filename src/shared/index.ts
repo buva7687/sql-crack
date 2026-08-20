@@ -22,6 +22,8 @@ export {
     stripSqlComments,
     maskSqlCommentsPreservingPositions,
     isHashTempTableIdentifierAt,
+    getDollarQuoteDelimiterAt,
+    getDollarQuotedTokenEnd,
 } from './stringUtils';
 export type { StripSqlCommentsOptions } from './stringUtils';
 export { unwrapIdentifierValue } from './astUtils';

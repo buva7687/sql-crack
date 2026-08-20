@@ -9,7 +9,7 @@ import {
     ExtractionOptions,
     DEFAULT_EXTRACTION_OPTIONS,
 } from './types';
-import { escapeRegex, maskSqlCommentsPreservingPositions, stripSqlComments, unwrapIdentifierValue } from '../../shared';
+import { escapeRegex, getDollarQuoteDelimiterAt, maskSqlCommentsPreservingPositions, stripSqlComments, unwrapIdentifierValue } from '../../shared';
 import { preprocessSqlForWorkspaceParsing } from '../parserConfig';
 import { getIdentifierSemantics } from '../identifiers';
 import { SCHEMA_SQL_RESERVED_WORDS } from './constants';
@@ -1039,7 +1039,7 @@ export class SchemaExtractor {
             }
 
             if (maskStrings && char === '$') {
-                const delimiter = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(i))?.[0];
+                const delimiter = getDollarQuoteDelimiterAt(sql, i);
                 if (delimiter) {
                     const start = i;
                     const close = sql.indexOf(delimiter, i + delimiter.length);

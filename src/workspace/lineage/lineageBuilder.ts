@@ -10,6 +10,7 @@ import {
 } from '../types';
 import { ColumnInfo } from '../extraction/types';
 import { getColumnKey, getDisplayName, getQualifiedKey, parseQualifiedKey } from '../identifiers';
+import { getDollarQuotedTokenEnd } from '../../shared/stringUtils';
 import {
     LineageNode,
     LineageEdge,
@@ -59,17 +60,9 @@ function skipQuotedSqlToken(sql: string, startIndex: number): number {
 }
 
 function skipDollarQuotedSqlToken(sql: string, startIndex: number): number | null {
-    if (sql[startIndex] !== '$') {
-        return null;
-    }
-
-    const delimiter = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(startIndex))?.[0];
-    if (!delimiter) {
-        return null;
-    }
-
-    const closingIndex = sql.indexOf(delimiter, startIndex + delimiter.length);
-    return closingIndex === -1 ? sql.length : closingIndex + delimiter.length;
+    // Shared helper so identifier-embedded dollars and MySQL DELIMITER
+    // directives are rejected here exactly as they are everywhere else.
+    return getDollarQuotedTokenEnd(sql, startIndex);
 }
 
 /**

@@ -405,4 +405,27 @@ describe('detectDialect', () => {
         const result = detectDialect('LOCKING TABLE customers FOR ACCESS SELECT * FROM customers');
         expect(result.scores.Teradata).toBeGreaterThanOrEqual(2);
     });
+
+    it('does not score PostgreSQL for a MySQL DELIMITER procedure dump', () => {
+        const sql = [
+            'DELIMITER $$',
+            'CREATE PROCEDURE p()',
+            'BEGIN',
+            '  INSERT INTO body_tbl SELECT * FROM src_tbl;',
+            'END$$',
+            'DELIMITER ;',
+        ].join('\n');
+
+        expect(detectDialect(sql).scores.PostgreSQL || 0).toBe(0);
+    });
+
+    it('does not score PostgreSQL for identifiers containing double dollars', () => {
+        const result = detectDialect('SELECT * FROM my$$a JOIN my$$b ON 1 = 1');
+        expect(result.scores.PostgreSQL || 0).toBe(0);
+    });
+
+    it('still detects a genuine dollar-quoted function body as PostgreSQL', () => {
+        const sql = 'CREATE FUNCTION f() RETURNS int AS $$ SELECT 1; $$ LANGUAGE sql';
+        expect(detectDialect(sql).dialect).toBe('PostgreSQL');
+    });
 });

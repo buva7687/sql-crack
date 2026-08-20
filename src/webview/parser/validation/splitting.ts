@@ -1,4 +1,4 @@
-import { isHashTempTableIdentifierAt } from '../../../shared/stringUtils';
+import { getDollarQuoteDelimiterAt, isHashTempTableIdentifierAt } from '../../../shared/stringUtils';
 
 export function stripLeadingComments(sql: string): string {
     let result = sql.trim();
@@ -163,7 +163,10 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
                     current += fullTag;
                     i = j;
                     continue;
-                } else if (!inDollarQuotes) {
+                } else if (!inDollarQuotes && getDollarQuoteDelimiterAt(sql, i)) {
+                    // Only a genuine opening delimiter starts a dollar-quoted
+                    // body. Closing is matched by tag above, so `$$SELECT 1$$`
+                    // still terminates correctly.
                     inDollarQuotes = true;
                     dollarQuoteTag = tag;
                     current += fullTag;

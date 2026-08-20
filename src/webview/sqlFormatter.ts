@@ -3,6 +3,8 @@
  * Formats SQL with proper indentation, capitalized keywords, and line breaks
  */
 
+import { getDollarQuoteDelimiterAt } from '../shared/stringUtils';
+
 const SQL_KEYWORDS = [
     'SELECT', 'FROM', 'WHERE', 'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'FULL',
     'ON', 'AND', 'OR', 'NOT', 'IN', 'EXISTS', 'BETWEEN', 'LIKE', 'IS', 'NULL',
@@ -125,9 +127,8 @@ function extractComments(sql: string): { sqlWithoutComments: string; comments: M
         }
 
         if (char === '$') {
-            const delimiterMatch = sql.slice(index).match(/^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/);
-            if (delimiterMatch) {
-                const delimiter = delimiterMatch[0];
+            const delimiter = getDollarQuoteDelimiterAt(sql, index);
+            if (delimiter) {
                 const closingIndex = sql.indexOf(delimiter, index + delimiter.length);
                 const end = closingIndex === -1 ? sql.length : closingIndex + delimiter.length;
                 result += sql.slice(index, end);

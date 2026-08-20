@@ -1,4 +1,4 @@
-import { maskSqlCommentsPreservingPositions, stripSqlComments } from '../../../src/shared/stringUtils';
+import { getDollarQuoteDelimiterAt, maskSqlCommentsPreservingPositions, stripSqlComments } from '../../../src/shared/stringUtils';
 
 describe('stripSqlComments', () => {
     it('strips line comments (--)', () => {
@@ -144,5 +144,53 @@ describe('maskSqlCommentsPreservingPositions', () => {
         expect(masked).toHaveLength(sql.length);
         expect(masked).toContain('$tag$-- literal /* text */$tag$ FROM source_table;');
         expect(masked).not.toContain('comment');
+    });
+
+    it('does not open a dollar quote on a dollar inside an identifier', () => {
+        const sql = 'SELECT * FROM my$$tbl;\n-- SELECT * FROM ghost_tbl;\nSELECT * FROM real_tbl;';
+        const masked = maskSqlCommentsPreservingPositions(sql);
+
+        expect(masked).toHaveLength(sql.length);
+        expect(masked).toContain('my$$tbl');
+        expect(masked).not.toContain('ghost_tbl');
+        expect(masked).toContain('real_tbl');
+        expect(stripSqlComments(sql)).not.toContain('ghost_tbl');
+    });
+
+    it('does not open a dollar quote on a MySQL DELIMITER directive', () => {
+        const sql = [
+            'DELIMITER $$',
+            'CREATE PROCEDURE p()',
+            'BEGIN',
+            '  -- SELECT * FROM commented_out_tbl;',
+            '  INSERT INTO body_tbl SELECT * FROM src_tbl;',
+            'END$$',
+            'DELIMITER ;',
+        ].join('\n');
+        const masked = maskSqlCommentsPreservingPositions(sql);
+
+        expect(masked).toHaveLength(sql.length);
+        expect(masked).not.toContain('commented_out_tbl');
+        expect(masked).toContain('body_tbl');
+        expect(masked).toContain('src_tbl');
+    });
+});
+
+describe('getDollarQuoteDelimiterAt', () => {
+    it('recognizes genuine opening delimiters', () => {
+        expect(getDollarQuoteDelimiterAt('AS $$body$$', 3)).toBe('$$');
+        expect(getDollarQuoteDelimiterAt('AS $tag$b$tag$', 3)).toBe('$tag$');
+        expect(getDollarQuoteDelimiterAt('$$top', 0)).toBe('$$');
+    });
+
+    it('rejects dollars that continue an identifier', () => {
+        expect(getDollarQuoteDelimiterAt('my$$tbl', 2)).toBeNull();
+        expect(getDollarQuoteDelimiterAt('END$$', 3)).toBeNull();
+    });
+
+    it('rejects MySQL DELIMITER directives and bind parameters', () => {
+        expect(getDollarQuoteDelimiterAt('DELIMITER $$', 10)).toBeNull();
+        expect(getDollarQuoteDelimiterAt('delimiter  $$', 11)).toBeNull();
+        expect(getDollarQuoteDelimiterAt('WHERE id = $1', 11)).toBeNull();
     });
 });

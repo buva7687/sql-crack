@@ -102,13 +102,45 @@ export interface StripSqlCommentsOptions {
     preserveHashTempIdentifiers?: boolean;
 }
 
-/** Return the exclusive end of a PostgreSQL dollar-quoted token at `offset`. */
-function getDollarQuotedTokenEnd(sql: string, offset: number): number | null {
+const DOLLAR_QUOTE_DELIMITER_PATTERN = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/;
+const DELIMITER_DIRECTIVE_PATTERN = /\bDELIMITER[ \t]*$/i;
+
+/**
+ * Return the dollar-quote delimiter opening at `offset`, or null when the
+ * dollar sign does not start a PostgreSQL dollar-quoted string.
+ *
+ * Two shapes look like a delimiter but are not one:
+ *  - `$` is a legal identifier continuation character, so `my$$tbl` is a single
+ *    name and `END$$` ends one. A `$` directly after an identifier character
+ *    therefore belongs to that identifier, matching PostgreSQL's own lexer.
+ *  - MySQL's `DELIMITER $$` declares a statement terminator rather than a
+ *    string, so procedure dumps must keep scanning their body normally.
+ *
+ * Only openings are filtered. A closing delimiter is located by searching for
+ * the same token, so `$$SELECT 1$$` still closes correctly.
+ */
+export function getDollarQuoteDelimiterAt(sql: string, offset: number): string | null {
     if (sql[offset] !== '$') {
         return null;
     }
+    if (offset > 0 && /[A-Za-z0-9_$]/.test(sql[offset - 1])) {
+        return null;
+    }
 
-    const delimiter = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/.exec(sql.slice(offset))?.[0];
+    const delimiter = DOLLAR_QUOTE_DELIMITER_PATTERN.exec(sql.slice(offset))?.[0];
+    if (!delimiter) {
+        return null;
+    }
+    if (DELIMITER_DIRECTIVE_PATTERN.test(sql.slice(Math.max(0, offset - 32), offset))) {
+        return null;
+    }
+
+    return delimiter;
+}
+
+/** Return the exclusive end of a PostgreSQL dollar-quoted token at `offset`. */
+export function getDollarQuotedTokenEnd(sql: string, offset: number): number | null {
+    const delimiter = getDollarQuoteDelimiterAt(sql, offset);
     if (!delimiter) {
         return null;
     }
