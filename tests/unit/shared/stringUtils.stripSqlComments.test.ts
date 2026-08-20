@@ -180,17 +180,22 @@ describe('getDollarQuoteDelimiterAt', () => {
     it('recognizes genuine opening delimiters', () => {
         expect(getDollarQuoteDelimiterAt('AS $$body$$', 3)).toBe('$$');
         expect(getDollarQuoteDelimiterAt('AS $tag$b$tag$', 3)).toBe('$tag$');
+        expect(getDollarQuoteDelimiterAt('AS $étiquette$b$étiquette$', 3)).toBe('$étiquette$');
         expect(getDollarQuoteDelimiterAt('$$top', 0)).toBe('$$');
     });
 
     it('rejects dollars that continue an identifier', () => {
         expect(getDollarQuoteDelimiterAt('my$$tbl', 2)).toBeNull();
+        expect(getDollarQuoteDelimiterAt('café$$tbl', 4)).toBeNull();
+        expect(getDollarQuoteDelimiterAt('таблица$$tbl', 7)).toBeNull();
         expect(getDollarQuoteDelimiterAt('END$$', 3)).toBeNull();
     });
 
     it('rejects MySQL DELIMITER directives and bind parameters', () => {
         expect(getDollarQuoteDelimiterAt('DELIMITER $$', 10)).toBeNull();
         expect(getDollarQuoteDelimiterAt('delimiter  $$', 11)).toBeNull();
+        const alignedDirective = `  DELIMITER${' '.repeat(40)}$$`;
+        expect(getDollarQuoteDelimiterAt(alignedDirective, alignedDirective.indexOf('$'))).toBeNull();
         expect(getDollarQuoteDelimiterAt('WHERE id = $1', 11)).toBeNull();
     });
 });

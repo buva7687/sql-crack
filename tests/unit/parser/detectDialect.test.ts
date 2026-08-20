@@ -419,6 +419,19 @@ describe('detectDialect', () => {
         expect(detectDialect(sql).scores.PostgreSQL || 0).toBe(0);
     });
 
+    it('does not depend on DELIMITER directive alignment when excluding PostgreSQL', () => {
+        const sql = [
+            `DELIMITER${' '.repeat(40)}$$`,
+            'CREATE PROCEDURE p()',
+            'BEGIN',
+            '  SELECT 1;',
+            'END$$',
+            'DELIMITER ;',
+        ].join('\n');
+
+        expect(detectDialect(sql).scores.PostgreSQL || 0).toBe(0);
+    });
+
     it('does not score PostgreSQL for identifiers containing double dollars', () => {
         const result = detectDialect('SELECT * FROM my$$a JOIN my$$b ON 1 = 1');
         expect(result.scores.PostgreSQL || 0).toBe(0);

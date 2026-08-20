@@ -12,7 +12,7 @@ import {
     ColumnUsageContext
 } from './types';
 import { ColumnExtractor } from './columnExtractor';
-import { escapeRegex, maskSqlCommentsPreservingPositions, unwrapIdentifierValue } from '../../shared';
+import { escapeRegex, getDollarQuoteDelimiterAt, maskSqlCommentsPreservingPositions, unwrapIdentifierValue } from '../../shared';
 import { preprocessSqlForWorkspaceParsing } from '../parserConfig';
 import { getIdentifierSemantics, getQualifiedKey } from '../identifiers';
 import { REFERENCE_SQL_RESERVED_WORDS, TERADATA_RESERVED_WORDS } from './constants';
@@ -1438,7 +1438,7 @@ export class ReferenceExtractor {
             }
 
             if (sql[index] === '$') {
-                const delimiter = /^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/u.exec(sql.slice(index))?.[0];
+                const delimiter = getDollarQuoteDelimiterAt(sql, index);
                 if (delimiter) {
                     const start = index;
                     const close = sql.indexOf(delimiter, index + delimiter.length);

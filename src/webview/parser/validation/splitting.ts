@@ -149,28 +149,22 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
         }
 
         if (!inString && char === '$') {
-            let j = i + 1;
-            let tag = '';
-            while (j < sql.length && /[a-zA-Z0-9_]/.test(sql[j])) {
-                tag += sql[j];
-                j++;
-            }
-            if (j < sql.length && sql[j] === '$') {
-                const fullTag = '$' + tag + '$';
-                if (inDollarQuotes && tag === dollarQuoteTag) {
+            if (inDollarQuotes) {
+                const fullTag = `$${dollarQuoteTag}$`;
+                if (sql.startsWith(fullTag, i)) {
                     inDollarQuotes = false;
                     dollarQuoteTag = '';
                     current += fullTag;
-                    i = j;
+                    i += fullTag.length - 1;
                     continue;
-                } else if (!inDollarQuotes && getDollarQuoteDelimiterAt(sql, i)) {
-                    // Only a genuine opening delimiter starts a dollar-quoted
-                    // body. Closing is matched by tag above, so `$$SELECT 1$$`
-                    // still terminates correctly.
+                }
+            } else {
+                const fullTag = getDollarQuoteDelimiterAt(sql, i);
+                if (fullTag) {
                     inDollarQuotes = true;
-                    dollarQuoteTag = tag;
+                    dollarQuoteTag = fullTag.slice(1, -1);
                     current += fullTag;
-                    i = j;
+                    i += fullTag.length - 1;
                     continue;
                 }
             }

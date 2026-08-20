@@ -509,6 +509,25 @@ describe('ReferenceExtractor behavioral coverage', () => {
         ]));
     });
 
+    it('preserves dollar-containing MERGE targets and their sources on fallback', () => {
+        const refs = extractor.extractReferences(
+            'MERGE INTO my$$target t USING source_tbl s ON t.id = s.id WHEN MATCHED THEN UPDATE SET id = s.id;',
+            'merge.sql',
+            'PostgreSQL'
+        );
+
+        expect(refs).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                tableName: 'my$$target',
+                referenceType: 'merge',
+            }),
+            expect.objectContaining({
+                tableName: 'source_tbl',
+                referenceType: 'select',
+            }),
+        ]));
+    });
+
     it('does not let a CTE name hide a physical table in a later statement', () => {
         const refs = extractor.extractReferences(
             'WITH orders AS (SELECT * FROM archive_orders) SELECT * FROM orders;\n'

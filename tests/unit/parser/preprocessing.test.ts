@@ -168,6 +168,16 @@ describe('parser preprocessing transforms', () => {
             expect(rewritten).toContain('SELECT employee_id FROM employees');
         });
 
+        it('does not hide Oracle clauses after an identifier containing dollars', () => {
+            const sql = 'SELECT id FROM my$$tbl START WITH parent_id IS NULL CONNECT BY PRIOR id = parent_id';
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).toContain('FROM my$$tbl');
+            expect(rewritten).not.toMatch(/\bSTART\s+WITH\b/i);
+            expect(rewritten).not.toMatch(/\bCONNECT\s+BY\b/i);
+        });
+
         it('strips ORDER SIBLINGS BY', () => {
             const sql = 'SELECT id FROM employees START WITH mgr IS NULL CONNECT BY PRIOR id = mgr ORDER SIBLINGS BY name';
             const rewritten = preprocessOracleSyntax(sql, 'Oracle');

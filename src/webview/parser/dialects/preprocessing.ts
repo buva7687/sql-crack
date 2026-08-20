@@ -1,4 +1,5 @@
 import type { SqlDialect } from '../../types';
+import { getDollarQuoteDelimiterAt } from '../../../shared';
 import { preprocessJinjaTemplates } from './jinjaPreprocessor';
 
 function stripAtTimeZoneClauses(sql: string): string | null {
@@ -1472,9 +1473,8 @@ export function maskStringsAndComments(sql: string): string {
             }
         }
         if (chars[i] === '$') {
-            const delimiterMatch = sql.slice(i).match(/^\$([A-Za-z_][A-Za-z0-9_]*)?\$/);
-            if (delimiterMatch) {
-                const delimiter = delimiterMatch[0];
+            const delimiter = getDollarQuoteDelimiterAt(sql, i);
+            if (delimiter) {
                 const closePos = sql.indexOf(delimiter, i + delimiter.length);
                 const end = closePos === -1 ? chars.length : closePos + delimiter.length;
                 while (i < end) {

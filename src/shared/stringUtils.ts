@@ -102,8 +102,23 @@ export interface StripSqlCommentsOptions {
     preserveHashTempIdentifiers?: boolean;
 }
 
-const DOLLAR_QUOTE_DELIMITER_PATTERN = /^\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$/;
-const DELIMITER_DIRECTIVE_PATTERN = /\bDELIMITER[ \t]*$/i;
+const DOLLAR_QUOTE_DELIMITER_PATTERN = /^\$(?:[_\p{L}][_\p{L}\p{M}\p{N}]*)?\$/u;
+const SQL_IDENTIFIER_CONTINUATION_PATTERN = /[_$\p{L}\p{M}\p{N}]/u;
+const DELIMITER_DIRECTIVE_PATTERN = /^[ \t]*DELIMITER[ \t]+$/i;
+
+function getPreviousCodePoint(sql: string, offset: number): string {
+    if (offset <= 0) {
+        return '';
+    }
+
+    const previousCodeUnit = sql.charCodeAt(offset - 1);
+    const startsSurrogatePair = previousCodeUnit >= 0xDC00
+        && previousCodeUnit <= 0xDFFF
+        && offset > 1
+        && sql.charCodeAt(offset - 2) >= 0xD800
+        && sql.charCodeAt(offset - 2) <= 0xDBFF;
+    return sql.slice(startsSurrogatePair ? offset - 2 : offset - 1, offset);
+}
 
 /**
  * Return the dollar-quote delimiter opening at `offset`, or null when the
@@ -123,7 +138,7 @@ export function getDollarQuoteDelimiterAt(sql: string, offset: number): string |
     if (sql[offset] !== '$') {
         return null;
     }
-    if (offset > 0 && /[A-Za-z0-9_$]/.test(sql[offset - 1])) {
+    if (SQL_IDENTIFIER_CONTINUATION_PATTERN.test(getPreviousCodePoint(sql, offset))) {
         return null;
     }
 
@@ -131,7 +146,11 @@ export function getDollarQuoteDelimiterAt(sql: string, offset: number): string |
     if (!delimiter) {
         return null;
     }
-    if (DELIMITER_DIRECTIVE_PATTERN.test(sql.slice(Math.max(0, offset - 32), offset))) {
+    const lineStart = Math.max(
+        sql.lastIndexOf('\n', offset - 1),
+        sql.lastIndexOf('\r', offset - 1)
+    ) + 1;
+    if (DELIMITER_DIRECTIVE_PATTERN.test(sql.slice(lineStart, offset))) {
         return null;
     }
 
