@@ -180,6 +180,36 @@ describe('buildWorkspaceExportCommentBlock', () => {
         const block = buildWorkspaceExportCommentBlock(ctx, '--');
         expect(block).toContain('-- SQL Crack Workspace Export');
     });
+
+    it('keeps newline and fence text from metadata inside prefixed comment lines', () => {
+        const fence = String.fromCharCode(96).repeat(3);
+        const ctx = createWorkspaceExportContext({
+            ...baseInput,
+            view: 'lineage',
+            scopeUri: '/repo\n' + fence + '\u2028scope',
+            searchFilter: {
+                query: 'orders\r\n' + fence + '\u2029query',
+                nodeTypes: [],
+                useRegex: false,
+                caseSensitive: false,
+            },
+            lineage: {
+                centerNodeId: 'table:orders',
+                centerNodeName: 'orders\n' + fence,
+                centerNodeType: 'table',
+                direction: 'both',
+                depth: 2,
+            },
+        });
+
+        const block = buildWorkspaceExportCommentBlock(ctx, '%%');
+        const lines = block.split('\n');
+
+        expect(lines.every(line => line.startsWith('%% '))).toBe(true);
+        expect(lines.every(line => !/[\r\u2028\u2029]/.test(line))).toBe(true);
+        expect(block).not.toContain(fence);
+        expect(block).toContain('#96;#96;#96;');
+    });
 });
 
 describe('buildWorkspaceSvgMetadata', () => {

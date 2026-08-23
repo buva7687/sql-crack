@@ -40,6 +40,8 @@ export interface ColumnLineageEdge {
     sourceColumnName: string;
     targetTableId: string;
     targetColumnName: string;
+    sourceColumnId?: string;
+    targetColumnId?: string;
     transformationType: 'direct' | 'rename' | 'aggregate' | 'expression' | 'case' | 'cast' | 'coalesce' | 'join' | 'filter' | 'unknown';
     expression?: string;
     filePath: string;

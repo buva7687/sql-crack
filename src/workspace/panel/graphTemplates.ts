@@ -218,7 +218,8 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
                 ${[
                     graph.stats.orphanedDefinitions.length > 0 ? `${graph.stats.orphanedDefinitions.length} orphaned` : '',
                     graph.stats.missingDefinitions.length > 0 ? `${graph.stats.missingDefinitions.length} missing` : '',
-                    graph.stats.parseErrors > 0 ? `${graph.stats.parseErrors} unparseable` : ''
+                    graph.stats.parseErrors > 0 ? `${graph.stats.parseErrors} unparseable` : '',
+                    (graph.stats.parseWarnings || 0) > 0 ? `${graph.stats.parseWarnings} fallback-parsed` : ''
                 ].filter(Boolean).join(', ')}
             </span>
             <button class="issue-banner-btn" id="btn-view-issues">View Details →</button>

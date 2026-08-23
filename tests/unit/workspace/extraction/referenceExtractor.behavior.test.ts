@@ -50,6 +50,44 @@ describe('ReferenceExtractor behavioral coverage', () => {
         ]));
     });
 
+    it('preserves catalog, schema, and quoting for three-part SQL Server references', () => {
+        const refs = extractor.extractReferences(
+            'SELECT * FROM [warehouse].[sales].[orders];',
+            'query.sql',
+            'TransactSQL'
+        );
+
+        expect(refs).toEqual([
+            expect.objectContaining({
+                catalog: 'warehouse',
+                schema: 'sales',
+                tableName: 'orders',
+                catalogQuoted: true,
+                schemaQuoted: true,
+                nameQuoted: true,
+            }),
+        ]);
+    });
+
+    it('preserves three-part qualifiers on regex fallback', () => {
+        jest.spyOn((extractor as any).parser, 'astify').mockImplementation(() => {
+            throw new Error('force regex fallback');
+        });
+        const refs = extractor.extractReferences(
+            'SELECT * FROM [warehouse].[sales].[orders];',
+            'query.sql',
+            'TransactSQL'
+        );
+
+        expect(refs).toEqual([
+            expect.objectContaining({
+                catalog: 'warehouse',
+                schema: 'sales',
+                tableName: 'orders',
+            }),
+        ]);
+    });
+
     it('extracts real tables from subqueries without leaking the subquery alias', () => {
         const refs = extractor.extractReferences(
             `
@@ -88,6 +126,63 @@ describe('ReferenceExtractor behavioral coverage', () => {
         ]));
     });
 
+    it('preserves reference line numbers after multiline block comments', () => {
+        const sql = [
+            '/*',
+            ' * generated model header',
+            ' * dependency documentation',
+            ' * keep these lines',
+            ' */',
+            'SELECT *',
+            'FROM source_table;',
+        ].join('\n');
+
+        const refs = extractor.extractReferences(sql, 'query.sql', 'PostgreSQL');
+
+        expect(refs).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                tableName: 'source_table',
+                lineNumber: 7,
+            }),
+        ]));
+    });
+
+    it('keeps fallback references after inline comment markers in PostgreSQL dollar strings', () => {
+        const result = extractor.extractReferencesWithStatus(
+            'SELECT $$-- literal$$ AS x FROM source_table FOR NO KEY UPDATE SKIP LOCKED;',
+            'dollar-quoted.sql',
+            'PostgreSQL'
+        );
+
+        expect(result.warnings).toHaveLength(1);
+        expect(result.references).toEqual([
+            expect.objectContaining({
+                tableName: 'source_table',
+                referenceType: 'select',
+                lineNumber: 1,
+                statementIndex: 0,
+            }),
+        ]);
+    });
+
+    it('keeps a real top-level UPDATE after fallback CTE declarations', () => {
+        jest.spyOn((extractor as any).parser, 'astify').mockImplementation(() => {
+            throw new Error('force regex fallback');
+        });
+
+        const refs = extractor.extractReferences(
+            'WITH staged AS (SELECT * FROM source_table) '
+                + 'UPDATE target_table SET value = 1 FROM staged WHERE target_table.id = staged.id;',
+            'cte-update.sql',
+            'PostgreSQL'
+        );
+
+        expect(refs).toEqual(expect.arrayContaining([
+            expect.objectContaining({ tableName: 'source_table', referenceType: 'select' }),
+            expect.objectContaining({ tableName: 'target_table', referenceType: 'update' }),
+        ]));
+    });
+
     it('captures UPDATE targets and UPDATE ... FROM source tables', () => {
         const refs = extractor.extractReferences(
             `
@@ -109,6 +204,49 @@ describe('ReferenceExtractor behavioral coverage', () => {
             expect.objectContaining({
                 tableName: 'source_table',
                 alias: 's',
+            }),
+        ]));
+    });
+
+    it('resolves SQL Server UPDATE aliases to the real write target', () => {
+        const refs = extractor.extractReferences(
+            `
+            UPDATE o
+            SET amount = s.amount
+            FROM dbo.orders AS o
+            JOIN dbo.staging AS s ON o.id = s.id
+            `,
+            'query.sql',
+            'TransactSQL'
+        );
+
+        expect(refs).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                tableName: 'orders',
+                schema: 'dbo',
+                referenceType: 'update',
+                context: 'UPDATE',
+            }),
+            expect.objectContaining({
+                tableName: 'staging',
+                schema: 'dbo',
+                referenceType: 'join',
+            }),
+        ]));
+    });
+
+    it('extracts CREATE TABLE AS SELECT sources from parser query_expr bodies', () => {
+        const refs = extractor.extractReferences(
+            'CREATE TABLE "sales"."orders_summary" AS SELECT * FROM "sales"."orders";',
+            'query.sql',
+            'PostgreSQL'
+        );
+
+        expect(refs).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                tableName: 'orders',
+                schema: 'sales',
+                referenceType: 'select',
             }),
         ]));
     });
@@ -218,6 +356,193 @@ describe('ReferenceExtractor behavioral coverage', () => {
         expect(names).toContain('raw_orders');
         expect(names).not.toContain('staging');
         expect(names).not.toContain('enriched');
+    });
+
+    it('keeps repeated source references in separate statements with occurrence lines', () => {
+        const refs = extractor.extractReferences(
+            'SELECT * FROM source_table;\nINSERT INTO target_table SELECT * FROM source_table;',
+            'pipeline.sql',
+            'MySQL'
+        );
+
+        const sourceRefs = refs.filter(ref => ref.tableName.toLowerCase() === 'source_table');
+        expect(sourceRefs).toEqual([
+            expect.objectContaining({ statementIndex: 0, lineNumber: 1 }),
+            expect.objectContaining({ statementIndex: 1, lineNumber: 2 }),
+        ]);
+    });
+
+    it('keeps JOIN condition subquery references in the owning statement', () => {
+        const refs = extractor.extractReferences(
+            [
+                'CREATE VIEW first_view AS SELECT * FROM first_source;',
+                'CREATE VIEW second_view AS',
+                'SELECT * FROM alpha',
+                'JOIN beta ON beta.id IN (SELECT id FROM gamma);',
+            ].join('\n'),
+            'views.sql',
+            'PostgreSQL'
+        );
+
+        expect(refs.find(ref => ref.tableName === 'gamma')).toMatchObject({
+            statementIndex: 1,
+            lineNumber: 4,
+        });
+    });
+
+    it('keeps legal one-character and quoted reserved table references', () => {
+        const refs = extractor.extractReferences(
+            'SELECT * FROM a;\nSELECT * FROM "select";\nSELECT * FROM "123";',
+            'quoted.sql',
+            'PostgreSQL'
+        );
+
+        expect(refs).toEqual(expect.arrayContaining([
+            expect.objectContaining({ tableName: 'a', statementIndex: 0 }),
+            expect.objectContaining({
+                tableName: 'select',
+                statementIndex: 1,
+                nameQuoted: true,
+            }),
+            expect.objectContaining({
+                tableName: '123',
+                statementIndex: 2,
+                nameQuoted: true,
+            }),
+        ]));
+    });
+
+    it('preserves quoted reserved identifiers on safe regex fallback', () => {
+        jest.spyOn((extractor as any).parser, 'astify').mockImplementation(() => {
+            throw new Error('force regex fallback');
+        });
+        const refs = extractor.extractReferences(
+            "SELECT 'FROM select' AS example FROM \"select\";",
+            'quoted-fallback.sql',
+            'PostgreSQL'
+        );
+
+        expect(refs).toEqual([
+            expect.objectContaining({
+                tableName: 'select',
+                nameQuoted: true,
+                referenceType: 'select',
+            }),
+        ]);
+    });
+
+    it('ignores table-looking text in string literals when locating AST references', () => {
+        const refs = extractor.extractReferences(
+            "SELECT 'FROM orders' AS example\nFROM \"orders\";",
+            'string-location.sql',
+            'PostgreSQL'
+        );
+
+        expect(refs).toEqual([
+            expect.objectContaining({
+                tableName: 'orders',
+                nameQuoted: true,
+                lineNumber: 2,
+            }),
+        ]);
+    });
+
+    it('keeps case-distinct quoted tables in a comma-separated FROM list', () => {
+        const refs = extractor.extractReferences(
+            'SELECT * FROM "users", "Users";',
+            'quoted-comma-list.sql',
+            'PostgreSQL'
+        );
+
+        expect(refs).toEqual(expect.arrayContaining([
+            expect.objectContaining({ tableName: 'users', nameQuoted: true }),
+            expect.objectContaining({ tableName: 'Users', nameQuoted: true }),
+        ]));
+        expect(refs).toHaveLength(2);
+    });
+
+    it('does not let a quoted CTE suppress a case-distinct PostgreSQL table', () => {
+        const refs = extractor.extractReferences(
+            'WITH "Foo" AS (SELECT * FROM src) SELECT * FROM "foo";',
+            'quoted-cte.sql',
+            'PostgreSQL'
+        );
+
+        expect(refs).toEqual(expect.arrayContaining([
+            expect.objectContaining({ tableName: 'src' }),
+            expect.objectContaining({ tableName: 'foo', nameQuoted: true }),
+        ]));
+        expect(refs.some(ref => ref.tableName === 'Foo')).toBe(false);
+    });
+
+    it('keeps case-distinct quoted JOIN relations on the same line', () => {
+        const refs = extractor.extractReferences(
+            'SELECT * FROM base JOIN "Users" u ON 1=1 JOIN "users" l ON 1=1;',
+            'quoted-joins.sql',
+            'PostgreSQL'
+        ).filter(ref => ref.referenceType === 'join');
+
+        expect(refs.map(ref => ref.tableName)).toEqual(['Users', 'users']);
+    });
+
+    it.each([
+        ['TransactSQL' as const, 'MERGE INTO dbo.target_table AS t USING dbo.source_table AS s ON t.id = s.id WHEN MATCHED THEN UPDATE SET t.value = s.value;'],
+        ['PostgreSQL' as const, 'MERGE INTO target_table AS t USING source_table AS s ON t.id = s.id WHEN MATCHED THEN UPDATE SET value = s.value;'],
+        ['Snowflake' as const, 'MERGE INTO target_table t USING source_table s ON t.id = s.id WHEN MATCHED THEN UPDATE SET value = s.value;'],
+        ['BigQuery' as const, 'MERGE target_table t USING source_table s ON t.id = s.id WHEN MATCHED THEN UPDATE SET value = s.value;'],
+    ])('extracts MERGE target and source references for %s', (dialect, sql) => {
+        const refs = extractor.extractReferences(sql, 'merge.sql', dialect);
+
+        expect(refs).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                tableName: 'target_table',
+                referenceType: 'merge',
+                context: 'MERGE INTO',
+                statementIndex: 0,
+            }),
+            expect.objectContaining({
+                tableName: 'source_table',
+                referenceType: 'select',
+                context: 'MERGE USING',
+                statementIndex: 0,
+            }),
+        ]));
+    });
+
+    it('preserves dollar-containing MERGE targets and their sources on fallback', () => {
+        const refs = extractor.extractReferences(
+            'MERGE INTO my$$target t USING source_tbl s ON t.id = s.id WHEN MATCHED THEN UPDATE SET id = s.id;',
+            'merge.sql',
+            'PostgreSQL'
+        );
+
+        expect(refs).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                tableName: 'my$$target',
+                referenceType: 'merge',
+            }),
+            expect.objectContaining({
+                tableName: 'source_tbl',
+                referenceType: 'select',
+            }),
+        ]));
+    });
+
+    it('does not let a CTE name hide a physical table in a later statement', () => {
+        const refs = extractor.extractReferences(
+            'WITH orders AS (SELECT * FROM archive_orders) SELECT * FROM orders;\n'
+                + 'INSERT INTO report SELECT * FROM orders;',
+            'pipeline.sql',
+            'MySQL'
+        );
+
+        expect(refs).toEqual(expect.arrayContaining([
+            expect.objectContaining({ tableName: 'archive_orders', statementIndex: 0 }),
+            expect.objectContaining({ tableName: 'orders', statementIndex: 1, lineNumber: 2 }),
+        ]));
+        expect(refs).not.toEqual(expect.arrayContaining([
+            expect.objectContaining({ tableName: 'orders', statementIndex: 0 }),
+        ]));
     });
 
     it('handles multiple CTEs that shadow real tables correctly', () => {

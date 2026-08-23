@@ -52,9 +52,8 @@ export function detectDialectSpecificSyntax(context: ParserContext, sql: string,
 
     const hasPostgresInterval = syntax.hasPostgresInterval;
     const hasPostgresDollarQuotes = syntax.hasPostgresDollarQuotes;
-    const hasPostgresArrayAccess = syntax.hasPostgresArrayAccess;
     const hasPostgresJsonOperators = syntax.hasPostgresJsonOperators;
-    if ((hasPostgresInterval || hasPostgresDollarQuotes || hasPostgresArrayAccess || hasPostgresJsonOperators)
+    if ((hasPostgresInterval || hasPostgresDollarQuotes || hasPostgresJsonOperators)
         && currentDialect !== 'PostgreSQL' && currentDialect !== 'Snowflake') {
         context.hints.push({
             type: 'warning',

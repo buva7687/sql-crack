@@ -28,11 +28,15 @@ describe('Dialect Support', () => {
     it('parses LIMIT with offset syntax', () => {
       const result = parseSql('SELECT * FROM users LIMIT 10, 20', dialect);
       expect(result.error).toBeUndefined();
+      expect(result.nodes.find(node => node.type === 'limit')?.details)
+        .toContain('20 rows (offset 10)');
     });
 
     it('parses LIMIT with OFFSET keyword', () => {
       const result = parseSql('SELECT * FROM users LIMIT 20 OFFSET 10', dialect);
       expect(result.error).toBeUndefined();
+      expect(result.nodes.find(node => node.type === 'limit')?.details)
+        .toContain('20 rows (offset 10)');
     });
 
     it('parses IF() function', () => {
@@ -620,14 +624,16 @@ describe('Dialect Support', () => {
     });
 
     it('parses AT TIME ZONE expressions after compatibility preprocessing', () => {
+      const sql = "SELECT t.date_col AT TIME ZONE 'UTC' AS utc_date FROM test_table t";
       const result = parseSql(
-        "SELECT t.date_col AT TIME ZONE 'UTC' AS utc_date FROM test_table t",
+        sql,
         dialect
       );
 
       expect(result.error).toBeUndefined();
       expect(result.partial).not.toBe(true);
       expect(result.nodes.some(n => n.label === 'test_table')).toBe(true);
+      expect(result.sql).toBe(sql);
     });
 
     it('parses TRY_CAST() after compatibility preprocessing', () => {

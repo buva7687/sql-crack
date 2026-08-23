@@ -5,11 +5,12 @@ import { logger } from '../../logger';
 import {
     WorkspaceIndex,
     SchemaDefinition,
-    FileAnalysis
+    FileAnalysis,
+    TableReference
 } from '../types';
 import { ColumnInfo } from '../extraction/types';
-import { getDisplayName, getQualifiedKey, parseQualifiedKey } from '../identifiers';
-import { escapeRegex, stripSqlComments } from '../../shared';
+import { getColumnKey, getDisplayName, getQualifiedKey, parseQualifiedKey } from '../identifiers';
+import { getDollarQuotedTokenEnd } from '../../shared/stringUtils';
 import {
     LineageNode,
     LineageEdge,
@@ -25,6 +26,201 @@ type NodeSqlParserCtor = new () => NodeSqlParserInstance;
 
 let cachedSqlParserCtor: NodeSqlParserCtor | null | undefined;
 const MAX_PRELOAD_CONCURRENCY = 20;
+
+function getDefinitionKey(definition: SchemaDefinition): string {
+    return getQualifiedKey(definition.name, definition.schema, definition);
+}
+
+function getReferenceKey(reference: TableReference): string {
+    return getQualifiedKey(reference.tableName, reference.schema, reference);
+}
+
+function skipQuotedSqlToken(sql: string, startIndex: number): number {
+    const quote = sql[startIndex];
+    const closingQuote = quote === '[' ? ']' : quote;
+    let index = startIndex + 1;
+
+    while (index < sql.length) {
+        if (sql[index] === '\\' && quote !== '[' && index + 1 < sql.length) {
+            index += 2;
+            continue;
+        }
+        if (sql[index] === closingQuote) {
+            // SQL identifiers and strings escape their closing delimiter by doubling it.
+            if (index + 1 < sql.length && sql[index + 1] === closingQuote) {
+                index += 2;
+                continue;
+            }
+            return index + 1;
+        }
+        index++;
+    }
+
+    return sql.length;
+}
+
+function skipDollarQuotedSqlToken(sql: string, startIndex: number): number | null {
+    // Shared helper so identifier-embedded dollars and MySQL DELIMITER
+    // directives are rejected here exactly as they are everywhere else.
+    return getDollarQuotedTokenEnd(sql, startIndex);
+}
+
+/**
+ * Replace comment contents with spaces while retaining every newline and string
+ * index. Regex consumers can then safely map matches back to the original SQL.
+ */
+function maskSqlCommentsPreservingPositions(sql: string): string {
+    const masked = sql.split('');
+    let index = 0;
+
+    const maskRange = (start: number, end: number): void => {
+        for (let position = start; position < end; position++) {
+            if (masked[position] !== '\n' && masked[position] !== '\r') {
+                masked[position] = ' ';
+            }
+        }
+    };
+
+    while (index < sql.length) {
+        const char = sql[index];
+
+        const dollarQuotedEnd = skipDollarQuotedSqlToken(sql, index);
+        if (dollarQuotedEnd !== null) {
+            const tokenStart = index;
+            index = dollarQuotedEnd;
+            maskRange(tokenStart, index);
+            continue;
+        }
+
+        if (char === "'" || char === '"' || char === '`' || char === '[') {
+            const tokenStart = index;
+            index = skipQuotedSqlToken(sql, index);
+            maskRange(tokenStart, index);
+            continue;
+        }
+
+        if (char === '-' && sql[index + 1] === '-') {
+            const commentStart = index;
+            while (index < sql.length && sql[index] !== '\n' && sql[index] !== '\r') {
+                index++;
+            }
+            maskRange(commentStart, index);
+            continue;
+        }
+
+        if (char === '/' && sql[index + 1] === '*') {
+            const commentStart = index;
+            let depth = 1;
+            index += 2;
+
+            while (index < sql.length && depth > 0) {
+                if (sql[index] === '/' && sql[index + 1] === '*') {
+                    depth++;
+                    index += 2;
+                } else if (sql[index] === '*' && sql[index + 1] === '/') {
+                    depth--;
+                    index += 2;
+                } else {
+                    index++;
+                }
+            }
+
+            maskRange(commentStart, index);
+            continue;
+        }
+
+        // Preserve SQL Server temp-table identifiers such as #staging and ##global_staging.
+        const isTempTableIdentifier = char === '#' && (
+            /[a-zA-Z0-9_]/.test(sql[index + 1] || '') ||
+            (sql[index + 1] === '#' && /[a-zA-Z0-9_]/.test(sql[index + 2] || ''))
+        );
+        if (char === '#' && !isTempTableIdentifier) {
+            const commentStart = index;
+            while (index < sql.length && sql[index] !== '\n' && sql[index] !== '\r') {
+                index++;
+            }
+            maskRange(commentStart, index);
+            continue;
+        }
+
+        index++;
+    }
+
+    return masked.join('');
+}
+
+function findMatchingSqlParenthesis(sql: string, openingIndex: number): number {
+    let depth = 0;
+
+    for (let index = openingIndex; index < sql.length; index++) {
+        const char = sql[index];
+        const dollarQuotedEnd = skipDollarQuotedSqlToken(sql, index);
+        if (dollarQuotedEnd !== null) {
+            index = dollarQuotedEnd - 1;
+            continue;
+        }
+        if (char === "'" || char === '"' || char === '`' || char === '[') {
+            index = skipQuotedSqlToken(sql, index) - 1;
+            continue;
+        }
+        if (char === '(') {
+            depth++;
+        } else if (char === ')') {
+            depth--;
+            if (depth === 0) {
+                return index;
+            }
+        }
+    }
+
+    return -1;
+}
+
+function findCteDeclarations(sql: string): Array<{ name: string; index: number }> {
+    const maskedSql = maskSqlCommentsPreservingPositions(sql);
+    const declarations: Array<{ name: string; index: number }> = [];
+    const withPattern = /\b(WITH\s+(?:RECURSIVE\s+)?)(\w+)\s+AS\s*\(/gi;
+    let match: RegExpExecArray | null;
+
+    while ((match = withPattern.exec(maskedSql)) !== null) {
+        let cteName = match[2];
+        let nameIndex = match.index + match[1].length;
+        let openingIndex = match.index + match[0].lastIndexOf('(');
+
+        while (cteName) {
+            declarations.push({ name: cteName, index: nameIndex });
+
+            const closingIndex = findMatchingSqlParenthesis(maskedSql, openingIndex);
+            if (closingIndex < 0) {
+                break;
+            }
+
+            let nextIndex = closingIndex + 1;
+            while (nextIndex < maskedSql.length && /\s/.test(maskedSql[nextIndex])) {
+                nextIndex++;
+            }
+            if (maskedSql[nextIndex] !== ',') {
+                break;
+            }
+
+            nextIndex++;
+            while (nextIndex < maskedSql.length && /\s/.test(maskedSql[nextIndex])) {
+                nextIndex++;
+            }
+
+            const nextCteMatch = /^(\w+)\s+AS\s*\(/i.exec(maskedSql.slice(nextIndex));
+            if (!nextCteMatch) {
+                break;
+            }
+
+            cteName = nextCteMatch[1];
+            nameIndex = nextIndex;
+            openingIndex = nextIndex + nextCteMatch[0].lastIndexOf('(');
+        }
+    }
+
+    return declarations;
+}
 
 function getNodeSqlParserCtor(): NodeSqlParserCtor | null {
     if (cachedSqlParserCtor !== undefined) {
@@ -52,7 +248,6 @@ export class LineageBuilder implements LineageGraph {
     private columnEdgeIds = new Set<string>();
     private incomingEdgesByNodeId: Map<string, LineageEdge[]> = new Map();
     private outgoingEdgesByNodeId: Map<string, LineageEdge[]> = new Map();
-    private nodeIdsByNormalizedName: Map<string, string[]> = new Map();
     private options: { includeExternal: boolean; includeColumns: boolean };
 
     constructor(options = { includeExternal: true, includeColumns: true }) {
@@ -79,13 +274,12 @@ export class LineageBuilder implements LineageGraph {
         this.columnEdgeIds.clear();
         this.incomingEdgesByNodeId.clear();
         this.outgoingEdgesByNodeId.clear();
-        this.nodeIdsByNormalizedName.clear();
 
         // Add all table/view definitions as nodes
         const seenNodes = new Set<string>();
         for (const defs of index.definitionMap.values()) {
             for (const def of defs) {
-                const tableKey = getQualifiedKey(def.name, def.schema);
+                const tableKey = getDefinitionKey(def);
                 const nodeId = this.getTableNodeId(def.type, tableKey);
                 if (seenNodes.has(nodeId)) {continue;}
                 seenNodes.add(nodeId);
@@ -149,14 +343,13 @@ export class LineageBuilder implements LineageGraph {
             };
             
             this.nodes.set(nodeId, cteNode);
-            this.registerNodeName(nodeId, cteNode.name);
         }
 
         // Add column nodes if enabled
         if (this.options.includeColumns) {
             for (const [key, defs] of index.definitionMap.entries()) {
                 for (const def of defs) {
-                    const tableKey = getQualifiedKey(def.name, def.schema);
+                    const tableKey = getDefinitionKey(def);
                     const nodeId = this.getTableNodeId(def.type, tableKey);
                     if (!this.nodes.has(nodeId)) {continue;}
                     this.addColumnNodes(tableKey, def.columns, def.type);
@@ -166,8 +359,7 @@ export class LineageBuilder implements LineageGraph {
 
         // Create edges from file references
         for (const [filePath, analysis] of index.files) {
-            const sql = this.resolveFileSql(filePath, analysis, fileSqlByPath, 'warn', 'CTE/alias extraction');
-            this.addFileEdges(filePath, analysis, sql);
+            this.addFileEdges(filePath, analysis);
             this.addColumnEdgesFromTransformations(filePath, analysis);
         }
 
@@ -253,9 +445,9 @@ export class LineageBuilder implements LineageGraph {
      * Add table/view definition as node
      */
     addDefinitionNode(def: SchemaDefinition): LineageNode {
-        const tableKey = getQualifiedKey(def.name, def.schema);
+        const tableKey = getDefinitionKey(def);
         const nodeId = this.getTableNodeId(def.type, tableKey);
-        const schemaPrefix = def.schema ? `${def.schema}.` : '';
+        const fullName = getDisplayName(def.name, def.schema, def.catalog);
         const existing = this.nodes.get(nodeId);
         if (existing) {
             const existingFiles = new Set<string>(existing.metadata.definitionFiles || []);
@@ -270,12 +462,13 @@ export class LineageBuilder implements LineageGraph {
         const node: LineageNode = {
             id: nodeId,
             type: def.type,
-            name: getDisplayName(def.name, def.schema),
+            name: fullName,
             filePath: def.filePath,
             lineNumber: def.lineNumber,
             metadata: {
                 schema: def.schema,
-                fullName: `${schemaPrefix}${def.name}`,
+                catalog: def.catalog,
+                fullName,
                 columnCount: def.columns.length,
                 definitionFiles: [def.filePath],
                 definitionLocations: [{ filePath: def.filePath, lineNumber: def.lineNumber }]
@@ -283,7 +476,6 @@ export class LineageBuilder implements LineageGraph {
         };
 
         this.nodes.set(nodeId, node);
-        this.registerNodeName(nodeId, node.name);
         return node;
     }
 
@@ -298,7 +490,7 @@ export class LineageBuilder implements LineageGraph {
         }
 
         for (const column of columns) {
-            const columnId = this.getColumnNodeId(tableKey, column.name);
+            const columnId = this.getColumnNodeId(tableKey, column.name, column);
             const existingColumn = this.nodes.get(columnId);
             if (existingColumn) {
                 const existingFiles = new Set<string>(existingColumn.metadata.definitionFiles || []);
@@ -329,7 +521,6 @@ export class LineageBuilder implements LineageGraph {
             };
 
             this.nodes.set(columnId, columnNode);
-            this.registerNodeName(columnId, columnNode.name);
 
             // Add edge from table to column
             this.addEdge({
@@ -353,38 +544,15 @@ export class LineageBuilder implements LineageGraph {
      * IMPORTANT: Edges are created per-statement, not per-file
      * This prevents false relationships between unrelated queries in the same file
      */
-    private addFileEdges(filePath: string, analysis: FileAnalysis, sql?: string | null): void {
-        // Collect CTE names from this file to filter them out
-        const fileCteNames = new Set<string>();
-        if (analysis.queries) {
-            for (const query of analysis.queries) {
-                if (query.ctes) {
-                    for (const cte of query.ctes) {
-                        fileCteNames.add(cte.name.toLowerCase());
-                    }
-                }
-            }
-        }
-
-        // ALWAYS extract CTE names and subquery aliases directly from SQL file as a fallback/verification
-        if (sql) {
-            this.extractCTEAndAliasNames(sql, fileCteNames);
-        }
-
+    private addFileEdges(filePath: string, analysis: FileAnalysis): void {
         // Group references by statement index for per-statement lineage
         const statementRefs = new Map<number, { inputs: Set<string>; outputs: Set<string> }>();
 
         for (const ref of analysis.references) {
-            const tableKey = getQualifiedKey(ref.tableName, ref.schema);
-            const tableNameLower = ref.tableName.toLowerCase();
+            const tableKey = getReferenceKey(ref);
 
             // Skip CTE references - they are not real table references
             if (ref.referenceType === 'cte') {
-                continue;
-            }
-
-            // Skip if the table name matches a known CTE or subquery alias
-            if (fileCteNames.has(tableNameLower)) {
                 continue;
             }
 
@@ -400,8 +568,8 @@ export class LineageBuilder implements LineageGraph {
                 stmtBucket.inputs.add(tableKey);
             }
 
-            // INSERT, UPDATE, DELETE targets are data destinations (outputs)
-            if (ref.referenceType === 'insert' || ref.referenceType === 'update' || ref.referenceType === 'delete') {
+            // Data-modification targets are destinations (outputs).
+            if (ref.referenceType === 'insert' || ref.referenceType === 'update' || ref.referenceType === 'delete' || ref.referenceType === 'merge') {
                 stmtBucket.outputs.add(tableKey);
             }
         }
@@ -421,7 +589,7 @@ export class LineageBuilder implements LineageGraph {
         }
 
         for (const def of analysis.definitions) {
-            const tableKey = getQualifiedKey(def.name, def.schema);
+            const tableKey = getDefinitionKey(def);
             const isView = def.type === 'view';
             const isCtas = def.type === 'table'
                 && def.sql
@@ -564,6 +732,8 @@ export class LineageBuilder implements LineageGraph {
                         sourceColumnName: inputCol.columnName,
                         targetTableId,
                         targetColumnName: transform.outputColumn,
+                        sourceColumnId: this.resolveColumnNodeId(sourceTableId, inputCol.columnName),
+                        targetColumnId: this.resolveColumnNodeId(targetTableId, transform.outputColumn),
                         transformationType: this.mapTransformationType(transform.operation),
                         expression: transform.expression,
                         filePath,
@@ -588,7 +758,22 @@ export class LineageBuilder implements LineageGraph {
     private resolveTableId(tableName: string | undefined, filePath: string): string | null {
         if (!tableName) {return null;}
 
-        const normalizedName = tableName.toLowerCase();
+        const exactName = tableName.trim();
+        const normalizedName = exactName.toLowerCase();
+
+        for (const type of ['table', 'view', 'cte', 'external']) {
+            const exactId = `${type}:${exactName}`;
+            if (this.nodes.has(exactId)) {
+                return exactId;
+            }
+        }
+
+        // Mixed-case canonical keys represent delimited identifiers. If their
+        // exact node is absent, folding them would attach lineage to a different
+        // physical relation (for example PostgreSQL users vs "Users").
+        if (exactName !== normalizedName) {
+            return null;
+        }
 
         // Try with table: prefix (most common)
         const tableId = `table:${normalizedName}`;
@@ -614,17 +799,6 @@ export class LineageBuilder implements LineageGraph {
             return externalId;
         }
 
-        // Try to find by node name (without prefix)
-        const matchingNodeIds = this.nodeIdsByNormalizedName.get(normalizedName);
-        if (matchingNodeIds) {
-            for (const nodeId of matchingNodeIds) {
-                const node = this.nodes.get(nodeId);
-                if (node && node.name.toLowerCase() === normalizedName) {
-                    return nodeId;
-                }
-            }
-        }
-
         return null;
     }
 
@@ -641,12 +815,12 @@ export class LineageBuilder implements LineageGraph {
         // 1. Check statement type from QueryAnalysis
         const statementType = query.statementType;
 
-        // 2. For INSERT/UPDATE/DELETE, find the target from references
-        if (statementType === 'insert' || statementType === 'update' || statementType === 'delete') {
+        // 2. For data-modification statements, find the target from references.
+        if (statementType === 'insert' || statementType === 'update' || statementType === 'delete' || statementType === 'merge') {
             for (const ref of analysis.references) {
                 if (ref.referenceType === statementType &&
                     (ref.statementIndex === queryIndex || ref.statementIndex === undefined)) {
-                    const tableKey = getQualifiedKey(ref.tableName, ref.schema);
+                    const tableKey = getReferenceKey(ref);
                     return this.resolveTableId(tableKey, filePath);
                 }
             }
@@ -673,9 +847,10 @@ export class LineageBuilder implements LineageGraph {
         // 6. Try to find target from statement-level references
         for (const ref of analysis.references) {
             if ((ref.referenceType === 'insert' ||
-                 ref.referenceType === 'update') &&
+                 ref.referenceType === 'update' ||
+                 ref.referenceType === 'merge') &&
                 (ref.statementIndex === queryIndex || ref.statementIndex === undefined)) {
-                const tableKey = getQualifiedKey(ref.tableName, ref.schema);
+                const tableKey = getReferenceKey(ref);
                 const resolved = this.resolveTableId(tableKey, filePath);
                 if (resolved) {return resolved;}
             }
@@ -684,26 +859,32 @@ export class LineageBuilder implements LineageGraph {
         // 7. Fallback: If this file has exactly one definition and this is a data modification query
         if (analysis.definitions.length === 1) {
             const def = analysis.definitions[0];
-            const tableKey = getQualifiedKey(def.name, def.schema);
+            const tableKey = getDefinitionKey(def);
             const resolved = this.resolveTableId(tableKey, filePath);
             if (resolved) {return resolved;}
         }
 
         // 8. Fallback: Check for SELECT INTO or INSERT patterns in SQL
         if (query.sql) {
-            const sql = query.sql.toUpperCase();
+            const sql = maskSqlCommentsPreservingPositions(query.sql);
+            const identitySource = analysis.definitions.find(def => def.identifierCaseFolding)
+                || analysis.references.find(ref => ref.identifierCaseFolding);
+            const identifierSemantics = {
+                identifierCaseFolding: identitySource?.identifierCaseFolding,
+                quotedIdentifiersCaseSensitive: identitySource?.quotedIdentifiersCaseSensitive,
+            };
 
             // SELECT INTO pattern
-            const intoMatch = sql.match(/INTO\s+(?:TEMP(?:ORARY)?(?:\s+TABLE)?\s+)?(?:(\w+)\.)?([A-Z_][A-Z0-9_$#]*)/);
+            const intoMatch = sql.match(/INTO\s+(?:TEMP(?:ORARY)?(?:\s+TABLE)?\s+)?(?:(\w+)\.)?([A-Z_][A-Z0-9_$#]*)/i);
             if (intoMatch) {
-                const tableKey = getQualifiedKey(intoMatch[2], intoMatch[1]);
+                const tableKey = getQualifiedKey(intoMatch[2], intoMatch[1], identifierSemantics);
                 return this.resolveTableId(tableKey, filePath);
             }
 
             // INSERT INTO pattern
-            const insertMatch = sql.match(/INSERT\s+INTO\s+(?:(\w+)\.)?([A-Z_][A-Z0-9_$#]*)/);
+            const insertMatch = sql.match(/INSERT\s+INTO\s+(?:(\w+)\.)?([A-Z_][A-Z0-9_$#]*)/i);
             if (insertMatch) {
-                const tableKey = getQualifiedKey(insertMatch[2], insertMatch[1]);
+                const tableKey = getQualifiedKey(insertMatch[2], insertMatch[1], identifierSemantics);
                 return this.resolveTableId(tableKey, filePath);
             }
         }
@@ -724,7 +905,7 @@ export class LineageBuilder implements LineageGraph {
         }
         if (matchingDefs.length === 1) {
             const onlyDef = matchingDefs[0];
-            return this.resolveTableId(getQualifiedKey(onlyDef.name, onlyDef.schema), filePath);
+            return this.resolveTableId(getDefinitionKey(onlyDef), filePath);
         }
 
         const queryLineNumber = typeof query?.lineNumber === 'number' ? query.lineNumber : undefined;
@@ -753,7 +934,7 @@ export class LineageBuilder implements LineageGraph {
         if (!bestDef) {
             return null;
         }
-        return this.resolveTableId(getQualifiedKey(bestDef.name, bestDef.schema), filePath);
+        return this.resolveTableId(getDefinitionKey(bestDef), filePath);
     }
 
     /**
@@ -784,35 +965,21 @@ export class LineageBuilder implements LineageGraph {
      * Resolve external references (tables not defined in workspace)
      */
     addExternalNode(tableKey: string): LineageNode {
-        const normalizedKey = getQualifiedKey(tableKey);
+        const normalizedKey = tableKey;
         const parsed = parseQualifiedKey(normalizedKey);
         const nodeId = this.getTableNodeId('external', normalizedKey);
 
         const node: LineageNode = {
             id: nodeId,
             type: 'external',
-            name: getDisplayName(parsed.name, parsed.schema),
+            name: getDisplayName(parsed.name, parsed.schema, parsed.catalog),
             metadata: {
                 isExternal: true
             }
         };
 
         this.nodes.set(nodeId, node);
-        this.registerNodeName(nodeId, node.name);
         return node;
-    }
-
-    private registerNodeName(nodeId: string, nodeName: string): void {
-        const normalizedName = nodeName.toLowerCase();
-        const existing = this.nodeIdsByNormalizedName.get(normalizedName);
-        if (existing) {
-            if (!existing.includes(nodeId)) {
-                existing.push(nodeId);
-            }
-            return;
-        }
-
-        this.nodeIdsByNormalizedName.set(normalizedName, [nodeId]);
     }
 
     private addEdge(edge: LineageEdge): void {
@@ -947,7 +1114,8 @@ export class LineageBuilder implements LineageGraph {
      * Get column lineage path
      */
     getColumnLineage(tableId: string, columnName: string): LineagePath[] {
-        const columnId = this.getColumnNodeId(tableId, columnName);
+        const columnId = this.resolveColumnNodeId(tableId, columnName)
+            || this.getColumnNodeId(tableId.replace(/^(?:table|view|external|cte):/, ''), columnName);
         const columnNode = this.nodes.get(columnId);
 
         if (!columnNode) {return [];}
@@ -986,21 +1154,47 @@ export class LineageBuilder implements LineageGraph {
     /**
      * Generate unique column node ID
      */
-    private getColumnNodeId(tableKey: string, columnName: string): string {
-        return `column:${tableKey}.${columnName.toLowerCase()}`;
+    private getColumnNodeId(tableKey: string, columnName: string, qualification: ColumnInfo = {
+        name: columnName,
+        dataType: 'unknown',
+        nullable: true,
+        primaryKey: false,
+    }): string {
+        return `column:${getColumnKey(tableKey, columnName, qualification)}`;
+    }
+
+    private resolveColumnNodeId(tableId: string, columnName: string): string | undefined {
+        const relationKey = tableId.replace(/^(?:table|view|external|cte):/, '');
+        const parentIds = new Set(
+            tableId.includes(':')
+                ? [tableId]
+                : ['table', 'view', 'external', 'cte'].map(type => `${type}:${relationKey}`)
+        );
+        const exact = [...this.nodes.values()].find(node =>
+            node.type === 'column' && parentIds.has(node.parentId || '') && node.name === columnName
+        );
+        if (exact) {return exact.id;}
+
+        const folded = [...this.nodes.values()].filter(node =>
+            node.type === 'column'
+            && parentIds.has(node.parentId || '')
+            && node.name.toLowerCase() === columnName.toLowerCase()
+        );
+        return folded.length === 1 ? folded[0].id : undefined;
     }
 
     private resolveTableNodeId(tableKey: string): string | null {
-        // A referenced object may have been defined as a table, a view, or a CTE
-        // (or already materialized as an external node). Statement edges must
-        // resolve to whichever node already exists; checking only `table:` lets a
-        // view/CTE reference fall through to a fresh `external:` node, leaving the
-        // real `view:`/`cte:` node disconnected from the lineage graph.
-        const candidateTypes = ['table', 'view', 'cte', 'external'];
+        // A referenced object may have been defined as a table or view (or
+        // already materialized as an external node). Statement edges must
+        // resolve to whichever physical relation already exists.
+        // Table references reaching this stage are physical relations; CTE
+        // references are tagged and skipped in addFileEdges. Resolving a later
+        // physical table to an earlier file-scoped CTE would conflate scopes.
+        const candidateTypes = ['table', 'view', 'external'];
 
         const parsed = parseQualifiedKey(tableKey);
-        const keysToTry = parsed.schema
-            ? [tableKey, getQualifiedKey(parsed.name)]
+        const keysToTry = parsed.schema || parsed.catalog
+            ? [tableKey, parsed.name]
             : [tableKey];
 
         for (const key of keysToTry) {
@@ -1023,13 +1217,22 @@ export class LineageBuilder implements LineageGraph {
         filePath: string,
         cteNames: Map<string, { name: string; filePath: string; lineNumber: number }>
     ): void {
+        const declarations = findCteDeclarations(sql);
         const ParserCtor = getNodeSqlParserCtor();
         if (!ParserCtor) {
-            this.extractCTEsWithRegex(sql, filePath, cteNames);
+            this.extractCTEsWithRegex(sql, filePath, cteNames, declarations);
             return;
         }
 
         const parser = new ParserCtor();
+        const cteLineNumbers = new Map<string, number>();
+        for (const declaration of declarations) {
+            const cteKey = declaration.name.toLowerCase();
+            if (!cteLineNumbers.has(cteKey)) {
+                const lineNumber = sql.substring(0, declaration.index).split('\n').length;
+                cteLineNumbers.set(cteKey, lineNumber);
+            }
+        }
         // Try different dialects
         const dialects = ['postgresql', 'mysql', 'transactsql', 'snowflake', 'bigquery'];
         let parsedSuccessfully = false;
@@ -1054,11 +1257,10 @@ export class LineageBuilder implements LineageGraph {
                         if (cteName && typeof cteName === 'string') {
                             const cteKey = cteName.toLowerCase();
                             if (!cteNames.has(cteKey)) {
-                                const lineNumber = this.getLineNumberFromSQL(sql, cteName);
                                 cteNames.set(cteKey, {
                                     name: cteName,
                                     filePath: filePath,
-                                    lineNumber: lineNumber
+                                    lineNumber: cteLineNumbers.get(cteKey) ?? 1
                                 });
                             }
                         }
@@ -1078,7 +1280,7 @@ export class LineageBuilder implements LineageGraph {
         }
 
         // Fallback to regex extraction
-        this.extractCTEsWithRegex(sql, filePath, cteNames);
+        this.extractCTEsWithRegex(sql, filePath, cteNames, declarations);
     }
 
     /**
@@ -1087,19 +1289,13 @@ export class LineageBuilder implements LineageGraph {
     private extractCTEsWithRegex(
         sql: string,
         filePath: string,
-        cteNames: Map<string, { name: string; filePath: string; lineNumber: number }>
+        cteNames: Map<string, { name: string; filePath: string; lineNumber: number }>,
+        declarations = findCteDeclarations(sql)
     ): void {
-        // Match WITH ... AS patterns (handles both WITH name AS and WITH RECURSIVE name AS)
-        const withPattern = /WITH\s+(?:RECURSIVE\s+)?(\w+)\s+AS\s*\(/gi;
-        let match;
-        
-        while ((match = withPattern.exec(sql)) !== null) {
-            const cteName = match[1];
+        for (const declaration of declarations) {
+            const cteName = declaration.name;
             if (cteName && !this.isReservedWord(cteName)) {
-                // Find line number
-                const beforeMatch = sql.substring(0, match.index);
-                const lineNumber = beforeMatch.split('\n').length;
-                
+                const lineNumber = sql.substring(0, declaration.index).split('\n').length;
                 const cteKey = cteName.toLowerCase();
                 if (!cteNames.has(cteKey)) {
                     cteNames.set(cteKey, {
@@ -1120,131 +1316,4 @@ export class LineageBuilder implements LineageGraph {
         return reserved.includes(word.toLowerCase());
     }
 
-    /**
-     * Get line number from SQL for a given identifier
-     */
-    private getLineNumberFromSQL(sql: string, identifier: string): number {
-        // Find the first occurrence of the identifier that's part of a WITH clause
-        const escaped = escapeRegex(identifier);
-        const withPattern = new RegExp(`WITH\\s+(?:RECURSIVE\\s+)?${escaped}\\s+AS`, 'i');
-        const match = withPattern.exec(sql);
-        if (match) {
-            const beforeMatch = sql.substring(0, match.index);
-            return beforeMatch.split('\n').length;
-        }
-        return 1;
-    }
-
-
-    /**
-     * Extract CTE names and subquery aliases from SQL content
-     * Consolidates all CTE/alias extraction patterns in one place
-     */
-    private extractCTEAndAliasNames(sql: string, cteNames: Set<string>): void {
-        const reservedWords = new Set(['select', 'from', 'where', 'join', 'inner', 'left', 'right', 'outer', 'on', 'as', 'with', 'recursive']);
-        let match;
-
-        // Strip comments for cleaner pattern matching on CTE detection
-        const sqlNoComments = stripSqlComments(sql);
-
-        // Use regex to find CTE names: WITH name AS or WITH RECURSIVE name AS
-        // Also handle multi-CTE: WITH name1 AS (...), name2 AS (...)
-        const ctePattern = /WITH\s+(?:RECURSIVE\s+)?(\w+)\s+AS\s*\(/gi;
-        while ((match = ctePattern.exec(sqlNoComments)) !== null) {
-            const cteName = match[1];
-            if (cteName && !reservedWords.has(cteName.toLowerCase())) {
-                cteNames.add(cteName.toLowerCase());
-            }
-        }
-
-        // Also check for comma-separated CTEs: WITH name1 AS (...), name2 AS (...)
-        const multiCtePattern = /,\s*(\w+)\s+AS\s*\(/gi;
-        while ((match = multiCtePattern.exec(sqlNoComments)) !== null) {
-            const cteName = match[1];
-            if (cteName && !reservedWords.has(cteName.toLowerCase())) {
-                cteNames.add(cteName.toLowerCase());
-            }
-        }
-
-        // Extract subquery aliases: ) AS alias_name
-        // This catches subqueries in FROM clauses like: FROM (SELECT ...) AS customer_totals
-        // Use original SQL for context checking but stripped SQL for pattern matching
-        const subqueryAliasPattern = /\)\s+AS\s+(\w+)(?=\s|$|,|WHERE|JOIN|ON)/gi;
-        while ((match = subqueryAliasPattern.exec(sqlNoComments)) !== null) {
-            const aliasName = match[1];
-            if (aliasName && !reservedWords.has(aliasName.toLowerCase())) {
-                // Check if this alias appears in a FROM clause context (not a column alias)
-                const beforeMatch = sqlNoComments.substring(Math.max(0, match.index - 300), match.index);
-                const fromBefore = /\bFROM\s+\(/i.test(beforeMatch) || /\bUPDATE\s+\w+\s+FROM\s+\(/i.test(beforeMatch);
-                if (fromBefore) {
-                    cteNames.add(aliasName.toLowerCase());
-                }
-            }
-        }
-
-        // Extract subquery aliases from UPDATE...FROM patterns
-        // Pattern: UPDATE table FROM (SELECT ...) AS alias
-        const updateFromPattern = /UPDATE\s+\w+\s+FROM\s+\([^)]+\)\s+AS\s+(\w+)/gi;
-        while ((match = updateFromPattern.exec(sqlNoComments)) !== null) {
-            const aliasName = match[1];
-            if (aliasName && !reservedWords.has(aliasName.toLowerCase())) {
-                cteNames.add(aliasName.toLowerCase());
-            }
-        }
-
-        // Extract subquery aliases using balanced parenthesis matching for complex subqueries
-        // This handles multi-line and nested subqueries in UPDATE...FROM patterns
-        this.extractSubqueryAliasesWithParenMatching(sqlNoComments, cteNames, reservedWords);
-    }
-
-    /**
-     * Extract subquery aliases using balanced parenthesis matching
-     * Handles complex nested subqueries that regex patterns may miss
-     */
-    private extractSubqueryAliasesWithParenMatching(sql: string, cteNames: Set<string>, reservedWords: Set<string>): void {
-        let updateIndex = 0;
-        while ((updateIndex = sql.indexOf('UPDATE', updateIndex)) !== -1) {
-            const fromIndex = sql.indexOf('FROM', updateIndex);
-            if (fromIndex === -1 || fromIndex > updateIndex + 500) {
-                updateIndex += 6;
-                continue;
-            }
-
-            // Find the opening paren after FROM
-            const openParenIndex = sql.indexOf('(', fromIndex);
-            if (openParenIndex === -1) {
-                updateIndex += 6;
-                continue;
-            }
-
-            // Find the matching closing paren using balanced counting
-            let parenCount = 0;
-            let closeParenIndex = -1;
-            const maxSearchLength = Math.min(sql.length, openParenIndex + 2000);
-            for (let i = openParenIndex; i < maxSearchLength; i++) {
-                if (sql[i] === '(') {parenCount++;}
-                else if (sql[i] === ')') {
-                    parenCount--;
-                    if (parenCount === 0) {
-                        closeParenIndex = i;
-                        break;
-                    }
-                }
-            }
-
-            if (closeParenIndex !== -1) {
-                // Check for AS alias after the closing paren
-                const afterParen = sql.substring(closeParenIndex + 1, closeParenIndex + 50).trim();
-                const asMatch = afterParen.match(/^AS\s+(\w+)/i);
-                if (asMatch) {
-                    const aliasName = asMatch[1].toLowerCase();
-                    if (!reservedWords.has(aliasName)) {
-                        cteNames.add(aliasName);
-                    }
-                }
-            }
-
-            updateIndex = fromIndex + 1;
-        }
-    }
 }

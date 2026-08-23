@@ -1,6 +1,28 @@
-import { collapseSnowflakePaths, rewriteGroupingSets, preprocessOracleSyntax, preprocessSnowflakeSyntax, preprocessTeradataSyntax, preprocessTransactSqlSyntax, preprocessForParsing, hoistNestedCtes } from '../../../src/webview/sqlParser';
+import { collapseSnowflakePaths, rewriteGroupingSets, preprocessHashTempTableIdentifiers, preprocessOracleSyntax, preprocessSnowflakeSyntax, preprocessTeradataSyntax, preprocessTransactSqlSyntax, preprocessForParsing, hoistNestedCtes } from '../../../src/webview/sqlParser';
+import { findMatchingParen, maskStringsAndComments } from '../../../src/webview/parser/dialects/preprocessing';
 
 describe('parser preprocessing transforms', () => {
+    describe('shared lexical helpers', () => {
+        it('preserves and quotes SQL Server global temp-table identifiers', () => {
+            const sql = 'CREATE TABLE ##global_temp (id INT); SELECT * FROM ##global_temp';
+
+            expect(maskStringsAndComments(sql)).toContain('##global_temp');
+            expect(preprocessHashTempTableIdentifiers(sql, 'TransactSQL')).toBe(
+                'CREATE TABLE "##global_temp" (id INT); SELECT * FROM "##global_temp"'
+            );
+        });
+
+        it('finds the outer close parenthesis past backtick and bracket identifiers', () => {
+            const sql = '(SELECT `a)b`, [order) items] FROM t) trailing';
+            expect(findMatchingParen(sql, 0)).toBe(sql.indexOf(') trailing'));
+        });
+
+        it('finds the outer close parenthesis past nested block comments', () => {
+            const sql = '(SELECT /* outer /* inner ) */ still ) */ 1) trailing';
+            expect(findMatchingParen(sql, 0)).toBe(sql.indexOf(') trailing'));
+        });
+    });
+
     describe('rewriteGroupingSets', () => {
         it('returns null when GROUPING SETS is absent', () => {
             const sql = 'SELECT dept, SUM(sales) FROM sales GROUP BY dept';
@@ -144,6 +166,16 @@ describe('parser preprocessing transforms', () => {
             expect(rewritten).not.toMatch(/\bSTART\s+WITH\b/i);
             expect(rewritten).not.toMatch(/\bCONNECT\s+BY\b/i);
             expect(rewritten).toContain('SELECT employee_id FROM employees');
+        });
+
+        it('does not hide Oracle clauses after an identifier containing dollars', () => {
+            const sql = 'SELECT id FROM my$$tbl START WITH parent_id IS NULL CONNECT BY PRIOR id = parent_id';
+            const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+            expect(rewritten).not.toBeNull();
+            expect(rewritten).toContain('FROM my$$tbl');
+            expect(rewritten).not.toMatch(/\bSTART\s+WITH\b/i);
+            expect(rewritten).not.toMatch(/\bCONNECT\s+BY\b/i);
         });
 
         it('strips ORDER SIBLINGS BY', () => {

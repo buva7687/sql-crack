@@ -52,10 +52,45 @@ describe('VisualizationPanel behavior', () => {
             '</script><!-- -->]]>'
         );
 
-        expect(escaped).toContain('<\\/script>');
-        expect(escaped).toContain('<\\!--');
-        expect(escaped).toContain('--\\>');
-        expect(escaped).toContain(']\\]>');
+        expect(escaped).toContain('\\u003c/script\\u003e');
+        expect(escaped).toContain('\\u003c!--');
+        expect(escaped).toContain('--\\u003e');
+        expect(escaped).toContain(']]\\u003e');
         expect(escaped).not.toContain('</script>');
+    });
+
+    it('refreshes a pinned snapshot in the panel that requested it', () => {
+        const postMessage = jest.fn();
+        const panel = {
+            _isPinned: true,
+            _currentSql: 'SELECT * FROM pinned_snapshot',
+            _currentOptions: { dialect: 'PostgreSQL', fileName: 'snapshot.sql' },
+            _isStale: true,
+            _postMessage: postMessage,
+        };
+
+        (VisualizationPanel.prototype as any)._handleRefreshRequest.call(panel);
+
+        expect(postMessage).toHaveBeenCalledWith({
+            command: 'refresh',
+            sql: 'SELECT * FROM pinned_snapshot',
+            options: { dialect: 'PostgreSQL', fileName: 'snapshot.sql' },
+        });
+        expect(panel._isStale).toBe(false);
+        expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith('sql-crack.refresh');
+    });
+
+    it('routes mutable main-panel refresh through the source-aware command', () => {
+        const panel = {
+            _isPinned: false,
+            _currentSql: 'SELECT 1',
+            _currentOptions: { dialect: 'MySQL', fileName: 'query.sql' },
+            _postMessage: jest.fn(),
+        };
+
+        (VisualizationPanel.prototype as any)._handleRefreshRequest.call(panel);
+
+        expect(vscode.commands.executeCommand).toHaveBeenCalledWith('sql-crack.refresh');
+        expect(panel._postMessage).not.toHaveBeenCalled();
     });
 });

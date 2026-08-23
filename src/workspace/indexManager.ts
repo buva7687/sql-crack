@@ -17,13 +17,44 @@ import {
 } from './types';
 import { WorkspaceScanner } from './scanner';
 import { normalizeFileExtensions } from '../shared/fileExtensions';
-import { getQualifiedKey, normalizeIdentifier } from './identifiers';
+import { getQualifiedKey, IdentifierQualification, normalizeIdentifier } from './identifiers';
 import { logger } from '../logger';
 
-const INDEX_VERSION = 4; // Bumped for column extraction in schema definitions
+const INDEX_VERSION = 5; // Bumped for quoted and catalog-qualified relation identity
 const DEFAULT_AUTO_INDEX_THRESHOLD = 50;
 const DEFAULT_CACHE_TTL_HOURS = 24;
 const DEFAULT_MAX_CACHE_BYTES = 4 * 1024 * 1024; // 4MB safety limit for workspaceState
+const MAX_CACHE_VALIDATION_CONCURRENCY = 4;
+
+function isFileNotFoundCode(code: string | undefined): boolean {
+    return code === 'FileNotFound' || code === 'ENOENT';
+}
+
+function getDefinitionKey(definition: SchemaDefinition): string {
+    return getQualifiedKey(definition.name, definition.schema, definition);
+}
+
+function getReferenceKey(reference: TableReference): string {
+    return getQualifiedKey(reference.tableName, reference.schema, reference);
+}
+
+function getDefinitionNameKey(definition: SchemaDefinition | undefined): string | undefined {
+    return normalizeIdentifier(
+        definition?.name,
+        definition?.nameQuoted,
+        definition?.identifierCaseFolding,
+        definition?.quotedIdentifiersCaseSensitive
+    );
+}
+
+function getReferenceNameKey(reference: TableReference | undefined): string | undefined {
+    return normalizeIdentifier(
+        reference?.tableName,
+        reference?.nameQuoted,
+        reference?.identifierCaseFolding,
+        reference?.quotedIdentifiersCaseSensitive
+    );
+}
 
 /**
  * Manages the workspace SQL index with caching and file watching
@@ -46,6 +77,7 @@ export class IndexManager {
     private _persistTimer: NodeJS.Timeout | null = null;
     private _persistDebounceMs: number = 1000;
     private _pendingDeletes: Set<string> = new Set();
+    private _deletedDuringBuild: Set<string> = new Set();
     private _fileWatcherDisposables: vscode.Disposable[] = [];
     private _pendingDialectRebuildVersion: number = 0;
     private _completedDialectRebuildVersion: number = 0;
@@ -117,6 +149,9 @@ export class IndexManager {
             return await this._buildPromise;
         } finally {
             this._buildPromise = null;
+            // Tombstones only describe events concurrent with this build. If the
+            // build failed, the next scan must observe the filesystem afresh.
+            this._deletedDuringBuild.clear();
         }
     }
 
@@ -124,7 +159,14 @@ export class IndexManager {
         progressCallback?: ProgressCallback,
         cancellationToken?: CancellationToken
     ): Promise<WorkspaceIndex> {
+        const previousIndex = this.index;
         const analyses = await this.scanner.analyzeWorkspace(progressCallback, cancellationToken);
+
+        // A cancelled refresh must not replace a complete, usable index with
+        // the scanner's partial result set.
+        if (cancellationToken?.isCancellationRequested && previousIndex) {
+            return previousIndex;
+        }
 
         // Initialize new index or reuse existing for incremental updates
         const newIndex: WorkspaceIndex = {
@@ -141,8 +183,25 @@ export class IndexManager {
         // Note: We always use the new analysis since analyzeWorkspace() already re-parsed all files
         // This ensures schema extractor improvements (like column extraction) take effect
         for (const analysis of analyses) {
-            this.addFileToIndex(analysis, newIndex);
+            if (this._deletedDuringBuild.has(analysis.filePath)) {
+                continue;
+            }
+            const previousAnalysis = previousIndex?.files.get(analysis.filePath);
+            if (analysis.readError && isFileNotFoundCode(analysis.readErrorCode)) {
+                continue;
+            }
+            if (analysis.readError && previousAnalysis) {
+                this.addFileToIndex({
+                    ...previousAnalysis,
+                    parseError: analysis.parseError || analysis.readError,
+                    readError: analysis.readError,
+                    readErrorCode: analysis.readErrorCode,
+                }, newIndex);
+            } else {
+                this.addFileToIndex(analysis, newIndex);
+            }
         }
+        newIndex.fileCount = newIndex.files.size;
 
         this.index = newIndex;
         this._changesSinceIndex = 0;
@@ -190,11 +249,44 @@ export class IndexManager {
         }
 
         const analysis = await this.scanner.analyzeFile(uri);
+        this._deletedDuringBuild.delete(uri.fsPath);
         const oldHash = this.index.fileHashes.get(uri.fsPath);
         const oldAnalysis = this.index.files.get(uri.fsPath);
 
+        if (analysis.readError && isFileNotFoundCode(analysis.readErrorCode)) {
+            if (oldAnalysis) {
+                await this.removeFile(uri);
+            }
+            return;
+        }
+
+        // A watcher update can race with an atomic save or hit a transient
+        // filesystem outage. Do not turn that temporary I/O failure into an
+        // empty graph analysis: keep the last-known-good dependencies and mark
+        // the file as unreadable so the Issues view still exposes the problem.
+        if (analysis.readError && oldAnalysis) {
+            if (oldAnalysis.readError === analysis.readError) {
+                return;
+            }
+
+            const preservedAnalysis: FileAnalysis = {
+                ...oldAnalysis,
+                parseError: analysis.parseError || analysis.readError,
+                readError: analysis.readError,
+                readErrorCode: analysis.readErrorCode,
+            };
+            this.removeFileFromIndex(oldAnalysis);
+            this.addFileToIndex(preservedAnalysis);
+            this.index.lastUpdated = Date.now();
+            this.schedulePersist();
+            this.onIndexUpdated?.();
+            return;
+        }
+
         // Check if file actually changed (hash comparison)
-        if (oldHash === analysis.contentHash && oldAnalysis) {
+        // A successful read must also replace a preserved error marker, even
+        // when the recovered content is byte-identical to the previous version.
+        if (oldHash === analysis.contentHash && oldAnalysis && !oldAnalysis.readError) {
             // No change detected - skip update
             return;
         }
@@ -221,6 +313,9 @@ export class IndexManager {
      * Remove a file from the index
      */
     async removeFile(uri: vscode.Uri): Promise<void> {
+        if (this._buildPromise) {
+            this._deletedDuringBuild.add(uri.fsPath);
+        }
         if (!this.index) {return;}
 
         const analysis = this.index.files.get(uri.fsPath);
@@ -241,27 +336,38 @@ export class IndexManager {
     /**
      * Find the definition for a table name
      */
-    findDefinition(tableName: string, schema?: string): SchemaDefinition | undefined {
+    findDefinition(
+        tableName: string,
+        schema?: string,
+        qualification: IdentifierQualification = {}
+    ): SchemaDefinition | undefined {
         if (!this.index) {return undefined;}
-        const key = getQualifiedKey(tableName, schema);
+        const key = getQualifiedKey(tableName, schema, qualification);
         const direct = this.index.definitionMap.get(key);
         if (direct && direct.length > 0) {
             return direct[0];
         }
 
-        const targetName = normalizeIdentifier(tableName);
+        const targetName = normalizeIdentifier(
+            tableName,
+            qualification.nameQuoted,
+            qualification.identifierCaseFolding,
+            qualification.quotedIdentifiersCaseSensitive
+        );
         if (!targetName) {return undefined;}
 
-        if (schema) {
+        if (schema || qualification.catalog) {
             for (const defs of this.index.definitionMap.values()) {
-                const match = defs.find(def => !def.schema && normalizeIdentifier(def.name) === targetName);
+                const match = defs.find(def =>
+                    !def.schema && !def.catalog && getDefinitionNameKey(def) === targetName
+                );
                 if (match) {return match;}
             }
             return undefined;
         }
 
         for (const defs of this.index.definitionMap.values()) {
-            const match = defs.find(def => normalizeIdentifier(def.name) === targetName);
+            const match = defs.find(def => getDefinitionNameKey(def) === targetName);
             if (match) {return match;}
         }
 
@@ -271,22 +377,31 @@ export class IndexManager {
     /**
      * Find all references to a table
      */
-    findReferences(tableName: string, schema?: string): TableReference[] {
+    findReferences(
+        tableName: string,
+        schema?: string,
+        qualification: IdentifierQualification = {}
+    ): TableReference[] {
         if (!this.index) {return [];}
-        const key = getQualifiedKey(tableName, schema);
+        const key = getQualifiedKey(tableName, schema, qualification);
         const direct = this.index.referenceMap.get(key);
         if (direct && direct.length > 0) {
             return direct;
         }
 
-        const targetName = normalizeIdentifier(tableName);
+        const targetName = normalizeIdentifier(
+            tableName,
+            qualification.nameQuoted,
+            qualification.identifierCaseFolding,
+            qualification.quotedIdentifiersCaseSensitive
+        );
         if (!targetName) {return [];}
 
-        if (schema) {
+        if (schema || qualification.catalog) {
             const matches: TableReference[] = [];
             for (const refs of this.index.referenceMap.values()) {
                 for (const ref of refs) {
-                    if (!ref.schema && normalizeIdentifier(ref.tableName) === targetName) {
+                    if (!ref.schema && !ref.catalog && getReferenceNameKey(ref) === targetName) {
                         matches.push(ref);
                     }
                 }
@@ -297,7 +412,7 @@ export class IndexManager {
         const matches: TableReference[] = [];
         for (const refs of this.index.referenceMap.values()) {
             for (const ref of refs) {
-                if (normalizeIdentifier(ref.tableName) === targetName) {
+                if (getReferenceNameKey(ref) === targetName) {
                     matches.push(ref);
                 }
             }
@@ -314,11 +429,11 @@ export class IndexManager {
         if (!analysis) {return [];}
 
         const localDefinitions = new Set(
-            analysis.definitions.map(d => getQualifiedKey(d.name, d.schema))
+            analysis.definitions.map(getDefinitionKey)
         );
 
         return analysis.references.filter(
-            ref => !localDefinitions.has(getQualifiedKey(ref.tableName, ref.schema))
+            ref => !localDefinitions.has(getReferenceKey(ref))
         );
     }
 
@@ -356,7 +471,7 @@ export class IndexManager {
         const definitionsByName = new Map<string, SchemaDefinition[]>();
         for (const defs of this.index.definitionMap.values()) {
             for (const def of defs) {
-                const name = normalizeIdentifier(def.name);
+                const name = getDefinitionNameKey(def);
                 if (!name) {continue;}
                 if (!definitionsByName.has(name)) {
                     definitionsByName.set(name, []);
@@ -367,12 +482,12 @@ export class IndexManager {
         const missing: string[] = [];
 
         for (const [key, refs] of this.index.referenceMap.entries()) {
-            const hasSchema = refs.some(ref => !!ref.schema);
+            const hasSchema = refs.some(ref => !!ref.schema || !!ref.catalog);
             if (hasSchema) {
                 if (!definedKeys.has(key)) {
-                    const refName = normalizeIdentifier(refs[0]?.tableName);
+                    const refName = getReferenceNameKey(refs[0]);
                     const defs = refName ? (definitionsByName.get(refName) || []) : [];
-                    const hasUnqualified = defs.some(def => !def.schema);
+                    const hasUnqualified = defs.some(def => !def.schema && !def.catalog);
                     if (!hasUnqualified) {
                         missing.push(key);
                     }
@@ -380,7 +495,7 @@ export class IndexManager {
                 continue;
             }
 
-            const refName = normalizeIdentifier(refs[0]?.tableName);
+            const refName = getReferenceNameKey(refs[0]);
             if (refName && !definitionsByName.has(refName)) {
                 missing.push(key);
             }
@@ -399,7 +514,7 @@ export class IndexManager {
         const refsByName = new Map<string, TableReference[]>();
         for (const refs of this.index.referenceMap.values()) {
             for (const ref of refs) {
-                const name = normalizeIdentifier(ref.tableName);
+                const name = getReferenceNameKey(ref);
                 if (!name) {continue;}
                 if (!refsByName.has(name)) {
                     refsByName.set(name, []);
@@ -414,7 +529,7 @@ export class IndexManager {
                 continue;
             }
 
-            const nameKey = normalizeIdentifier(defs[0]?.name);
+            const nameKey = getDefinitionNameKey(defs[0]);
             const nameRefs = nameKey ? refsByName.get(nameKey) : undefined;
             if (!nameRefs || nameRefs.length === 0) {
                 orphaned.push(key);
@@ -536,7 +651,7 @@ export class IndexManager {
 
         // Index definitions
         for (const def of analysis.definitions) {
-            const key = getQualifiedKey(def.name, def.schema);
+            const key = getDefinitionKey(def);
             if (!targetIndex.definitionMap.has(key)) {
                 targetIndex.definitionMap.set(key, []);
             }
@@ -545,7 +660,7 @@ export class IndexManager {
 
         // Index references
         for (const ref of analysis.references) {
-            const key = getQualifiedKey(ref.tableName, ref.schema);
+            const key = getReferenceKey(ref);
             if (!targetIndex.referenceMap.has(key)) {
                 targetIndex.referenceMap.set(key, []);
             }
@@ -565,7 +680,7 @@ export class IndexManager {
 
         // Remove definitions from this file
         for (const def of analysis.definitions) {
-            const key = getQualifiedKey(def.name, def.schema);
+            const key = getDefinitionKey(def);
             const existing = this.index.definitionMap.get(key) || [];
             const remaining = existing.filter(entry => entry.filePath !== analysis.filePath);
             if (remaining.length === 0) {
@@ -799,8 +914,17 @@ export class IndexManager {
                         try {
                             await vscode.workspace.fs.stat(uri);
                         } catch (e) {
-                            logger.debug(`[indexManager] File stat failed (likely deleted), removing: ${uri.fsPath} ${String(e)}`);
-                            await this.removeFile(uri);
+                            if (this.isFileNotFoundError(e)) {
+                                logger.debug(`[IndexManager] Queued file no longer exists, removing: ${uri.fsPath}`);
+                                await this.removeFile(uri);
+                            } else {
+                                // A provider outage or permission error is not
+                                // evidence of deletion. Retry through analyzeFile;
+                                // if it remains unreadable, updateFile preserves
+                                // and marks the last-known-good analysis.
+                                logger.debug(`[IndexManager] File stat failed, preserving until analysis retry: ${uri.fsPath} ${String(e)}`);
+                                await this.updateFile(uri);
+                            }
                             continue;
                         }
                         await this.updateFile(uri);
@@ -834,6 +958,14 @@ export class IndexManager {
         if (this._changesSinceIndex > 0) {
             this._changesSinceIndex--;
         }
+    }
+
+    private isFileNotFoundError(error: unknown): boolean {
+        if (!error || typeof error !== 'object') {
+            return false;
+        }
+        const code = 'code' in error ? String(error.code) : '';
+        return isFileNotFoundCode(code);
     }
 
     /**
@@ -932,36 +1064,69 @@ export class IndexManager {
             return false;
         }
 
-        const cachedHashes = new Map(cached.fileHashesArray || []);
-        for (const [filePath, analysis] of cached.filesArray || []) {
-            const uri = vscode.Uri.file(filePath);
-            let stat: vscode.FileStat;
-            try {
-                stat = await vscode.workspace.fs.stat(uri);
-            } catch {
-                return false;
-            }
-
-            if (typeof analysis.lastModified === 'number' && analysis.lastModified === stat.mtime) {
-                continue;
-            }
-
-            const cachedHash = cachedHashes.get(filePath) || analysis.contentHash;
-            if (!cachedHash) {
-                return false;
-            }
-
-            try {
-                const currentHash = await this.computeCurrentContentHash(uri, stat.size);
-                if (currentHash !== cachedHash) {
-                    return false;
-                }
-            } catch {
-                return false;
-            }
+        const cachedFiles = cached.filesArray || [];
+        if (cachedFiles.length !== cached.fileCount) {
+            return false;
         }
 
-        return true;
+        const cachedHashes = new Map(cached.fileHashesArray || []);
+        let nextFileIndex = 0;
+        let validationFailed = false;
+
+        const validateNextFiles = async (): Promise<void> => {
+            while (!validationFailed) {
+                const currentIndex = nextFileIndex++;
+                if (currentIndex >= cachedFiles.length) {
+                    return;
+                }
+
+                const [filePath, analysis] = cachedFiles[currentIndex];
+                const cachedHash = cachedHashes.get(filePath) || analysis.contentHash;
+
+                try {
+                    const uri = vscode.Uri.file(filePath);
+                    const stat = await vscode.workspace.fs.stat(uri);
+                    if (analysis.skippedReason === 'tooLarge') {
+                        if (analysis.fileSize !== stat.size || analysis.lastModified !== stat.mtime) {
+                            validationFailed = true;
+                        }
+                        continue;
+                    }
+                    // Preserved read-error entries retain the last-known-good
+                    // hash and can be verified like any other cached analysis.
+                    if (!cachedHash) {
+                        validationFailed = true;
+                        return;
+                    }
+                    const currentHash = await this.computeCurrentContentHash(uri, stat.size);
+                    if (currentHash !== cachedHash) {
+                        validationFailed = true;
+                        return;
+                    }
+                } catch (error) {
+                    if (this.isFileNotFoundError(error)) {
+                        validationFailed = true;
+                        return;
+                    }
+                    // If the provider is still unavailable, a preserved-error
+                    // entry is safer and more useful than discarding the entire
+                    // last-known-good workspace index. Its warning remains
+                    // visible until a successful refresh verifies/replaces it.
+                    if (analysis.readError && cachedHash) {
+                        continue;
+                    }
+                    validationFailed = true;
+                    return;
+                }
+            }
+        };
+
+        const concurrency = Math.max(
+            1,
+            Math.min(MAX_CACHE_VALIDATION_CONCURRENCY, cachedFiles.length)
+        );
+        await Promise.all(Array.from({ length: concurrency }, () => validateNextFiles()));
+        return !validationFailed;
     }
 
     private async computeCurrentContentHash(uri: vscode.Uri, expectedSize: number): Promise<string> {

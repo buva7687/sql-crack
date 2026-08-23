@@ -15,7 +15,18 @@ export {
 } from './theme';
 export type { ColorblindMode } from './theme';
 
-export { escapeRegex, safeString, escapeHtml, stripSqlComments } from './stringUtils';
+export {
+    escapeRegex,
+    safeString,
+    escapeHtml,
+    stripSqlComments,
+    maskSqlCommentsPreservingPositions,
+    isHashTempTableIdentifierAt,
+    getDollarQuoteDelimiterAt,
+    getDollarQuotedTokenEnd,
+} from './stringUtils';
+export type { StripSqlCommentsOptions } from './stringUtils';
+export { unwrapIdentifierValue } from './astUtils';
 
 export {
     CANVAS,

@@ -1,8 +1,8 @@
 // Impact Analyzer - Analyze impact of changes
 
-import { LineageGraph, LineageNode } from './types';
+import { ColumnLineageEdge, LineageGraph, LineageNode } from './types';
 import { FlowAnalyzer } from './flowAnalyzer';
-import { normalizeIdentifier, parseQualifiedKey } from '../identifiers';
+import { getColumnKey, normalizeIdentifier, parseQualifiedKey, splitLastQualifiedKeyComponent } from '../identifiers';
 
 /**
  * Type of change being analyzed
@@ -18,6 +18,7 @@ export interface ImpactReport {
         type: 'table' | 'view' | 'column';
         name: string;
         tableName?: string;
+        nodeId?: string;
     };
 
     // Direct impacts (immediate dependents)
@@ -91,9 +92,12 @@ export class ImpactAnalyzer {
     analyzeTableChange(
         tableName: string,
         changeType: ChangeType = 'modify',
-        targetType: 'table' | 'view' = 'table'
+        targetType: 'table' | 'view' = 'table',
+        requestedNodeId?: string
     ): ImpactReport {
-        const nodeId = this.getRelationNodeId(tableName, targetType);
+        const nodeId = requestedNodeId && this.graph.nodes.has(requestedNodeId)
+            ? requestedNodeId
+            : this.getRelationNodeId(tableName, targetType);
         const node = this.graph.nodes.get(nodeId);
 
         if (!node) {
@@ -111,6 +115,7 @@ export class ImpactAnalyzer {
         const directEdges = this.graph.edges.filter(e =>
             e.sourceId === nodeId && !e.targetId.startsWith(ownColumnPrefix)
         );
+        const directTargetIds = new Set(directEdges.map(edge => edge.targetId));
         const directImpacts: ImpactItem[] = [];
         const transitiveImpacts: ImpactItem[] = [];
 
@@ -120,6 +125,7 @@ export class ImpactAnalyzer {
         const foreignKeyReasons = new Map<string, string>();
         const foreignKeyColumnsByTableId = new Map<string, Set<string>>();
         const normalizedTarget = normalizeIdentifier(tableName) || tableName.toLowerCase();
+        const columnFlowByTargetId = new Map<string, ColumnLineageEdge>();
 
         // Check regular edges for non-structural relationships
         for (const edge of this.graph.edges) {
@@ -132,10 +138,16 @@ export class ImpactAnalyzer {
         if (this.graph.columnEdges) {
             for (const colEdge of this.graph.columnEdges) {
                 // Add both source and target columns as having data flow
-                const sourceColId = `column:${colEdge.sourceTableId.replace(/^(table|view):/, '')}.${colEdge.sourceColumnName.toLowerCase()}`;
-                const targetColId = `column:${colEdge.targetTableId.replace(/^(table|view):/, '')}.${colEdge.targetColumnName.toLowerCase()}`;
+                const sourceColId = colEdge.sourceColumnId
+                    || this.resolveColumnNodeId(colEdge.sourceTableId, colEdge.sourceColumnName);
+                const targetColId = colEdge.targetColumnId
+                    || this.resolveColumnNodeId(colEdge.targetTableId, colEdge.targetColumnName);
+                if (!sourceColId || !targetColId) {continue;}
                 columnsWithDataFlow.add(sourceColId);
                 columnsWithDataFlow.add(targetColId);
+                if (!columnFlowByTargetId.has(targetColId)) {
+                    columnFlowByTargetId.set(targetColId, colEdge);
+                }
             }
         }
 
@@ -163,28 +175,6 @@ export class ImpactAnalyzer {
             }
         }
 
-        // Defense-in-depth: collect target's definition files and files with direct edges
-        // to filter out cross-file false positives from shared node IDs
-        const targetDefFiles = new Set<string>(node.metadata?.definitionFiles || []);
-        if (node.filePath) {targetDefFiles.add(node.filePath);}
-
-        // Collect files that have edges originating from the target node
-        const targetEdgeFiles = new Set<string>();
-        for (const edge of this.graph.edges) {
-            if (edge.sourceId === nodeId && edge.metadata?.filePath) {
-                targetEdgeFiles.add(edge.metadata.filePath);
-            }
-        }
-
-        // Collect table/view node IDs that have a foreign key relationship with the target
-        const fkRelatedNodeIds = new Set<string>();
-        for (const [colId, reason] of foreignKeyReasons) {
-            const colNode = this.graph.nodes.get(colId);
-            if (colNode?.parentId) {
-                fkRelatedNodeIds.add(colNode.parentId);
-            }
-        }
-
         const addedImpactNodes = new Set<string>();
 
         for (const depNode of downstream.nodes) {
@@ -198,7 +188,7 @@ export class ImpactAnalyzer {
                 continue;
             }
 
-            const isDirect = directEdges.some(e => e.targetId === depNode.id);
+            const isDirect = directTargetIds.has(depNode.id);
 
             // For transitive column impacts, only include if there's actual data flow
             // (not just structural "contains" relationship from parent table)
@@ -206,38 +196,12 @@ export class ImpactAnalyzer {
                 continue;
             }
 
-            // Cross-file false positive filter for transitive table/view impacts:
-            // Skip if the impacted node's definition files have no overlap with
-            // the target's files/edge files AND there's no FK relationship
-            if (!isDirect && (depNode.type === 'table' || depNode.type === 'view')) {
-                const depDefFiles = depNode.metadata?.definitionFiles as string[] | undefined;
-                if (depDefFiles && depDefFiles.length > 0) {
-                    const hasFileOverlap = depDefFiles.some(
-                        f => targetDefFiles.has(f) || targetEdgeFiles.has(f)
-                    );
-                    // Also check if any edge connecting to this dep originated from a target-related file
-                    const hasSharedFileEdge = this.graph.edges.some(e => {
-                        if (e.targetId !== depNode.id) {return false;}
-                        const edgeFile = e.metadata?.filePath as string | undefined;
-                        return edgeFile ? (targetDefFiles.has(edgeFile) || targetEdgeFiles.has(edgeFile)) : false;
-                    });
-                    const hasFkRelation = fkRelatedNodeIds.has(depNode.id);
-
-                    if (!hasFileOverlap && !hasSharedFileEdge && !hasFkRelation) {
-                        continue;
-                    }
-                }
-            }
-
             const resolved = this.resolveImpactLocation(depNode);
 
             // For column nodes, try to find source column info from column lineage
             let reason = this.generateImpactReason(depNode, tableName, 'table');
             if (depNode.type === 'column' && this.graph.columnEdges) {
-                const colEdge = this.graph.columnEdges.find(e => {
-                    const targetColId = `column:${e.targetTableId.replace(/^(table|view):/, '')}.${e.targetColumnName.toLowerCase()}`;
-                    return targetColId === depNode.id;
-                });
+                const colEdge = columnFlowByTargetId.get(depNode.id);
                 if (colEdge) {
                     const sourceTable = this.getTableDisplayName(colEdge.sourceTableId);
                     const targetTable = this.getTableDisplayName(colEdge.targetTableId);
@@ -284,7 +248,7 @@ export class ImpactAnalyzer {
         }
 
         // Calculate summary
-        const summary = this.calculateSummary(directImpacts, transitiveImpacts);
+        const summary = this.calculateSummary(directImpacts, transitiveImpacts, nodeId);
 
         // Calculate overall severity
         const severity = this.calculateSeverity({
@@ -301,7 +265,8 @@ export class ImpactAnalyzer {
             changeType,
             target: {
                 type: actualType,
-                name: tableName
+                name: tableName,
+                nodeId,
             },
             directImpacts,
             transitiveImpacts,
@@ -335,11 +300,15 @@ export class ImpactAnalyzer {
 
         const directImpacts: ImpactItem[] = [];
         const transitiveImpacts: ImpactItem[] = [];
+        const directTargetIds = new Set<string>();
+        for (const edge of this.graph.edges) {
+            if (edge.sourceId === columnId) {
+                directTargetIds.add(edge.targetId);
+            }
+        }
 
         for (const depNode of downstream.nodes) {
-            const isDirect = this.graph.edges.some(e =>
-                e.sourceId === columnId && e.targetId === depNode.id
-            );
+            const isDirect = directTargetIds.has(depNode.id);
 
             const resolved = this.resolveImpactLocation(depNode);
             const impactItem: ImpactItem = {
@@ -358,7 +327,7 @@ export class ImpactAnalyzer {
             }
         }
 
-        const summary = this.calculateSummary(directImpacts, transitiveImpacts);
+        const summary = this.calculateSummary(directImpacts, transitiveImpacts, columnId);
         const severity = this.calculateSeverity({
             directImpacts,
             transitiveImpacts,
@@ -444,13 +413,17 @@ export class ImpactAnalyzer {
      */
     private calculateSummary(
         directImpacts: ImpactItem[],
-        transitiveImpacts: ImpactItem[]
+        transitiveImpacts: ImpactItem[],
+        targetNodeId: string
     ): ImpactReport['summary'] {
         const allImpacts = [...directImpacts, ...transitiveImpacts];
 
         const tables = new Set<string>();
         const views = new Set<string>();
         const files = new Set<string>();
+        const affectedNodeIds = new Set(allImpacts.map(impact => impact.node.id));
+        const pathNodeIds = new Set([targetNodeId, ...affectedNodeIds]);
+        const affectedStatements = new Set<string>();
 
         for (const impact of allImpacts) {
             if (impact.node.type === 'table') {tables.add(impact.node.name);}
@@ -458,11 +431,25 @@ export class ImpactAnalyzer {
             if (impact.filePath) {files.add(impact.filePath);}
         }
 
+        // Query statements are not graph nodes. Count only statements that are
+        // explicitly identified on data-flow edges within the affected path;
+        // never infer a query count from the number of impacted objects.
+        for (const edge of this.graph.edges) {
+            if (!pathNodeIds.has(edge.sourceId) || !affectedNodeIds.has(edge.targetId)) {
+                continue;
+            }
+            const filePath = edge.metadata?.filePath;
+            const statementIndex = edge.metadata?.statementIndex;
+            if (typeof filePath === 'string' && filePath.length > 0 && Number.isInteger(statementIndex)) {
+                affectedStatements.add(`${filePath}\u0000${statementIndex}`);
+            }
+        }
+
         return {
             totalAffected: allImpacts.length,
             tablesAffected: tables.size,
             viewsAffected: views.size,
-            queriesAffected: allImpacts.length,
+            queriesAffected: affectedStatements.size,
             filesAffected: files.size
         };
     }
@@ -590,11 +577,20 @@ export class ImpactAnalyzer {
      * Resolve table/view node ID based on requested type, with compatibility fallback.
      */
     private getRelationNodeId(tableName: string, targetType: 'table' | 'view' = 'table'): string {
-        const normalizedName = tableName.toLowerCase();
+        const exactName = tableName.trim();
+        const normalizedName = exactName.toLowerCase();
+        const exactTableId = `table:${exactName}`;
+        const exactViewId = `view:${exactName}`;
         const tableId = `table:${normalizedName}`;
         const viewId = `view:${normalizedName}`;
 
         if (targetType === 'view') {
+            if (this.graph.nodes.has(exactViewId)) {
+                return exactViewId;
+            }
+            if (this.graph.nodes.has(exactTableId)) {
+                return exactTableId;
+            }
             if (this.graph.nodes.has(viewId)) {
                 return viewId;
             }
@@ -604,6 +600,12 @@ export class ImpactAnalyzer {
             return viewId;
         }
 
+        if (this.graph.nodes.has(exactTableId)) {
+            return exactTableId;
+        }
+        if (this.graph.nodes.has(exactViewId)) {
+            return exactViewId;
+        }
         if (this.graph.nodes.has(tableId)) {
             return tableId;
         }
@@ -617,7 +619,29 @@ export class ImpactAnalyzer {
      * Generate column node ID
      */
     private getColumnNodeId(tableName: string, columnName: string): string {
-        return `column:${tableName.toLowerCase()}.${columnName.toLowerCase()}`;
+        return this.resolveColumnNodeId(tableName, columnName)
+            || `column:${getColumnKey(tableName.trim().toLowerCase(), columnName)}`;
+    }
+
+    private resolveColumnNodeId(tableNameOrId: string, columnName: string): string | undefined {
+        const explicitParentId = /^(?:table|view|external|cte):/.test(tableNameOrId)
+            ? tableNameOrId
+            : undefined;
+        const relationKey = tableNameOrId.replace(/^(?:table|view|external|cte):/, '');
+        const parentIds = explicitParentId
+            ? new Set([explicitParentId])
+            : new Set(['table', 'view', 'external', 'cte'].map(type => `${type}:${relationKey}`));
+        const exact = [...this.graph.nodes.values()].find(node =>
+            node.type === 'column' && parentIds.has(node.parentId || '') && node.name === columnName
+        );
+        if (exact) {return exact.id;}
+
+        const folded = [...this.graph.nodes.values()].filter(node =>
+            node.type === 'column'
+            && parentIds.has(node.parentId || '')
+            && node.name.toLowerCase() === columnName.toLowerCase()
+        );
+        return folded.length === 1 ? folded[0].id : undefined;
     }
 
     private getTableDisplayName(tableId: string | undefined): string {
@@ -659,11 +683,10 @@ export class ImpactAnalyzer {
             return columnId || 'unknown_table';
         }
         const withoutPrefix = columnId.substring(7);
-        const dotIndex = withoutPrefix.lastIndexOf('.');
-        if (dotIndex <= 0) {
+        const { prefix } = splitLastQualifiedKeyComponent(withoutPrefix);
+        if (!prefix) {
             return withoutPrefix || 'unknown_table';
         }
-        const tableName = withoutPrefix.substring(0, dotIndex);
-        return tableName || 'unknown_table';
+        return prefix;
     }
 }

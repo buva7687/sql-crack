@@ -80,4 +80,47 @@ describe('workspace exportUtils', () => {
         expect(mermaid).toContain('%% Graph Mode: tables');
         expect(mermaid).toContain('%% Filters: query="orders"');
     });
+
+    it('keeps multiline backtick labels inside the Mermaid Markdown fence', () => {
+        const fence = String.fromCharCode(96).repeat(3);
+        const hostileGraph: WorkspaceDependencyGraph = {
+            ...graph,
+            nodes: [{
+                ...graph.nodes[0],
+                label: ['orders', fence, '[click](javascript:alert(1))'].join('\n'),
+            }],
+            edges: [],
+        };
+
+        const mermaid = generateWorkspaceMermaid(hostileGraph, 'TD');
+
+        expect(mermaid.split(fence)).toHaveLength(3);
+        expect(mermaid).not.toContain(['', fence, ''].join('\n'));
+        expect(mermaid).not.toContain('[click](javascript:alert(1))');
+        expect(mermaid).toContain('#96;#96;#96;');
+    });
+
+    it('keeps hostile export metadata inside the Mermaid Markdown fence', () => {
+        const fence = String.fromCharCode(96).repeat(3);
+        const context = createWorkspaceExportContext({
+            view: 'graph',
+            graphMode: 'tables',
+            scopeUri: '/repo\n' + fence + '\u2028scope',
+            searchFilter: {
+                query: 'orders\r\n' + fence + '\u2029query',
+                nodeTypes: [],
+                useRegex: false,
+                caseSensitive: false,
+            },
+            nodeCount: graph.nodes.length,
+            edgeCount: graph.edges.length,
+            exportedAt: '2026-03-07T12:34:56.000Z',
+        });
+
+        const mermaid = generateWorkspaceMermaid(graph, 'TD', context);
+
+        expect(mermaid.split(fence)).toHaveLength(3);
+        expect(mermaid).not.toMatch(/%% (?:Scope|Filters):[^\n]*[\r\u2028\u2029]/);
+        expect(mermaid).toContain('#96;#96;#96;');
+    });
 });

@@ -30,7 +30,7 @@ JOIN model_ref m ON s.id = m.customer_id
 
 function hasExecutableSqlLikeWebview(sql: string): boolean {
     const { rewritten } = preprocessJinjaTemplates(sql);
-    return stripSqlComments(rewritten).trim().length > 0;
+    return stripSqlComments(rewritten, { preserveHashTempIdentifiers: false }).trim().length > 0;
 }
 
 describe('DBT/Jinja integration', () => {

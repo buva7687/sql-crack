@@ -16,6 +16,40 @@ import { getDisplayName, getQualifiedKey, normalizeIdentifier, parseQualifiedKey
 
 type DefinitionNameIndex = Map<string, SchemaDefinition[]>;
 
+function getDefinitionKey(definition: SchemaDefinition): string {
+    return getQualifiedKey(definition.name, definition.schema, definition);
+}
+
+function getReferenceKey(reference: TableReference): string {
+    return getQualifiedKey(reference.tableName, reference.schema, reference);
+}
+
+function getDefinitionNameKey(definition: SchemaDefinition | undefined): string | undefined {
+    return normalizeIdentifier(
+        definition?.name,
+        definition?.nameQuoted,
+        definition?.identifierCaseFolding,
+        definition?.quotedIdentifiersCaseSensitive
+    );
+}
+
+function getReferenceNameKey(reference: TableReference | undefined): string | undefined {
+    return normalizeIdentifier(
+        reference?.tableName,
+        reference?.nameQuoted,
+        reference?.identifierCaseFolding,
+        reference?.quotedIdentifiersCaseSensitive
+    );
+}
+
+function getDefinitionDisplayName(definition: SchemaDefinition): string {
+    return getDisplayName(definition.name, definition.schema, definition.catalog);
+}
+
+function getReferenceDisplayName(reference: TableReference): string {
+    return getDisplayName(reference.tableName, reference.schema, reference.catalog);
+}
+
 /**
  * Build a dependency graph from the workspace index
  */
@@ -48,7 +82,7 @@ function buildDefinitionNameIndex(index: WorkspaceIndex): DefinitionNameIndex {
     const byName: DefinitionNameIndex = new Map();
     for (const defs of index.definitionMap.values()) {
         for (const def of defs) {
-            const normalizedName = normalizeIdentifier(def.name);
+            const normalizedName = getDefinitionNameKey(def);
             if (!normalizedName) {
                 continue;
             }
@@ -61,16 +95,16 @@ function buildDefinitionNameIndex(index: WorkspaceIndex): DefinitionNameIndex {
 }
 
 function getDefinitionCandidates(index: WorkspaceIndex, definitionNameIndex: DefinitionNameIndex, ref: TableReference): SchemaDefinition[] {
-    const key = getQualifiedKey(ref.tableName, ref.schema);
+    const key = getReferenceKey(ref);
     const direct = index.definitionMap.get(key);
     if (direct && direct.length > 0) {
         return direct;
     }
 
-    const normalizedName = normalizeIdentifier(ref.tableName);
+    const normalizedName = getReferenceNameKey(ref);
     const byName = normalizedName ? (definitionNameIndex.get(normalizedName) || []) : [];
-    if (ref.schema) {
-        const unqualified = byName.filter(def => !def.schema);
+    if (ref.schema || ref.catalog) {
+        const unqualified = byName.filter(def => !def.schema && !def.catalog);
         return unqualified;
     }
 
@@ -136,7 +170,7 @@ function buildFileGraph(
                 const edgeData = edgeMap.get(edgeKey)!;
                 edgeData.count++;
                 edgeData.types.add(ref.referenceType);
-                edgeData.tables.add(getDisplayName(ref.tableName, ref.schema));
+                edgeData.tables.add(getReferenceDisplayName(ref));
                 appendEdgeReference(edgeData.references, ref);
             }
         }
@@ -172,7 +206,7 @@ function buildTableGraph(
     const definedNames = new Set<string>();
     for (const defs of index.definitionMap.values()) {
         for (const def of defs) {
-            const normalized = normalizeIdentifier(def.name);
+            const normalized = getDefinitionNameKey(def);
             if (normalized) {definedNames.add(normalized);}
         }
     }
@@ -186,7 +220,7 @@ function buildTableGraph(
         nodes.push({
             id: nodeId,
             type: def.type,
-            label: getDisplayName(def.name, def.schema),
+            label: getDefinitionDisplayName(def),
             filePath: def.filePath,
             definitions: defs,
             x: 0,
@@ -200,7 +234,7 @@ function buildTableGraph(
     for (const [key, refs] of index.referenceMap.entries()) {
         if (definedKeys.has(key)) {continue;}
         const parsed = parseQualifiedKey(key);
-        const normalizedName = normalizeIdentifier(parsed.name);
+        const normalizedName = parsed.name || undefined;
         if (!parsed.schema && normalizedName && definedNames.has(normalizedName)) {
             continue;
         }
@@ -208,8 +242,8 @@ function buildTableGraph(
             const nodeId = `external_${nodes.length}`;
             nodeIdMap.set(key, nodeId);
             const displayName = refs[0]
-                ? getDisplayName(refs[0].tableName, refs[0].schema)
-                : getDisplayName(parsed.name, parsed.schema);
+                ? getReferenceDisplayName(refs[0])
+                : getDisplayName(parsed.name, parsed.schema, parsed.catalog);
 
             nodes.push({
                 id: nodeId,
@@ -236,25 +270,23 @@ function buildTableGraph(
         const edgeData = edgeMap.get(key)!;
         edgeData.count += 1;
         edgeData.types.add(ref.referenceType);
-        edgeData.tables.add(getDisplayName(ref.tableName, ref.schema));
+        edgeData.tables.add(getReferenceDisplayName(ref));
         appendEdgeReference(edgeData.references, ref);
     };
 
     // Create edges based on view/query dependencies.
     // Views reference tables, so create edges from views to their source tables.
     for (const analysis of index.files.values()) {
-        // Get tables defined in this file
-        const definedHere = new Set(
-            analysis.definitions.map(d => getQualifiedKey(d.name, d.schema))
-        );
-
-        const viewDefinitions = analysis.definitions
-            .filter(def => def.type === 'view')
+        const dependentDefinitions = analysis.definitions
+            .filter(def => def.type === 'view' || (
+                def.type === 'table'
+                && (/\bAS\s+(?:SELECT|\()/i.test(def.sql) || /^\s*(?:WITH[\s\S]+?)?SELECT[\s\S]+?\bINTO\b/i.test(def.sql))
+            ))
             .sort((a, b) => (a.lineNumber || Number.MAX_SAFE_INTEGER) - (b.lineNumber || Number.MAX_SAFE_INTEGER));
 
-        for (let viewIndex = 0; viewIndex < viewDefinitions.length; viewIndex++) {
-            const def = viewDefinitions[viewIndex];
-            const sourceId = nodeIdMap.get(getQualifiedKey(def.name, def.schema));
+        for (let definitionIndex = 0; definitionIndex < dependentDefinitions.length; definitionIndex++) {
+            const def = dependentDefinitions[definitionIndex];
+            const sourceId = nodeIdMap.get(getDefinitionKey(def));
             if (!sourceId) {
                 continue;
             }
@@ -263,7 +295,7 @@ function buildTableGraph(
                 ? analysis.references.filter(ref => ref.statementIndex === def.statementIndex)
                 : [];
 
-            const nextDef = viewDefinitions[viewIndex + 1];
+            const nextDef = dependentDefinitions[definitionIndex + 1];
             const refsByLineRange = analysis.references.filter(ref => {
                 if (!Number.isFinite(def.lineNumber) || def.lineNumber <= 0) {
                     return true;
@@ -283,15 +315,11 @@ function buildTableGraph(
             const scopedReferences = refsByStatement.length > 0 ? refsByStatement : refsByLineRange;
 
             for (const ref of scopedReferences) {
-                const refKey = getQualifiedKey(ref.tableName, ref.schema);
-                if (definedHere.has(refKey)) {
-                    continue;
-                }
-
+                const refKey = getReferenceKey(ref);
                 const targets = getDefinitionCandidates(index, definitionNameIndex, ref);
                 if (targets.length > 0) {
                     for (const targetDef of targets) {
-                        const targetId = nodeIdMap.get(getQualifiedKey(targetDef.name, targetDef.schema));
+                        const targetId = nodeIdMap.get(getDefinitionKey(targetDef));
                         if (targetId) {
                             pushEdge(sourceId, targetId, ref);
                         }
@@ -334,7 +362,7 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
     const definitionsByName = new Map<string, SchemaDefinition[]>();
     for (const defs of index.definitionMap.values()) {
         for (const def of defs) {
-            const name = normalizeIdentifier(def.name);
+            const name = getDefinitionNameKey(def);
             if (!name) {continue;}
             if (!definitionsByName.has(name)) {
                 definitionsByName.set(name, []);
@@ -346,7 +374,7 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
     const referencesByName = new Map<string, TableReference[]>();
     for (const refs of index.referenceMap.values()) {
         for (const ref of refs) {
-            const name = normalizeIdentifier(ref.tableName);
+            const name = getReferenceNameKey(ref);
             if (!name) {continue;}
             if (!referencesByName.has(name)) {
                 referencesByName.set(name, []);
@@ -383,7 +411,7 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
             continue;
         }
 
-        const nameKey = normalizeIdentifier(defs[0]?.name);
+        const nameKey = getDefinitionNameKey(defs[0]);
         const nameRefs = nameKey ? referencesByName.get(nameKey) : undefined;
         if (!nameRefs || nameRefs.length === 0) {
             orphanedDefinitions.push(key);
@@ -395,10 +423,10 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
         totalReferences += refs.length;
 
         // Skip CTE names — they are query-scoped aliases, not external tables.
-        const refName = normalizeIdentifier(refs[0]?.tableName);
+        const refName = getReferenceNameKey(refs[0]);
         if (refName && knownCteNames.has(refName)) {continue;}
 
-        const hasSchema = refs.some(ref => !!ref.schema);
+        const hasSchema = refs.some(ref => !!ref.schema || !!ref.catalog);
         if (hasSchema) {
             if (!index.definitionMap.has(key)) {
                 const defs = refName ? (definitionsByName.get(refName) || []) : [];
@@ -435,8 +463,10 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
 
     // Count files that failed to parse
     let parseErrors = 0;
+    let parseWarnings = 0;
     for (const file of index.files.values()) {
         if (file.parseError) { parseErrors++; }
+        if (file.parseWarnings && file.parseWarnings.length > 0) { parseWarnings++; }
     }
 
     return {
@@ -447,7 +477,8 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
         orphanedDefinitions,
         missingDefinitions,
         circularDependencies,
-        parseErrors
+        parseErrors,
+        parseWarnings
     };
 }
 
@@ -563,7 +594,7 @@ function appendEdgeReference(target: WorkspaceEdgeReference[], ref: TableReferen
         filePath: ref.filePath,
         lineNumber: ref.lineNumber,
         context: ref.context,
-        tableName: getDisplayName(ref.tableName, ref.schema)
+        tableName: getReferenceDisplayName(ref)
     };
     const signature = `${reference.filePath}:${reference.lineNumber}:${reference.context}:${reference.tableName}`;
     const alreadyIncluded = target.some((entry) =>

@@ -355,6 +355,34 @@ describe('Function Extractors', () => {
             expect(mysqlResult).toBeDefined();
             expect(pgResult).toBeDefined();
         });
+
+        it('extracts PostgreSQL wrapped window partition and order identifiers', () => {
+            const columns = [{
+                expr: {
+                    name: 'ROW_NUMBER',
+                    over: {
+                        as_window_specification: {
+                            window_specification: {
+                                partitionby: [
+                                    { expr: { column: { expr: { value: 'dept' } } } }
+                                ],
+                                orderby: [
+                                    {
+                                        expr: { column: { expr: { value: 'created_at' } } },
+                                        type: 'DESC'
+                                    }
+                                ]
+                            }
+                        }
+                    }
+                }
+            }];
+
+            const result = extractWindowFunctionDetails(columns, 'PostgreSQL');
+
+            expect(result[0].partitionBy).toEqual(['dept']);
+            expect(result[0].orderBy).toEqual(['created_at DESC']);
+        });
     });
 
     describe('extractAggregateFunctionDetails', () => {
@@ -407,6 +435,24 @@ describe('Function Extractors', () => {
             const result = extractAggregateFunctionDetails(columns);
 
             expect(result[0].alias).toBe('total_count');
+        });
+
+        it('preserves separate output aliases for the same aggregate expression', () => {
+            const aggregateExpr = {
+                type: 'aggr_func',
+                name: 'SUM',
+                args: { column: 'amount' }
+            };
+            const columns = [
+                { as: 'gross', expr: { ...aggregateExpr } },
+                { as: 'net', expr: { ...aggregateExpr } }
+            ];
+
+            const result = extractAggregateFunctionDetails(columns);
+
+            expect(result).toHaveLength(2);
+            expect(result.map(detail => detail.alias)).toEqual(['gross', 'net']);
+            expect(result.every(detail => detail.expression === 'SUM(amount)')).toBe(true);
         });
 
         it('extracts nested aggregates', () => {
@@ -622,6 +668,35 @@ describe('Function Extractors', () => {
             const result = extractCaseStatementDetails(columns);
 
             expect(result[0].elseValue).toBe('no');
+        });
+
+        it('formats numeric zero literals and parser ELSE args', () => {
+            const columns = [{
+                as: 'flag',
+                expr: {
+                    type: 'case',
+                    args: [
+                        {
+                            cond: {
+                                type: 'binary_expr',
+                                operator: '=',
+                                left: { column: 'amount' },
+                                right: { type: 'number', value: 0 }
+                            },
+                            result: { type: 'number', value: 0 }
+                        },
+                        {
+                            type: 'else',
+                            result: { type: 'number', value: 1 }
+                        }
+                    ]
+                }
+            }];
+
+            const result = extractCaseStatementDetails(columns);
+
+            expect(result[0].conditions[0]).toEqual({ when: 'amount = 0', then: '0' });
+            expect(result[0].elseValue).toBe('1');
         });
 
         it('formats binary expression in condition', () => {

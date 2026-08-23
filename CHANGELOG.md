@@ -5,6 +5,63 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] - 2026-08-19
+
+### Fixed
+
+- **Workspace relation and column identity**: Canonical keys now preserve SQL Server three-part names, escape dots inside identifier components, and apply dialect-aware case folding throughout extraction, indexing, graphs, lineage, impact analysis, exports, and cross-view navigation. PostgreSQL `"Users"` / `"users"`, quoted case-distinct or dotted column names, Snowflake quoted/unquoted case, case-sensitive BigQuery table names, and SQL Server `db1.sales.orders` / `db1.finance.orders` no longer collapse or split incorrectly.
+- **Workspace DML extraction**: JOIN-condition subqueries retain their owning statement, legal one-character and quoted-reserved table names are preserved, `MERGE` targets/sources are indexed across supported dialects, and table-producing `SELECT INTO` statements are recognized for SQL Server, PostgreSQL, and Redshift without misclassifying MySQL file/variable forms. MERGE targets now participate as lineage outputs.
+- **Workspace index resilience**: Cache reuse verifies content hashes even when mtimes are unchanged, with bounded read concurrency. Incremental and full rebuilds retain last-known-good dependencies during transient filesystem failures, cancelled rebuilds cannot replace a complete index with partial results, and filesystem error codes distinguish confirmed `FileNotFound`/`ENOENT` deletions from temporary provider failures across scanner, incremental, full-build, and cache-validation paths.
+- **Workspace parser transparency**: Files analyzed through regex fallback now carry parser warnings, appear separately from fatal read/parse failures in graph issue counts, and are listed as fallback-parsed files in the Issues view instead of silently appearing fully parsed.
+- **Workspace impact query counts**: Impact summaries count unique affected `(file, statement)` identities from data-flow edges rather than treating affected graph nodes as queries or guessing when statement identity is unavailable.
+- **Workspace Markdown export safety**: Impact and lineage Markdown normalize repository-controlled line breaks, escape formatting/link/HTML controls, and use adaptive code-span delimiters so identifiers, paths, reasons, and suggestions cannot restructure exported reports.
+- **Workspace lineage and impact completeness**: Transitive impacts now follow valid cross-file graph paths, repeated table references retain their statement-specific locations, and CTE/subquery aliases are scoped to the statement that declares them with quote-aware identity. Physical tables that reuse an earlier or case-distinct quoted CTE name are no longer hidden from lineage, and multiline block comments no longer shift table-reference locations or break line-proximity matching.
+- **Workspace table dependencies**: Tables mode now includes same-file view dependencies and `CREATE TABLE AS SELECT` relationships while still suppressing true self-edges.
+- **Workspace index delete races**: Files deleted during a full rebuild are reconciled through build-scoped tombstones, preventing stale analysis or parse errors from resurrecting deleted nodes and keeping index counts accurate.
+- **Workspace schema extraction**: Explicit quoted PostgreSQL view columns are unwrapped correctly, and regex fallback table-body scanning is bounded to the current statement so CTAS definitions cannot inherit columns from later DDL, including parenthesized CTAS queries.
+- **Workspace webview bootstrap security**: Search, graph, lineage, and restored-view state are escaped at the final inline-script boundary, preventing repository-controlled SQL identifiers from terminating the script and injecting HTML or CSS. Graph data remains structured until that boundary, and valid Unicode escapes protect HTML-comment/CDATA sequences without creating malformed JSON that can crash the panel.
+- **Deferred query hydration**: Concurrent deferred-tab parses use independently scoped requests, cancellation sentinels are never cached as query failures, and token-owned loading state prevents stale hydrations from hiding an active loader.
+- **SQL source and refresh fidelity**: Parser compatibility rewrites remain internal so preview, copy, pin, and compare use the original SQL. Manual and automatic refresh preserve the originating editor selection, selection offsets track document edits before or inside the range, and pinned panels refresh their own immutable snapshot instead of targeting the main panel.
+- **SQL comment and statement parsing**: PostgreSQL nested block comments no longer create phantom statements. MySQL `#comment` text without whitespace is treated as a comment while contextual T-SQL/Redshift `#temp` and `##temp` table identifiers remain supported.
+- **PostgreSQL dollar-quoted fallback parsing**: Comment markers inside `$$...$$` and `$tag$...$tag$` strings remain literal content across shared comment masking and lineage fallback scanning, so valid statements that require regex fallback no longer lose later table dependencies or invent CTEs.
+- **Dollar-quote opening detection**: A `$` that continues an identifier (`my$$tbl`, `END$$`, including Unicode names) and MySQL's `DELIMITER $$` directive no longer open a dollar-quoted string. Unicode dollar-quote tags are recognized, arbitrarily aligned `DELIMITER` directives remain MySQL, and preprocessing, comment masking, statement splitting, schema/reference extraction, lineage fallback scanning, SQL formatting, and dialect detection share one guarded delimiter check.
+- **Aggregate output details**: Repeated aggregate expressions projected under different aliases remain distinct outputs, while nested visits to the same aggregate are still deduplicated.
+- **Workspace PNG export memory**: Rasterization now enforces both dimension and total-pixel limits and encodes through `toBlob()`, avoiding oversized synchronous data-URL allocations.
+- **Quoted workspace schema fallback parsing**: Regex fallback extraction now supports double-quoted, backtick-quoted, bracketed, and schema-qualified table and column identifiers, including quoted foreign-key references. Parenthesis and comma scanning is quote-aware, so delimiters inside identifiers no longer corrupt definitions.
+- **Comment/string-safe workspace extraction**: Schema and lineage fallback paths now use position-preserving masking before matching SQL structure, preventing commented examples or SQL-like string contents from creating phantom tables, CTEs, targets, or incorrect source locations. Comma-separated fallback CTEs are also recognized.
+- **SQL Server global temporary tables**: Comment stripping, dialect preprocessing, and hash-temp rewriting now preserve `##global_temp` identifiers instead of treating them as comments or malformed names.
+- **Workspace definition SQL boundaries**: Captured `CREATE TABLE` and `CREATE VIEW` SQL no longer stops at `create` text inside ordinary, sigil-prefixed, or quoted identifiers, preserving complete CTAS statements and their lineage.
+- **Recursive CTE source locations**: Multiline `WITH RECURSIVE` declarations now report the actual CTE name line even for short names that also occur inside the `RECURSIVE` keyword.
+- **T-SQL `OUTPUT` compatibility reporting**: `UPDATE` and `DELETE` compatibility paths no longer report successful `OUTPUT` handling when the rewritten statement still returns an error or partial parse.
+- **Parameterized PostgreSQL limits**: `LIMIT $1` and equivalent wrapped AST values now render their parameter names instead of `[object Object]`.
+- **Dialect detection and warnings**: A lone backtick is now a low-confidence MySQL signal, while combined MySQL syntax remains high confidence. Generic array subscripts such as `arr[5]` no longer produce PostgreSQL-specific warnings.
+- **Dialect preprocessing delimiter handling**: Balanced-parenthesis scanning now handles doubled double-quote and backtick escapes, bracketed identifiers, and nested block comments.
+- **PostgreSQL workspace lineage `CREATE TABLE` crash**: Shared AST identifier unwrapping now handles PostgreSQL's object-wrapped column identifiers, so ordinary PostgreSQL `CREATE TABLE` statements no longer crash lineage building with `columnName.toLowerCase is not a function`.
+- **Workspace CTAS dependency extraction**: `CREATE TABLE AS SELECT` statements now inspect parser `query_expr` bodies, restoring source-table references that were previously missed.
+- **T-SQL aliased update targets**: Workspace reference extraction now resolves `UPDATE <alias> ... FROM <table> AS <alias>` back to the real write target instead of recording only a read/reference from the FROM clause.
+- **Window function details**: Window partition/order fields now read parser `as_window_specification.window_specification` nodes and unwrap PostgreSQL-style identifier objects, so window cards no longer render empty or `[object Object]` details.
+- **Drag-path allocation**: SQL Flow drag edge updates now reuse a provided node map without allocating an unused fallback map on every mousemove.
+
+- **Workspace Mermaid export safety**: Repository-controlled labels now collapse line breaks and encode Markdown fences, Mermaid shape delimiters, quotes, and HTML delimiters so exported diagrams cannot be fence-broken or inject rendered content.
+- **Workspace export metadata safety**: Comment-block metadata now collapses CR/LF and Unicode line separators and encodes backticks, keeping unusual workspace paths, filters, and lineage names inside Mermaid and DOT export comments.
+- **SQL formatter comment restoration**: Multiline block comments containing line-comment syntax are tokenized in one pass, preventing nested comment placeholders from leaking into formatted SQL.
+- **MySQL LIMIT details**: Both comma-form and OFFSET-form limits now render the actual row count and offset instead of displaying only the first AST value.
+
+### Performance
+
+- **Workspace impact analysis**: Direct targets, incoming edges, column target flows, and direct column edges are indexed once per analysis instead of repeatedly scanning the full graph for every node.
+- **Workspace schema and CTE extraction**: Position-preserving SQL masks and CTE declaration locations are computed once per source instead of rescanning and remasking the entire file for every extracted definition or CTE.
+
+### Security
+
+- Updated the enforced DOMPurify production dependency to 3.4.13, clearing the transitive jsPDF sanitizer advisories reported by `npm audit --omit=dev`.
+
+### Tests
+
+- Added regression coverage for PostgreSQL column identifier unwrapping, quote-aware/dotted column IDs, case-distinct quoted CTEs, BigQuery table-name case, filesystem deletion codes and stale-cache rejection, workspace lineage `CREATE TABLE` safety, CTAS `query_expr` references, T-SQL update-alias writes, PostgreSQL-wrapped window identifiers, CASE/ELSE formatting variants, drag-path map reuse, quoted schema extraction, `CREATE` text inside identifiers, comment/string masking, fallback and recursive CTE locations, target resolution, global temporary tables, T-SQL `OUTPUT` partial parses, parameterized limits, dialect scoring and warnings, delimiter-aware preprocessing, indexed impact analysis, statement-scoped lineage, transitive impact, delete/build races, CTAS graph edges, safe bootstrap serialization, deferred hydration, source-preserving refresh, edit-adjusted source selections, nested/hash comments, aggregate aliases, and bounded PNG export.
+- Added focused regression coverage for Mermaid fence-breaking labels and metadata, block comments containing line-comment markers, and MySQL LIMIT row-count/offset rendering.
+- Branch validation: 281 suites, 3,741 tests passing. `npm run typecheck`, `npm run lint`, `npm run package`, and the production dependency audit pass.
+
 ## [0.9.1] - 2026-07-01
 
 ### Fixed
@@ -26,7 +83,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Workspace lineage view/CTE resolution**: Statement lineage edges now resolve existing `view:`, `cte:`, and `external:` nodes instead of checking only `table:`, preventing valid view references from falling through to stray external nodes.
 - **Dead-column CTE output hints**: Dead-column detection keeps scoped CTE-body analysis while also recognizing downstream CTE output usage, including outer `SELECT` projections and table aliases.
 - **Workspace index cache freshness**: Cached workspace indexes are validated against current file count, file stats, and content hashes before reuse, so offline file edits, additions, and deletions trigger a rebuild instead of serving stale definitions.
-- **Release workflow ordering and concurrency**: The release workflow now creates the GitHub release/tag before external Marketplace/Open VSX publishing and serializes release attempts with workflow-level concurrency.
+- **Release workflow ordering, concurrency, and recovery**: The release workflow creates the GitHub release/tag before external Marketplace/Open VSX publishing and serializes release attempts. Manual targeted retries now rebuild the exact tagged source and can resume GitHub, Marketplace, or Open VSX publication independently after a partial failure. The release checklist now documents the actual push-to-`main` automation instead of manual tag and duplicate-publish steps.
 - **Performance baseline CI wiring**: Hard perf baseline suites are excluded from normal Jest/coverage runs and are executed through the dedicated `test:perf` script.
 - **Validation byte counting**: SQL size-limit validation uses `TextEncoder` byte length instead of `Blob`, for correct sizing in Node-like contexts.
 - **MySQL backslash escapes in statement splitting**: The statement splitter no longer splits on semicolons inside MySQL backslash-escaped string literals (`\'` / `\"`).

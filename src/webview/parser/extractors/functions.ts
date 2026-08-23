@@ -7,7 +7,7 @@ import type {
     WindowFunctionDetail
 } from '../../types';
 import { getAggregateFunctions, getWindowFunctions } from '../../../dialects';
-import { unwrapIdentifierValue } from '../astUtils';
+import { unwrapIdentifierValue } from '../../../shared/astUtils';
 import { formatExpressionFromAst } from './columns';
 
 export type TrackFunctionUsageFn = (
@@ -57,10 +57,24 @@ export function extractWindowFunctionDetails(
     const windowFuncList = getWindowFunctions(dialect);
 
     const getStringName = (obj: any): string | null => {
-        if (typeof obj === 'string') {return obj;}
-        if (obj && typeof obj.name === 'string') {return obj.name;}
-        if (obj && typeof obj.value === 'string') {return obj.value;}
-        return null;
+        return unwrapIdentifierValue(obj) || unwrapIdentifierValue(obj?.name) || null;
+    };
+
+    const getWindowSpec = (over: any): any =>
+        over?.as_window_specification?.window_specification
+        || over?.window_specification
+        || over;
+
+    const formatIdentifierExpr = (expr: any): string => {
+        const unwrapped = unwrapIdentifierValue(expr)
+            || unwrapIdentifierValue(expr?.column)
+            || unwrapIdentifierValue(expr?.expr?.column)
+            || unwrapIdentifierValue(expr?.expr);
+        if (unwrapped) {
+            return unwrapped;
+        }
+        const formatted = formatExpressionFromAst(expr);
+        return formatted || '?';
     };
 
     for (const col of columns) {
@@ -105,19 +119,20 @@ export function extractWindowFunctionDetails(
                 }
             }
 
-            const partitionBy = col.expr.over?.partitionby?.map((p: any) =>
-                p.column || p.expr?.column || p.value || '?'
-            ).filter(Boolean);
+            const windowSpec = getWindowSpec(col.expr.over);
 
-            const orderBy = col.expr.over?.orderby?.map((o: any) => {
-                const colName = o.expr?.column || o.column || '?';
+            const partitionBy = windowSpec?.partitionby?.map(formatIdentifierExpr).filter(Boolean);
+
+            const orderBy = windowSpec?.orderby?.map((o: any) => {
+                const colName = formatIdentifierExpr(o.expr || o);
                 const dir = o.type || '';
                 return dir ? `${colName} ${dir}` : colName;
             }).filter(Boolean);
 
             let frame: string | undefined;
-            if (col.expr.over?.frame) {
-                const f = col.expr.over.frame;
+            const frameNode = windowSpec?.frame || windowSpec?.window_frame_clause;
+            if (frameNode) {
+                const f = frameNode;
                 frame = `${f.type || 'ROWS'} ${f.start || ''} ${f.end ? 'TO ' + f.end : ''}`.trim();
             }
 
@@ -148,7 +163,10 @@ export function extractAggregateFunctionDetails(
     if (!columns || !Array.isArray(columns)) { return []; }
 
     const aggregateFuncSet = new Set(getAggregateFunctions(dialect));
-    const details: AggregateFunctionDetailWithSource[] = [];
+    type ExtractedAggregateDetail = AggregateFunctionDetailWithSource & {
+        topLevelOutputIndex?: number;
+    };
+    const details: ExtractedAggregateDetail[] = [];
 
     function getExpressionFunctionName(expr: any): string {
         if (typeof expr?.name === 'string') {
@@ -321,7 +339,8 @@ export function extractAggregateFunctionDetails(
         }
     }
 
-    for (const col of columns) {
+    for (let columnIndex = 0; columnIndex < columns.length; columnIndex++) {
+        const col = columns[columnIndex];
         if (!col?.expr) {
             continue;
         }
@@ -334,23 +353,44 @@ export function extractAggregateFunctionDetails(
         const isTopLevelAggregate =
             topExprType === 'aggr_func' || (topExprName && aggregateFuncSet.has(topExprName));
 
-        if (col.as && addedCount === 1 && isTopLevelAggregate) {
-            details[startIndex].alias = col.as;
+        if (addedCount === 1 && isTopLevelAggregate) {
+            details[startIndex].topLevelOutputIndex = columnIndex;
+            if (col.as) {
+                details[startIndex].alias = col.as;
+            }
         }
     }
 
     const deduped: AggregateFunctionDetailWithSource[] = [];
-    const indexByKey = new Map<string, number>();
+    const seenKeys = new Set<string>();
+    const baseKey = (detail: AggregateFunctionDetailWithSource): string =>
+        `${detail.name}|${detail.expression}|${detail.sourceTable || ''}|${detail.sourceColumn || ''}`;
+    const projectedBaseKeys = new Set(
+        details
+            .filter(detail => detail.topLevelOutputIndex !== undefined)
+            .map(baseKey)
+    );
     for (const detail of details) {
-        const key = `${detail.name}|${detail.expression}|${detail.sourceTable || ''}|${detail.sourceColumn || ''}`;
-        const existingIndex = indexByKey.get(key);
-        if (existingIndex === undefined) {
-            indexByKey.set(key, deduped.length);
-            deduped.push(detail);
+        const aggregateKey = baseKey(detail);
+        if (detail.topLevelOutputIndex === undefined && projectedBaseKeys.has(aggregateKey)) {
             continue;
         }
-        if (!deduped[existingIndex].alias && detail.alias) {
-            deduped[existingIndex].alias = detail.alias;
+        // Every top-level SELECT output is meaningful even if multiple outputs
+        // intentionally use the same aggregate expression. Nested occurrences,
+        // however, are shown once and are omitted when that aggregate already has
+        // a top-level output card.
+        const key = detail.topLevelOutputIndex === undefined
+            ? aggregateKey
+            : `${aggregateKey}|output:${detail.topLevelOutputIndex}`;
+        if (!seenKeys.has(key)) {
+            seenKeys.add(key);
+            deduped.push({
+                name: detail.name,
+                expression: detail.expression,
+                alias: detail.alias,
+                sourceColumn: detail.sourceColumn,
+                sourceTable: detail.sourceTable,
+            });
         }
     }
 
@@ -364,8 +404,10 @@ export function extractCaseStatementDetails(columns: any): CaseDetail[] {
 
     function formatExpr(expr: any): string {
         if (!expr) {return '?';}
-        if (expr.column) {return expr.column;}
-        if (expr.value) {return String(expr.value);}
+        const unwrapped = unwrapIdentifierValue(expr.column) || unwrapIdentifierValue(expr);
+        if (unwrapped) {return unwrapped;}
+        if (expr.value !== undefined) {return String(expr.value);}
+        if (expr.type === 'null') {return 'NULL';}
         if (expr.type === 'binary_expr') {
             const left = formatExpr(expr.left);
             const right = formatExpr(expr.right);
@@ -381,6 +423,10 @@ export function extractCaseStatementDetails(columns: any): CaseDetail[] {
 
             if (caseExpr.args && Array.isArray(caseExpr.args)) {
                 for (const arg of caseExpr.args) {
+                    const argType = typeof arg?.type === 'string' ? arg.type.toLowerCase() : '';
+                    if (argType === 'else') {
+                        continue;
+                    }
                     if (arg.cond && arg.result) {
                         conditions.push({
                             when: formatExpr(arg.cond),
@@ -390,7 +436,12 @@ export function extractCaseStatementDetails(columns: any): CaseDetail[] {
                 }
             }
 
-            const elseValue = caseExpr.else ? formatExpr(caseExpr.else) : undefined;
+            const elseArg = Array.isArray(caseExpr.args)
+                ? caseExpr.args.find((arg: any) => typeof arg?.type === 'string' && arg.type.toLowerCase() === 'else')
+                : undefined;
+            const elseValue = caseExpr.else !== undefined
+                ? formatExpr(caseExpr.else)
+                : (elseArg ? formatExpr(elseArg.result ?? elseArg.expr ?? elseArg.value) : undefined);
             const alias = col.as;
 
             if (conditions.length > 0) {

@@ -73,6 +73,25 @@ describe('ImpactAnalyzer', () => {
             expect(report.directImpacts[0].impactType).toBe('direct');
         });
 
+        it('uses the selected case-sensitive node identity for impact analysis', () => {
+            const nodes = [
+                makeNode('table:Users', 'table', 'Users'),
+                makeNode('table:users', 'table', 'users'),
+                makeNode('view:upper_report', 'view', 'upper_report'),
+                makeNode('view:lower_report', 'view', 'lower_report'),
+            ];
+            const edges = [
+                makeEdge('table:Users', 'view:upper_report'),
+                makeEdge('table:users', 'view:lower_report'),
+            ];
+            const { analyzer } = makeAnalyzer(nodes, edges);
+
+            const report = analyzer.analyzeTableChange('Users', 'modify', 'table', 'table:Users');
+
+            expect(report.target.nodeId).toBe('table:Users');
+            expect(report.directImpacts.map(impact => impact.node.id)).toEqual(['view:upper_report']);
+        });
+
         it('resolves view targets when requested type is view', () => {
             const nodes = [
                 makeNode('view:daily_orders', 'view', 'daily_orders'),
@@ -95,23 +114,67 @@ describe('ImpactAnalyzer', () => {
             expect(report.suggestions.some(s => s.includes("view 'missing_view' not found"))).toBe(true);
         });
 
-        it('identifies transitive impacts', () => {
+        it('identifies transitive impacts across independent definition files', () => {
             const nodes = [
-                makeNode('table:orders', 'table', 'orders'),
-                makeNode('table:staging', 'table', 'staging', { filePath: 'staging.sql' }),
-                makeNode('table:report', 'table', 'report', { filePath: 'staging.sql' })
+                makeNode('table:orders', 'table', 'orders', {
+                    filePath: 'orders.sql',
+                    metadata: { definitionFiles: ['orders.sql'] }
+                }),
+                makeNode('table:staging', 'table', 'staging', {
+                    filePath: 'staging.sql',
+                    metadata: { definitionFiles: ['staging.sql'] }
+                }),
+                makeNode('table:report', 'table', 'report', {
+                    filePath: 'report.sql',
+                    metadata: { definitionFiles: ['report.sql'] }
+                })
             ];
             const edges = [
-                makeEdge('table:orders', 'table:staging'),
-                makeEdge('table:staging', 'table:report')
+                makeEdge('table:orders', 'table:staging', 'direct', { filePath: 'staging.sql' }),
+                makeEdge('table:staging', 'table:report', 'direct', { filePath: 'report.sql' })
             ];
             const { analyzer } = makeAnalyzer(nodes, edges);
 
             const report = analyzer.analyzeTableChange('orders');
             expect(report.directImpacts).toHaveLength(1);
-            // The cross-file filter may filter out report if def files don't overlap
-            // but staging.sql is shared, so report should appear as transitive
-            expect(report.transitiveImpacts.length + report.directImpacts.length).toBeGreaterThanOrEqual(1);
+            expect(report.transitiveImpacts.map(impact => impact.node.id)).toContain('table:report');
+        });
+
+        it('counts unique affected statements instead of affected graph nodes', () => {
+            const nodes = [
+                makeNode('table:orders', 'table', 'orders'),
+                makeNode('table:staging', 'table', 'staging', { filePath: 'pipeline.sql' }),
+                makeNode('table:audit', 'table', 'audit', { filePath: 'pipeline.sql' }),
+                makeNode('view:report', 'view', 'report', { filePath: 'report.sql' }),
+                makeNode('table:unrelated', 'table', 'unrelated'),
+            ];
+            const edges = [
+                makeEdge('table:orders', 'table:staging', 'direct', { filePath: 'pipeline.sql', statementIndex: 0 }),
+                makeEdge('table:orders', 'table:audit', 'direct', { filePath: 'pipeline.sql', statementIndex: 0 }),
+                makeEdge('table:staging', 'view:report', 'direct', { filePath: 'report.sql', statementIndex: 0 }),
+                // This statement also writes an affected node, but it is not on a path from orders.
+                makeEdge('table:unrelated', 'view:report', 'direct', { filePath: 'other.sql', statementIndex: 0 }),
+            ];
+            const { analyzer } = makeAnalyzer(nodes, edges);
+
+            const report = analyzer.analyzeTableChange('orders');
+
+            expect(report.summary.totalAffected).toBe(3);
+            expect(report.summary.queriesAffected).toBe(2);
+        });
+
+        it('does not guess a query count when statement identity is unavailable', () => {
+            const nodes = [
+                makeNode('table:orders', 'table', 'orders'),
+                makeNode('view:report', 'view', 'report', { filePath: 'report.sql' }),
+            ];
+            const edges = [makeEdge('table:orders', 'view:report')];
+            const { analyzer } = makeAnalyzer(nodes, edges);
+
+            const report = analyzer.analyzeTableChange('orders');
+
+            expect(report.summary.totalAffected).toBe(1);
+            expect(report.summary.queriesAffected).toBe(0);
         });
 
         it('respects changeType in report', () => {
@@ -303,6 +366,57 @@ describe('ImpactAnalyzer', () => {
             const { analyzer } = makeAnalyzer(nodes, edges);
             const report = analyzer.analyzeTableChange('core');
             expect(report.suggestions.some(s => s.includes('maintenance window') || s.includes('rollback'))).toBe(true);
+        });
+    });
+
+    describe('edge lookup scaling', () => {
+        it('indexes graph and column edges instead of repeatedly scanning them per downstream node', () => {
+            const nodes = [
+                makeNode('table:orders', 'table', 'orders', { filePath: 'shared.sql' }),
+                makeNode('column:report.total', 'column', 'total', {
+                    parentId: 'table:report',
+                    filePath: 'shared.sql'
+                }),
+                makeNode('table:report', 'table', 'report', { filePath: 'shared.sql' })
+            ];
+            const edges = [
+                makeEdge('table:orders', 'column:report.total'),
+                makeEdge('column:report.total', 'table:report')
+            ];
+            const columnEdges: ColumnLineageEdge[] = [{
+                id: 'orders.amount->report.total',
+                sourceTableId: 'table:orders',
+                sourceColumnName: 'amount',
+                targetTableId: 'table:report',
+                targetColumnName: 'total',
+                transformationType: 'direct',
+                filePath: 'shared.sql',
+                lineNumber: 1
+            }];
+            const { graph, analyzer } = makeAnalyzer(nodes, edges, columnEdges);
+            const graphSomeSpy = jest.spyOn(graph.edges, 'some');
+            const columnFindSpy = jest.spyOn(graph.columnEdges, 'find');
+
+            const report = analyzer.analyzeTableChange('orders');
+
+            expect(report.summary.totalAffected).toBeGreaterThan(0);
+            expect(graphSomeSpy).not.toHaveBeenCalled();
+            expect(columnFindSpy).not.toHaveBeenCalled();
+        });
+
+        it('indexes direct column targets once', () => {
+            const nodes = [
+                makeNode('column:orders.amount', 'column', 'amount'),
+                makeNode('column:report.total', 'column', 'total', { filePath: 'report.sql' })
+            ];
+            const edges = [makeEdge('column:orders.amount', 'column:report.total')];
+            const { graph, analyzer } = makeAnalyzer(nodes, edges);
+            const graphSomeSpy = jest.spyOn(graph.edges, 'some');
+
+            const report = analyzer.analyzeColumnChange('orders', 'amount');
+
+            expect(report.directImpacts).toHaveLength(1);
+            expect(graphSomeSpy).not.toHaveBeenCalled();
         });
     });
 });

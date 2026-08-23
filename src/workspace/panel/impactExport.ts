@@ -1,4 +1,5 @@
 import { ImpactReport } from '../lineage/impactAnalyzer';
+import { escapeMarkdownText, markdownCodeSpan } from './markdownUtils';
 
 export function buildImpactReportExportData(
     report: ImpactReport,
@@ -60,13 +61,13 @@ export function generateImpactReportMarkdown(payload: Record<string, any>): stri
 
     lines.push('# Impact Analysis Report');
     lines.push('');
-    lines.push(`- Exported: ${payload.exportedAt}`);
+    lines.push(`- Exported: ${escapeMarkdownText(payload.exportedAt)}`);
     if (payload.context?.scopeUri) {
-        lines.push(`- Scope: ${payload.context.scopeUri}`);
+        lines.push(`- Scope: ${escapeMarkdownText(payload.context.scopeUri)}`);
     }
-    lines.push(`- Severity: ${report.severity.toUpperCase()}`);
-    lines.push(`- Change Type: ${report.changeType.toUpperCase()}`);
-    lines.push(`- Target: ${report.target.type} \`${report.target.name}\``);
+    lines.push(`- Severity: ${escapeMarkdownText(report.severity.toUpperCase())}`);
+    lines.push(`- Change Type: ${escapeMarkdownText(report.changeType.toUpperCase())}`);
+    lines.push(`- Target: ${escapeMarkdownText(report.target.type)} ${markdownCodeSpan(report.target.name)}`);
     lines.push('');
     lines.push('## Summary');
     lines.push('');
@@ -99,10 +100,10 @@ export function generateImpactReportMarkdown(payload: Record<string, any>): stri
             const location = item.lineNumber > 0
                 ? `${item.filePath}:${item.lineNumber}`
                 : item.filePath;
-            lines.push(`- \`${item.node.name}\` (${item.node.type})`);
-            lines.push(`  - Severity: ${item.severity}`);
-            lines.push(`  - Reason: ${item.reason}`);
-            lines.push(`  - Location: ${location}`);
+            lines.push(`- ${markdownCodeSpan(item.node.name)} (${escapeMarkdownText(item.node.type)})`);
+            lines.push(`  - Severity: ${escapeMarkdownText(item.severity)}`);
+            lines.push(`  - Reason: ${escapeMarkdownText(item.reason)}`);
+            lines.push(`  - Location: ${escapeMarkdownText(location)}`);
         }
         lines.push('');
     };
@@ -116,7 +117,7 @@ export function generateImpactReportMarkdown(payload: Record<string, any>): stri
         lines.push('- None');
     } else {
         for (const suggestion of report.suggestions) {
-            lines.push(`- ${suggestion}`);
+            lines.push(`- ${escapeMarkdownText(suggestion)}`);
         }
     }
     lines.push('');

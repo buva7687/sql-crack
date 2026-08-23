@@ -91,6 +91,53 @@ function resolveColumnName(col: any): string {
     return '';
 }
 
+function resolveLimitValue(value: any): string {
+    const unwrappedValue = value?.value ?? value;
+
+    if (unwrappedValue === null || unwrappedValue === undefined) {
+        return '?';
+    }
+    if (Array.isArray(unwrappedValue)) {
+        return resolveLimitValue(unwrappedValue[0]);
+    }
+    if (typeof unwrappedValue === 'string' || typeof unwrappedValue === 'number' || typeof unwrappedValue === 'bigint') {
+        return String(unwrappedValue);
+    }
+    if (typeof unwrappedValue === 'object') {
+        if (unwrappedValue.value !== null && unwrappedValue.value !== undefined) {
+            return resolveLimitValue(unwrappedValue.value);
+        }
+        if (unwrappedValue.type === 'var' && unwrappedValue.name !== null && unwrappedValue.name !== undefined) {
+            const prefix = typeof unwrappedValue.prefix === 'string' ? unwrappedValue.prefix : '';
+            return prefix + String(unwrappedValue.name);
+        }
+    }
+    return '?';
+}
+
+function resolveLimitDetails(limit: any): string {
+    const values = Array.isArray(limit?.value) ? limit.value : [limit?.value ?? limit];
+    const separator = String(limit?.seperator ?? limit?.separator ?? '').toLowerCase();
+    let rowCount = values[0];
+    let offset: any;
+
+    if (values.length > 1) {
+        if (separator === ',') {
+            offset = values[0];
+            rowCount = values[1];
+        } else if (separator === 'offset') {
+            rowCount = values[0];
+            offset = values[1];
+        }
+    }
+
+    const rowText = resolveLimitValue(rowCount);
+    const offsetText = offset === undefined ? null : resolveLimitValue(offset);
+    return offsetText === null
+        ? rowText + ' rows'
+        : rowText + ' rows (offset ' + offsetText + ')';
+}
+
 export function processSelectStatement(
     context: ParserContext,
     stmt: any,
@@ -659,13 +706,13 @@ function processSelect(
     if (stmt.limit && !(Array.isArray(stmt.limit.value) && stmt.limit.value.length === 0)) {
         ctx.hasNoLimit = false;
         const limitId = genId(runtime, 'limit');
-        const limitVal = stmt.limit.value?.[0]?.value ?? stmt.limit.value ?? stmt.limit;
+        const limitDetails = resolveLimitDetails(stmt.limit);
         nodes.push({
             id: limitId,
             type: 'limit',
             label: 'LIMIT',
             description: 'Limit rows',
-            details: [`${limitVal} rows`],
+            details: [limitDetails],
             x: 0, y: 0, width: 120, height: 60
         });
 
@@ -1280,13 +1327,13 @@ function parseCteOrSubqueryInternals(
     // Add LIMIT if present (guard against phantom objects from node-sql-parser)
     if (stmt.limit && !(Array.isArray(stmt.limit.value) && stmt.limit.value.length === 0)) {
         const limitId = genId(runtime, 'child_limit');
-        const limitVal = stmt.limit.value?.[0]?.value ?? stmt.limit.value ?? stmt.limit;
+        const limitDetails = resolveLimitDetails(stmt.limit);
         nodes.push({
             id: limitId,
             type: 'limit',
             label: 'LIMIT',
             description: 'Limit rows',
-            details: [`${limitVal} rows`],
+            details: [limitDetails],
             parentId: parentId,
             depth: depth + 1,
             x: 0, y: 0, width: 120, height: 60

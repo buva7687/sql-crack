@@ -97,8 +97,9 @@ describe('confirmed bug regression anchors from archive/multiple_bugs.txt', () =
 
     it('#24 cancels stale queued parser-client requests before synchronous parsing starts', () => {
         const source = readSource('src/webview/parserClient.ts');
-        expect(source).toContain('function isParseRequestStale(requestId: number): boolean {');
-        expect(source).toContain('return requestId <= cancelledParseRequestId || requestId !== latestParseRequestId;');
+        expect(source).toContain("function isParseRequestStale(requestId: number, mode: ParseRequestMode = 'latest'): boolean {");
+        expect(source).toContain('if (requestId <= cancelledParseRequestId) {');
+        expect(source).toContain("mode === 'latest'");
         expect(source).toContain('return createCancelledParseResult(sql);');
         expect(source).toContain('return createCancelledBatchParseResult(sql);');
     });
@@ -185,11 +186,14 @@ describe('resolved former PARTIAL issue regression anchors', () => {
         expect(source).toContain('for (const msg of this.preInitBuffer) {');
     });
 
-    it('#23 does not treat lone MINUS or SAMPLE heuristics as high-confidence detections', () => {
+    it('#23 does not treat ambiguous lone heuristics as high-confidence detections', () => {
         const source = readSource('src/webview/parser/dialects/detection.ts');
         expect(source).toContain('const hasOnlyOracleMinusSignal =');
+        expect(source).toContain('const hasOnlyMysqlBacktickSignal =');
         expect(source).toContain('const hasOnlyTeradataSampleSignal =');
-        expect(source).toContain('!hasOnlyOracleMinusSignal && !hasOnlyTeradataSampleSignal');
+        expect(source).toContain('&& !hasOnlyOracleMinusSignal');
+        expect(source).toContain('&& !hasOnlyMysqlBacktickSignal');
+        expect(source).toContain('&& !hasOnlyTeradataSampleSignal');
     });
 
     it('#N1 adds operation to the FlowNode type model instead of using warehouseDdl as any casts', () => {

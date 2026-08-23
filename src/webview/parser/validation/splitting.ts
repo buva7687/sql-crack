@@ -1,3 +1,5 @@
+import { getDollarQuoteDelimiterAt, isHashTempTableIdentifierAt } from '../../../shared/stringUtils';
+
 export function stripLeadingComments(sql: string): string {
     let result = sql.trim();
     let changed = true;
@@ -15,15 +17,27 @@ export function stripLeadingComments(sql: string): string {
         }
 
         if (result.startsWith('/*')) {
-            const endIdx = result.indexOf('*/');
-            if (endIdx === -1) {
+            let blockDepth = 1;
+            let endIdx = 2;
+            while (endIdx < result.length && blockDepth > 0) {
+                if (result[endIdx] === '/' && result[endIdx + 1] === '*') {
+                    blockDepth++;
+                    endIdx += 2;
+                } else if (result[endIdx] === '*' && result[endIdx + 1] === '/') {
+                    blockDepth--;
+                    endIdx += 2;
+                } else {
+                    endIdx++;
+                }
+            }
+            if (blockDepth > 0) {
                 return '';
             }
-            result = result.substring(endIdx + 2).trim();
+            result = result.substring(endIdx).trim();
             changed = true;
         }
 
-        while (result.startsWith('#') && !/^#[a-zA-Z0-9_]/.test(result)) {
+        while (result.startsWith('#') && !isHashTempTableIdentifierAt(result, 0)) {
             const newlineIdx = result.indexOf('\n');
             if (newlineIdx === -1) {
                 return '';
@@ -41,7 +55,7 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
     let inString = false;
     let stringChar = '';
     let inLineComment = false;
-    let inBlockComment = false;
+    let blockCommentDepth = 0;
     let depth = 0;
 
     // Track procedural blocks
@@ -99,19 +113,23 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
             continue;
         }
 
-        if (inBlockComment) {
+        if (blockCommentDepth > 0) {
             current += char;
-            if (char === '*' && nextChar === '/') {
+            if (char === '/' && nextChar === '*') {
+                current += '*';
+                i++;
+                blockCommentDepth++;
+            } else if (char === '*' && nextChar === '/') {
                 current += '/';
                 i++;
-                inBlockComment = false;
+                blockCommentDepth--;
             }
             continue;
         }
 
         if (!inString && !inDollarQuotes) {
             if (char === '/' && nextChar === '*') {
-                inBlockComment = true;
+                blockCommentDepth = 1;
                 current += '/*';
                 i++;
                 continue;
@@ -123,7 +141,7 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
                 i++;
                 continue;
             }
-            if (char === '#' && !isIdentifierChar(nextChar)) {
+            if (char === '#' && !isHashTempTableIdentifierAt(sql, i)) {
                 inLineComment = true;
                 current += char;
                 continue;
@@ -131,31 +149,28 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
         }
 
         if (!inString && char === '$') {
-            let j = i + 1;
-            let tag = '';
-            while (j < sql.length && /[a-zA-Z0-9_]/.test(sql[j])) {
-                tag += sql[j];
-                j++;
-            }
-            if (j < sql.length && sql[j] === '$') {
-                const fullTag = '$' + tag + '$';
-                if (inDollarQuotes && tag === dollarQuoteTag) {
+            if (inDollarQuotes) {
+                const fullTag = `$${dollarQuoteTag}$`;
+                if (sql.startsWith(fullTag, i)) {
                     inDollarQuotes = false;
                     dollarQuoteTag = '';
                     current += fullTag;
-                    i = j;
+                    i += fullTag.length - 1;
                     continue;
-                } else if (!inDollarQuotes) {
+                }
+            } else {
+                const fullTag = getDollarQuoteDelimiterAt(sql, i);
+                if (fullTag) {
                     inDollarQuotes = true;
-                    dollarQuoteTag = tag;
+                    dollarQuoteTag = fullTag.slice(1, -1);
                     current += fullTag;
-                    i = j;
+                    i += fullTag.length - 1;
                     continue;
                 }
             }
         }
 
-        if (!inString && !inDollarQuotes && !inBlockComment && !inLineComment) {
+        if (!inString && !inDollarQuotes && blockCommentDepth === 0 && !inLineComment) {
             const lineStart = current.trim();
             if (lineStart === '' && (char === 'D' || char === 'd')) {
                 const remaining = sql.substring(i, i + 20).toUpperCase();
@@ -203,7 +218,7 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
             }
         }
 
-        if (!inString && !inDollarQuotes && !inBlockComment && !inLineComment) {
+        if (!inString && !inDollarQuotes && blockCommentDepth === 0 && !inLineComment) {
             if (char === '(') { depth++; }
             if (char === ')') { depth--; }
 

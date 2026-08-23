@@ -29,7 +29,7 @@ SELECT * FROM customer_segments;
         const extractor = new ReferenceExtractor();
         const refs = extractor.extractReferences(sql, 'demo-showcase.sql', 'MySQL');
 
-        const cteNames = ['customer_journey', 'customer_segments', 'revenue_metrics', 'monthly_product_sales',
+        const cteNames = ['customer_journey', 'revenue_metrics', 'monthly_product_sales',
                           'product_rankings', 'dept_salary_stats', 'top_earners', 'salary_analysis'];
         for (const cteName of cteNames) {
             const leaked = refs.filter((r: any) => r.tableName.toLowerCase() === cteName.toLowerCase());
@@ -40,6 +40,12 @@ SELECT * FROM customer_segments;
         const refNames = refs.map((r: any) => r.tableName.toLowerCase());
         expect(refNames).toContain('customers');
         expect(refNames).toContain('orders');
+        // customer_segments is a CTE in query 1, then a physical UPDATE target
+        // and SELECT source in query 7. Later statements must remain visible.
+        expect(refs).toEqual(expect.arrayContaining([
+            expect.objectContaining({ tableName: 'customer_segments', statementIndex: 6, lineNumber: 391 }),
+            expect.objectContaining({ tableName: 'customer_segments', statementIndex: 6, lineNumber: 398 }),
+        ]));
     });
 
     it('ignores MySQL hash comments during regex fallback extraction', () => {

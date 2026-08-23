@@ -26,10 +26,10 @@ describe('normalizeAdvancedLimit (consolidated)', () => {
 
 describe('escapeForInlineScriptValue (consolidated)', () => {
     it('JSON-encodes and neutralizes script-context breakouts', () => {
-        expect(escapeForInlineScriptValue('</script>')).toBe('"<\\/script>"');
-        expect(escapeForInlineScriptValue('<!--')).toBe('"<\\!--"');
-        expect(escapeForInlineScriptValue('-->')).toBe('"--\\>"');
-        expect(escapeForInlineScriptValue(']]>')).toBe('"]\\]>"');
+        expect(escapeForInlineScriptValue('</script>')).toBe('"\\u003c/script\\u003e"');
+        expect(escapeForInlineScriptValue('<!--')).toBe('"\\u003c!--"');
+        expect(escapeForInlineScriptValue('-->')).toBe('"--\\u003e"');
+        expect(escapeForInlineScriptValue(']]>')).toBe('"]]\\u003e"');
     });
 
     it('handles non-string values', () => {

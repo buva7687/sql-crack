@@ -303,5 +303,39 @@ describe('workspace/panel/impactExport.ts', () => {
             expect(markdown).toContain('- Second suggestion');
             expect(markdown).toContain('- Third suggestion');
         });
+
+        it('keeps hostile legal report values inside their Markdown fields', () => {
+            const payload = createPayload({
+                context: { view: 'impact', scopeUri: '/repo/[scope](javascript:alert(1))\n## scope heading' },
+            });
+            payload.report.target.name = 'users```\n## target heading';
+            payload.report.directImpacts = [{
+                node: { name: '`view` [click](javascript:alert(1))', type: 'view' },
+                reason: 'Uses *all* fields\r\n## reason heading [run](javascript:alert(1))',
+                filePath: '/repo/<report>.sql\n- forged location',
+                lineNumber: 10,
+                severity: 'high',
+            }];
+            payload.report.suggestions = [
+                'Review [runbook](javascript:alert(1))\n## suggestion heading',
+            ];
+
+            const markdown = generateImpactReportMarkdown(payload);
+
+            expect(markdown.match(/^## .+$/gm)).toEqual([
+                '## Summary',
+                '## Direct Impacts',
+                '## Transitive Impacts',
+                '## Suggestions',
+            ]);
+            expect(markdown).not.toContain('[run](javascript:alert(1))');
+            expect(markdown).not.toContain('[runbook](javascript:alert(1))');
+            expect(markdown).toContain('- `` `view` [click](javascript:alert(1)) `` (view)');
+            expect(markdown).toContain('\\[run\\](javascript:alert(1))');
+            expect(markdown).toContain('\\[runbook\\](javascript:alert(1))');
+            expect(markdown).toContain('## target heading');
+            expect(markdown).toContain('## reason heading');
+            expect(markdown).toContain('## suggestion heading');
+        });
     });
 });

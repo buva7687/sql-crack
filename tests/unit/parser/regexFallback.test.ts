@@ -331,6 +331,18 @@ describe('Item #1: Regex-Based Partial Parser Fallback', () => {
             expect(hasTemp).toBe(true);
         });
 
+        it('should preserve SQL Server ##global_temp names end to end', () => {
+            const sql = `
+                CREATE TABLE ##global_temp (id INT);
+                SELECT id FROM ##global_temp;
+            `;
+            const result = parseSql(sql, 'TransactSQL' as SqlDialect);
+            const labels = result.nodes.map((node: any) => node.label);
+
+            expect(labels).toContain('##global_temp');
+            expect(labels).not.toContain('#');
+        });
+
         it('should still strip actual # comments (MySQL style)', () => {
             const sql = 'SELECT * FROM users # this is a comment\nWHERE id = 1';
             const result = parseSql(sql, 'MySQL' as SqlDialect);

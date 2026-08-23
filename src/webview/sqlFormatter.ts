@@ -3,6 +3,8 @@
  * Formats SQL with proper indentation, capitalized keywords, and line breaks
  */
 
+import { getDollarQuoteDelimiterAt } from '../shared/stringUtils';
+
 const SQL_KEYWORDS = [
     'SELECT', 'FROM', 'WHERE', 'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'FULL',
     'ON', 'AND', 'OR', 'NOT', 'IN', 'EXISTS', 'BETWEEN', 'LIKE', 'IS', 'NULL',
@@ -85,22 +87,103 @@ export function formatSql(sql: string, options: Partial<FormatOptions> = {}): st
  */
 function extractComments(sql: string): { sqlWithoutComments: string; comments: Map<string, string> } {
     const comments = new Map<string, string>();
-    let result = sql;
+    let result = '';
     let commentIndex = 0;
+    let index = 0;
 
-    // Extract -- style comments (include trailing newline to preserve line breaks)
-    result = result.replace(/--[^\n]*\n?/g, (match) => {
-        const placeholder = `__COMMENT_${commentIndex++}__`;
-        comments.set(placeholder, match);
+    const storeComment = (comment: string): string => {
+        const placeholder = '__COMMENT_' + commentIndex++ + '__';
+        comments.set(placeholder, comment);
         return placeholder;
-    });
+    };
 
-    // Extract /* */ style comments (include trailing newline if present)
-    result = result.replace(/\/\*[\s\S]*?\*\/\n?/g, (match) => {
-        const placeholder = `__COMMENT_${commentIndex++}__`;
-        comments.set(placeholder, match);
-        return placeholder;
-    });
+    const copyQuotedToken = (start: number, closingQuote: string): number => {
+        let cursor = start + 1;
+        while (cursor < sql.length) {
+            if (sql[cursor] === '\\' && closingQuote !== ']' && cursor + 1 < sql.length) {
+                cursor += 2;
+                continue;
+            }
+            if (sql[cursor] === closingQuote) {
+                if (cursor + 1 < sql.length && sql[cursor + 1] === closingQuote) {
+                    cursor += 2;
+                    continue;
+                }
+                return cursor + 1;
+            }
+            cursor++;
+        }
+        return sql.length;
+    };
+
+    while (index < sql.length) {
+        const char = sql[index];
+
+        if (char === "'" || char === '"' || char.charCodeAt(0) === 96 || char === '[') {
+            const end = copyQuotedToken(index, char === '[' ? ']' : char);
+            result += sql.slice(index, end);
+            index = end;
+            continue;
+        }
+
+        if (char === '$') {
+            const delimiter = getDollarQuoteDelimiterAt(sql, index);
+            if (delimiter) {
+                const closingIndex = sql.indexOf(delimiter, index + delimiter.length);
+                const end = closingIndex === -1 ? sql.length : closingIndex + delimiter.length;
+                result += sql.slice(index, end);
+                index = end;
+                continue;
+            }
+        }
+
+        if (char === '-' && sql[index + 1] === '-') {
+            const start = index;
+            while (index < sql.length && sql[index] !== '\n' && sql[index] !== '\r') {
+                index++;
+            }
+            if (sql[index] === '\r') {
+                index++;
+                if (sql[index] === '\n') {
+                    index++;
+                }
+            } else if (sql[index] === '\n') {
+                index++;
+            }
+            result += storeComment(sql.slice(start, index));
+            continue;
+        }
+
+        if (char === '/' && sql[index + 1] === '*') {
+            const start = index;
+            let depth = 1;
+            index += 2;
+            while (index < sql.length && depth > 0) {
+                if (sql[index] === '/' && sql[index + 1] === '*') {
+                    depth++;
+                    index += 2;
+                } else if (sql[index] === '*' && sql[index + 1] === '/') {
+                    depth--;
+                    index += 2;
+                } else {
+                    index++;
+                }
+            }
+            if (sql[index] === '\r') {
+                index++;
+                if (sql[index] === '\n') {
+                    index++;
+                }
+            } else if (sql[index] === '\n') {
+                index++;
+            }
+            result += storeComment(sql.slice(start, index));
+            continue;
+        }
+
+        result += char;
+        index++;
+    }
 
     return { sqlWithoutComments: result, comments };
 }
@@ -409,4 +492,3 @@ function escapeHtmlSimple(text: string): string {
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;');
 }
-

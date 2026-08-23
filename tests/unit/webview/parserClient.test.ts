@@ -10,7 +10,8 @@ import {
     terminateWorker,
     parseWithFallback,
     cancelPendingParse,
-    getWorkerStatus
+    getWorkerStatus,
+    isCancelledBatchParseResult,
 } from '../../../src/webview/parserClient';
 import { SqlDialect } from '../../../src/webview/types';
 
@@ -192,6 +193,24 @@ describe('parserClient', () => {
                 ]);
                 expect(newerResult.queries.length).toBeGreaterThan(0);
                 expect(newerResult.queries[0]?.error).toBeUndefined();
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+
+        it('allows independent deferred hydrations to complete without cancelling each other', async () => {
+            jest.useFakeTimers();
+            try {
+                const firstHydration = parseBatchAsync('SELECT * FROM first_table;', 'MySQL', undefined, {}, 'independent');
+                const secondHydration = parseBatchAsync('SELECT * FROM second_table;', 'MySQL', undefined, {}, 'independent');
+
+                jest.runOnlyPendingTimers();
+
+                const [firstResult, secondResult] = await Promise.all([firstHydration, secondHydration]);
+                expect(isCancelledBatchParseResult(firstResult)).toBe(false);
+                expect(isCancelledBatchParseResult(secondResult)).toBe(false);
+                expect(firstResult.queries[0]?.tableUsage.has('first_table')).toBe(true);
+                expect(secondResult.queries[0]?.tableUsage.has('second_table')).toBe(true);
             } finally {
                 jest.useRealTimers();
             }

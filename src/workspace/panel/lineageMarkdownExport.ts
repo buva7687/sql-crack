@@ -1,6 +1,7 @@
 import { WorkspaceExportContext, buildWorkspaceExportMetadata } from '../exportMetadata';
 import { FlowAnalyzer, FlowResult } from '../lineage/flowAnalyzer';
 import { LineageNode } from '../lineage/types';
+import { escapeMarkdownText, markdownCodeSpan } from './markdownUtils';
 
 interface LineageMarkdownExportOptions {
     flowAnalyzer: FlowAnalyzer;
@@ -41,9 +42,11 @@ function countUniqueEdges(results: FlowResult[]): number {
 
 function describeNode(node: Pick<LineageNode, 'name' | 'type' | 'filePath' | 'lineNumber'>): string {
     const location = node.filePath
-        ? (node.lineNumber && node.lineNumber > 0 ? ` — ${node.filePath}:${node.lineNumber}` : ` — ${node.filePath}`)
+        ? (node.lineNumber && node.lineNumber > 0
+            ? ` — ${escapeMarkdownText(node.filePath)}:${node.lineNumber}`
+            : ` — ${escapeMarkdownText(node.filePath)}`)
         : '';
-    return `- \`${node.name}\` (${node.type})${location}`;
+    return `- ${markdownCodeSpan(node.name)} (${escapeMarkdownText(node.type)})${location}`;
 }
 
 function appendNodeSection(lines: string[], title: string, nodes: LineageNode[]): void {
@@ -100,16 +103,16 @@ export function buildLineageMarkdownExport(options: LineageMarkdownExportOptions
     const lines: string[] = [
         '# Lineage Graph',
         '',
-        `- Exported: ${context.exportedAt}`,
-        `- Node: ${node.type} \`${node.name}\``,
-        `- Direction: ${direction}`,
+        `- Exported: ${escapeMarkdownText(context.exportedAt)}`,
+        `- Node: ${escapeMarkdownText(node.type)} ${markdownCodeSpan(node.name)}`,
+        `- Direction: ${escapeMarkdownText(direction)}`,
         `- Depth: ${depth}`,
         `- Nodes: ${context.nodeCount}`,
         `- Edges: ${context.edgeCount}`,
     ];
 
     if (scopeLabel) {
-        lines.push(`- Scope: ${scopeLabel}`);
+        lines.push(`- Scope: ${escapeMarkdownText(scopeLabel)}`);
     }
     lines.push(`- Expanded Nodes: ${expandedNodeCount}`);
     lines.push('');

@@ -142,6 +142,28 @@ describe('Item #4: Procedural SQL Splitting (BEGIN...END Blocks)', () => {
             expect(statements[0]).toMatch(/CREATE FUNCTION/);
             expect(statements[0]).toMatch(/\$function\$.*\$function\$/s);
         });
+
+        it('supports Unicode dollar-quote tags', () => {
+            const statements = splitSqlStatements(
+                'SELECT $étiquette$literal;still literal$étiquette$; SELECT 2;'
+            );
+
+            expect(statements).toEqual([
+                'SELECT $étiquette$literal;still literal$étiquette$',
+                'SELECT 2',
+            ]);
+        });
+
+        it('does not open a dollar quote inside a Unicode identifier', () => {
+            const statements = splitSqlStatements(
+                'SELECT * FROM café$$tbl; SELECT * FROM real_tbl;'
+            );
+
+            expect(statements).toEqual([
+                'SELECT * FROM café$$tbl',
+                'SELECT * FROM real_tbl',
+            ]);
+        });
     });
 
     describe('MySQL DELIMITER Statements', () => {

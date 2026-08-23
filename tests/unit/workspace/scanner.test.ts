@@ -247,6 +247,8 @@ describe('WorkspaceScanner', () => {
 
             // ASSERT: Should return error, not throw
             expect(result.parseError).toContain('File too large');
+            expect(result.skippedReason).toBe('tooLarge');
+            expect(result.fileSize).toBe(15 * 1024 * 1024);
             expect(result.definitions).toHaveLength(0);
             expect(result.references).toHaveLength(0);
         });
@@ -268,7 +270,18 @@ describe('WorkspaceScanner', () => {
 
             // ASSERT: Should capture error gracefully
             expect(result.parseError).toBe('Permission denied');
+            expect(result.readError).toBe('Permission denied');
             expect(result.definitions).toHaveLength(0);
+        });
+
+        it('preserves the filesystem error code for deletion-aware indexing', async () => {
+            const missing = Object.assign(new Error('File not found'), { code: 'FileNotFound' });
+            (vscode.workspace.fs.stat as jest.Mock).mockRejectedValue(missing);
+
+            const result = await scanner.analyzeFile(testUri);
+
+            expect(result.readError).toBe('File not found');
+            expect(result.readErrorCode).toBe('FileNotFound');
         });
 
         it('should generate consistent content hash', async () => {
@@ -443,6 +456,7 @@ describe('WorkspaceScanner', () => {
     describe('edge cases', () => {
         it('should handle SQL with syntax errors', async () => {
             const testUri = vscode.Uri.file('/workspace/broken.sql');
+            const invalidSql = 'SELEKT * FORM users WHER id = ;';
 
             (vscode.workspace.fs.stat as jest.Mock).mockResolvedValue({
                 type: 1,
@@ -450,16 +464,18 @@ describe('WorkspaceScanner', () => {
                 size: 100
             });
 
-            (vscode.workspace.openTextDocument as jest.Mock).mockResolvedValue({
-                getText: () => 'SELEKT * FORM users WHER id = ;', // Intentional errors
-                uri: testUri
-            });
+            (vscode.workspace.fs.readFile as jest.Mock).mockResolvedValue(
+                new TextEncoder().encode(invalidSql)
+            );
 
             // Should not throw - returns result with possible parse issues
             const result = await scanner.analyzeFile(testUri);
 
             expect(result.filePath).toBe('/workspace/broken.sql');
-            // Parser may or may not set parseError depending on implementation
+            expect(result.parseError).toBeUndefined();
+            expect(result.parseWarnings).toEqual(expect.arrayContaining([
+                expect.stringContaining('parser failed; regex fallback used'),
+            ]));
         });
 
         it('should handle empty SQL files', async () => {

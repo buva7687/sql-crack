@@ -16,7 +16,9 @@ jest.mock('fs', () => ({
 import * as fs from 'fs';
 import * as path from 'path';
 import { LineageBuilder } from '../../../../src/workspace/lineage/lineageBuilder';
+import { getQualifiedKey } from '../../../../src/workspace/identifiers';
 import { logger } from '../../../../src/logger';
+import { SchemaExtractor } from '../../../../src/workspace/extraction/schemaExtractor';
 import type { WorkspaceIndex, SchemaDefinition, FileAnalysis, TableReference } from '../../../../src/workspace/types';
 import type { ColumnInfo } from '../../../../src/workspace/extraction/types';
 
@@ -72,7 +74,7 @@ function makeIndex(
 ): WorkspaceIndex {
     const definitionMap = new Map<string, SchemaDefinition[]>();
     for (const def of defs) {
-        const key = (def.schema ? `${def.schema}.` : '') + def.name.toLowerCase();
+        const key = getQualifiedKey(def.name, def.schema, def);
         if (!definitionMap.has(key)) {
             definitionMap.set(key, []);
         }
@@ -135,6 +137,35 @@ describe('LineageBuilder', () => {
             expect(builder.nodes.get('view:active_users')!.type).toBe('view');
         });
 
+        it('preserves quoted case and catalog-schema relation identities', () => {
+            const definitions = [
+                makeDef('Users', 'table', [], { nameQuoted: true }),
+                makeDef('users', 'table', [], { nameQuoted: true }),
+                makeDef('orders', 'table', [], {
+                    catalog: 'db1',
+                    schema: 'sales',
+                    catalogQuoted: true,
+                    schemaQuoted: true,
+                    nameQuoted: true,
+                }),
+                makeDef('orders', 'table', [], {
+                    catalog: 'db1',
+                    schema: 'finance',
+                    catalogQuoted: true,
+                    schemaQuoted: true,
+                    nameQuoted: true,
+                }),
+            ];
+            const builder = new LineageBuilder();
+
+            builder.buildFromIndex(makeIndex(definitions));
+
+            expect(builder.nodes.has('table:Users')).toBe(true);
+            expect(builder.nodes.has('table:users')).toBe(true);
+            expect(builder.nodes.get('table:db1.sales.orders')?.name).toBe('db1.sales.orders');
+            expect(builder.nodes.get('table:db1.finance.orders')?.name).toBe('db1.finance.orders');
+        });
+
         it('creates column nodes when includeColumns is true', () => {
             const cols = [makeColumn('id', 'int'), makeColumn('email', 'varchar')];
             const def = makeDef('users', 'table', cols);
@@ -144,6 +175,45 @@ describe('LineageBuilder', () => {
 
             expect(builder.nodes.has('column:users.id')).toBe(true);
             expect(builder.nodes.has('column:users.email')).toBe(true);
+        });
+
+        it('builds lineage for ordinary PostgreSQL CREATE TABLE columns', () => {
+            const defs = new SchemaExtractor().extractDefinitions(
+                'CREATE TABLE accounts (id INT, name TEXT);',
+                'accounts.sql',
+                'PostgreSQL'
+            );
+            const fileAnalysis = makeFileAnalysis('accounts.sql', defs, []);
+            const files = new Map([['accounts.sql', fileAnalysis]]);
+            const index = makeIndex(defs, files);
+            const builder = new LineageBuilder({ includeExternal: true, includeColumns: true });
+
+            expect(() => builder.buildFromIndex(index)).not.toThrow();
+            expect(builder.nodes.has('column:accounts.id')).toBe(true);
+            expect(builder.nodes.has('column:accounts.name')).toBe(true);
+        });
+
+        it('keeps quoted case-distinct and dotted PostgreSQL columns separate', () => {
+            const defs = new SchemaExtractor().extractDefinitions(
+                'CREATE TABLE t ("OrderID" INT, "orderid" INT, "customer.id" INT);',
+                'quoted-columns.sql',
+                'PostgreSQL'
+            );
+            const fileAnalysis = makeFileAnalysis('quoted-columns.sql', defs, []);
+            const index = makeIndex(defs, new Map([['quoted-columns.sql', fileAnalysis]]));
+            const builder = new LineageBuilder({ includeExternal: true, includeColumns: true });
+
+            expect(defs[0].columns).toEqual([
+                expect.objectContaining({ name: 'OrderID', nameQuoted: true }),
+                expect.objectContaining({ name: 'orderid', nameQuoted: true }),
+                expect.objectContaining({ name: 'customer.id', nameQuoted: true }),
+            ]);
+            builder.buildFromIndex(index);
+
+            expect(builder.nodes.has('column:t.OrderID')).toBe(true);
+            expect(builder.nodes.has('column:t.orderid')).toBe(true);
+            expect(builder.nodes.has('column:t.customer\\.id')).toBe(true);
+            expect([...builder.nodes.values()].filter(node => node.type === 'column')).toHaveLength(3);
         });
 
         it('skips column nodes when includeColumns is false', () => {
@@ -174,6 +244,30 @@ describe('LineageBuilder', () => {
                 e.sourceId === 'table:source_table' && e.targetId === 'table:target_table'
             );
             expect(edge).toBeDefined();
+        });
+
+        it('treats a MERGE target as an output destination', () => {
+            const sourceDef = makeDef('staging_orders', 'table', [], { filePath: 'merge.sql' });
+            const targetDef = makeDef('orders', 'table', [], { filePath: 'merge.sql' });
+            const refs = [
+                makeRef('staging_orders', 'select', { filePath: 'merge.sql', statementIndex: 0 }),
+                makeRef('orders', 'merge', { filePath: 'merge.sql', statementIndex: 0 }),
+            ];
+            const analysis = makeFileAnalysis('merge.sql', [sourceDef, targetDef], refs);
+            const index = makeIndex(
+                [sourceDef, targetDef],
+                new Map([['merge.sql', analysis]])
+            );
+
+            const builder = new LineageBuilder();
+            builder.buildFromIndex(index);
+
+            expect(builder.edges).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    sourceId: 'table:staging_orders',
+                    targetId: 'table:orders',
+                }),
+            ]));
         });
 
         it('creates external nodes for unknown references', () => {
@@ -236,7 +330,7 @@ describe('LineageBuilder', () => {
             debugSpy.mockRestore();
         });
 
-        it('logs warning when async SQL preload cannot provide SQL for CTE/alias extraction', async () => {
+        it('does not require file SQL to filter already-classified references', async () => {
             const warnSpy = jest.spyOn(logger, 'warn').mockImplementation(() => {});
             (mockedFs.promises.readFile as jest.Mock).mockRejectedValue(new Error('EACCES'));
 
@@ -253,7 +347,7 @@ describe('LineageBuilder', () => {
             const builder = new LineageBuilder();
             await builder.buildFromIndexAsync(index);
 
-            expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('CTE/alias extraction (restricted.sql)'));
+            expect(warnSpy).not.toHaveBeenCalled();
             warnSpy.mockRestore();
         });
 
@@ -378,6 +472,36 @@ describe('LineageBuilder', () => {
             expect(builder.nodes.has('external:my_cte')).toBe(false);
         });
 
+        it('does not let a CTE name hide a physical table in a later statement', () => {
+            const report = makeDef('report', 'table', [], { filePath: 'pipeline.sql' });
+            const refs = [
+                makeRef('orders', 'select', { filePath: 'pipeline.sql', statementIndex: 1 }),
+                makeRef('report', 'insert', { filePath: 'pipeline.sql', statementIndex: 1 }),
+            ];
+            const queries = [{
+                statementType: 'select',
+                outputColumns: [],
+                inputTables: [],
+                inputColumns: [],
+                transformations: [],
+                ctes: [{ name: 'orders', columns: [], lineNumber: 1 }],
+                subqueries: [],
+                lineNumber: 1,
+            }];
+            const analysis = makeFileAnalysis('pipeline.sql', [report], refs, queries as any);
+            const index = makeIndex([report], new Map([['pipeline.sql', analysis]]));
+
+            const builder = new LineageBuilder({ includeExternal: true, includeColumns: false });
+            builder.buildFromIndex(index);
+
+            expect(builder.edges).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    sourceId: 'external:orders',
+                    targetId: 'table:report',
+                }),
+            ]));
+        });
+
         it('resolves a view reference to the existing view node, not a stray external node', () => {
             // A view feeds an INSERT in the same statement. The edge source must
             // resolve to the real `view:` node; checking only `table:` would
@@ -404,6 +528,18 @@ describe('LineageBuilder', () => {
     });
 
     describe('resolveTableId', () => {
+        it('does not fold an unresolved relation onto a different quoted-case node', () => {
+            const quotedDef = makeDef('Users', 'table', [], {
+                nameQuoted: true,
+                filePath: 'quoted.sql',
+            });
+            const builder = new LineageBuilder();
+            builder.buildFromIndex(makeIndex([quotedDef]));
+
+            expect((builder as any).resolveTableId('users', 'query.sql')).toBeNull();
+            expect((builder as any).resolveTableId('Users', 'query.sql')).toBe('table:Users');
+        });
+
         it('resolves table: prefix', () => {
             const def = makeDef('orders');
             const index = makeIndex([def]);
@@ -485,6 +621,112 @@ describe('LineageBuilder', () => {
                 })
             ]));
         });
+
+        it('ignores commented target patterns and resolves the real SELECT INTO target', () => {
+            const commentedTarget = makeDef('commented_target');
+            const realTarget = makeDef('real_target');
+            const analysis = makeFileAnalysis(
+                'targets.sql',
+                [commentedTarget, realTarget],
+                []
+            );
+            const builder = new LineageBuilder();
+            builder.buildFromIndex(makeIndex([commentedTarget, realTarget]));
+
+            const targetId = (builder as any).resolveTargetTableId(
+                {
+                    statementType: 'select',
+                    sql: [
+                        '-- INSERT INTO commented_target SELECT 1',
+                        '/* SELECT 1 INTO commented_target */',
+                        'SELECT 1 INTO real_target'
+                    ].join('\n')
+                },
+                0,
+                analysis,
+                'targets.sql'
+            );
+
+            expect(targetId).toBe('table:real_target');
+        });
+
+        it('does not resolve a target mentioned only inside SQL comments', () => {
+            const commentedTarget = makeDef('commented_target');
+            const unrelatedTarget = makeDef('unrelated_target');
+            const analysis = makeFileAnalysis(
+                'comments_only.sql',
+                [commentedTarget, unrelatedTarget],
+                []
+            );
+            const builder = new LineageBuilder();
+            builder.buildFromIndex(makeIndex([commentedTarget, unrelatedTarget]));
+
+            const targetId = (builder as any).resolveTargetTableId(
+                {
+                    statementType: 'select',
+                    sql: [
+                        '-- INSERT INTO commented_target SELECT 1',
+                        '/* SELECT 1 INTO commented_target */',
+                        'SELECT 1'
+                    ].join('\n')
+                },
+                0,
+                analysis,
+                'comments_only.sql'
+            );
+
+            expect(targetId).toBeNull();
+        });
+
+        it('preserves BigQuery case in the SELECT INTO target fallback', () => {
+            const target = makeDef('MixedTarget', 'table', [], {
+                filePath: 'bigquery.sql',
+                identifierCaseFolding: 'preserve',
+                quotedIdentifiersCaseSensitive: false,
+            });
+            const unrelated = makeDef('OtherTarget', 'table', [], {
+                filePath: 'bigquery.sql',
+                identifierCaseFolding: 'preserve',
+                quotedIdentifiersCaseSensitive: false,
+            });
+            const analysis = makeFileAnalysis('bigquery.sql', [target, unrelated], []);
+            const builder = new LineageBuilder();
+            builder.buildFromIndex(makeIndex([target, unrelated]));
+
+            const targetId = (builder as any).resolveTargetTableId(
+                { statementType: 'select', sql: 'SELECT 1 INTO MixedTarget' },
+                0,
+                analysis,
+                'bigquery.sql'
+            );
+
+            expect(targetId).toBe('table:MixedTarget');
+        });
+
+        it('applies Snowflake upper folding in the INSERT target fallback', () => {
+            const target = makeDef('MixedTarget', 'table', [], {
+                filePath: 'snowflake.sql',
+                identifierCaseFolding: 'upper',
+                quotedIdentifiersCaseSensitive: true,
+            });
+            const unrelated = makeDef('OtherTarget', 'table', [], {
+                filePath: 'snowflake.sql',
+                identifierCaseFolding: 'upper',
+                quotedIdentifiersCaseSensitive: true,
+            });
+            const analysis = makeFileAnalysis('snowflake.sql', [target, unrelated], []);
+            const builder = new LineageBuilder();
+            builder.buildFromIndex(makeIndex([target, unrelated]));
+
+            const targetId = (builder as any).resolveTargetTableId(
+                { statementType: 'insert', sql: 'INSERT INTO MixedTarget SELECT 1' },
+                0,
+                analysis,
+                'snowflake.sql'
+            );
+
+            expect(targetId).toBe('table:MIXEDTARGET');
+        });
     });
 
     describe('extractCTEsWithRegex', () => {
@@ -503,8 +745,8 @@ describe('LineageBuilder', () => {
             expect(builder.nodes.has('cte:my_cte')).toBe(true);
         });
 
-        it('extracts RECURSIVE CTEs from preloaded SQL', async () => {
-            const sql = 'WITH RECURSIVE hierarchy AS (\n  SELECT 1\n)\nSELECT * FROM hierarchy';
+        it('extracts multiline RECURSIVE CTEs with the correct name line', async () => {
+            const sql = 'WITH RECURSIVE\n e AS (\n  SELECT 1\n)\nSELECT * FROM e';
             (mockedFs.promises.readFile as jest.Mock).mockResolvedValue(sql);
 
             const fa = makeFileAnalysis('rec.sql', [], []);
@@ -514,7 +756,10 @@ describe('LineageBuilder', () => {
             const builder = new LineageBuilder();
             await builder.buildFromIndexAsync(index);
 
-            expect(builder.nodes.has('cte:hierarchy')).toBe(true);
+            expect(builder.nodes.get('cte:e')).toEqual(expect.objectContaining({
+                name: 'e',
+                lineNumber: 2
+            }));
         });
 
         it('filters out SQL reserved words from preloaded SQL', async () => {
@@ -533,6 +778,79 @@ describe('LineageBuilder', () => {
             for (const [id] of builder.nodes) {
                 expect(id.startsWith('cte:')).toBe(false);
             }
+        });
+
+        it('ignores commented CTEs and preserves valid CTE line numbers', () => {
+            const sql = [
+                '-- WITH line_phantom AS (SELECT 1)',
+                '/*',
+                'WITH block_phantom AS (SELECT 2)',
+                '*/',
+                'WITH first_cte AS (',
+                '  SELECT 1',
+                '),',
+                'second_cte AS (',
+                '  SELECT 2',
+                ')',
+                'SELECT * FROM first_cte JOIN second_cte ON 1 = 1'
+            ].join('\n');
+            const cteNames = new Map<string, {
+                name: string;
+                filePath: string;
+                lineNumber: number;
+            }>();
+            const builder = new LineageBuilder();
+
+            (builder as any).extractCTEsWithRegex(sql, 'comments.sql', cteNames);
+
+            expect(Array.from(cteNames.keys())).toEqual(['first_cte', 'second_cte']);
+            expect(cteNames.get('first_cte')).toEqual({
+                name: 'first_cte',
+                filePath: 'comments.sql',
+                lineNumber: 5
+            });
+            expect(cteNames.get('second_cte')).toEqual({
+                name: 'second_cte',
+                filePath: 'comments.sql',
+                lineNumber: 8
+            });
+        });
+
+        it('ignores CTE-like text inside quoted SQL tokens', () => {
+            const sql = [
+                "SELECT 'WITH string_phantom AS (SELECT 1)' AS note;",
+                'SELECT "WITH identifier_phantom AS (SELECT 2)" FROM source;',
+                'WITH real_cte AS (SELECT 3) SELECT * FROM real_cte'
+            ].join('\n');
+            const cteNames = new Map<string, {
+                name: string;
+                filePath: string;
+                lineNumber: number;
+            }>();
+            const builder = new LineageBuilder();
+
+            (builder as any).extractCTEsWithRegex(sql, 'quoted.sql', cteNames);
+
+            expect(Array.from(cteNames.keys())).toEqual(['real_cte']);
+            expect(cteNames.get('real_cte')?.lineNumber).toBe(3);
+        });
+
+        it('ignores CTE-like text inside PostgreSQL dollar-quoted strings', () => {
+            const sql = [
+                'SELECT $body$WITH dollar_phantom AS (SELECT 1) -- literal$body$ AS note;',
+                'WITH real_cte AS (SELECT 2) SELECT * FROM real_cte'
+            ].join('\n');
+            const cteNames = new Map<string, {
+                name: string;
+                filePath: string;
+                lineNumber: number;
+            }>();
+            const builder = new LineageBuilder();
+
+            (builder as any).extractCTEsWithRegex(sql, 'dollar-quoted.sql', cteNames);
+
+            expect(Array.from(cteNames.keys())).toEqual(['real_cte']);
+            expect(cteNames.get('real_cte')?.lineNumber).toBe(2);
         });
     });
 

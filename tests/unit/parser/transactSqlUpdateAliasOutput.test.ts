@@ -127,5 +127,16 @@ from   #temp_table tt`;
             const updateNode = result.nodes.find((n: any) => n.type === 'result' && n.label === 'UPDATE');
             expect(updateNode?.details?.some((d: string) => /OUTPUT/i.test(d))).toBe(true);
         });
+
+        it('does not report a successful OUTPUT compatibility parse for a partial fallback result', () => {
+            const result = parseSql(
+                'UPDATE target_table SET active = 1 OUTPUT inserted.active INTO output_table WHERE ;',
+                TSQL
+            );
+
+            expect(result.partial).toBe(true);
+            expect(result.hints.some((h: any) => /Parse error:/i.test(h.message))).toBe(true);
+            expect(result.hints.some((h: any) => /OUTPUT via compatibility parser/i.test(h.message))).toBe(false);
+        });
     });
 });

@@ -30,7 +30,7 @@ export interface ImpactEntry {
 
 export interface ImpactReportResult {
     changeType: string;
-    target: { type: 'table' | 'view' | 'column'; name: string; tableName?: string };
+    target: { type: 'table' | 'view' | 'column'; name: string; tableName?: string; nodeId?: string };
     severity: string;
     summary: { totalAffected: number; tablesAffected: number; viewsAffected: number; queriesAffected: number; filesAffected: number };
     directImpacts: ImpactEntry[];
@@ -71,7 +71,7 @@ export type WorkspaceWebviewMessage =
     | { command: 'switchToImpactView'; requestId?: WorkspaceRequestId }
     // Lineage analysis
     | { command: 'getLineage'; nodeId: string; direction: 'upstream' | 'downstream' | 'both'; depth?: number; requestId?: WorkspaceRequestId }
-    | { command: 'analyzeImpact'; type: 'table' | 'view' | 'column'; name: string; tableName?: string; changeType?: 'modify' | 'rename' | 'drop' | 'addColumn'; requestId?: WorkspaceRequestId }
+    | { command: 'analyzeImpact'; type: 'table' | 'view' | 'column'; name: string; tableName?: string; nodeId?: string; changeType?: 'modify' | 'rename' | 'drop' | 'addColumn'; requestId?: WorkspaceRequestId }
     | { command: 'exploreTable'; tableName: string; nodeId?: string; requestId?: WorkspaceRequestId }
     | { command: 'getColumnLineage'; tableName?: string; tableId?: string; columnName: string; requestId?: WorkspaceRequestId }
     | { command: 'selectLineageNode'; nodeId: string }

@@ -19,6 +19,7 @@ jest.mock('../../src/visualizationPanel', () => ({
         getPinnedTabs: jest.fn().mockReturnValue([]),
         createOrShow: jest.fn(),
         refresh: jest.fn(),
+        applySourceDocumentChanges: jest.fn(),
         markAsStale: jest.fn(),
         sendCursorPosition: jest.fn(),
         sendQueryIndex: jest.fn(),
@@ -462,6 +463,8 @@ describe('Extension Activation Wiring', () => {
                 dialect: 'PostgreSQL',
                 fileName: 'source.sql',
                 documentUri: sourceUri,
+                sourceRange: undefined,
+                sourceOffsets: undefined,
             });
         });
 

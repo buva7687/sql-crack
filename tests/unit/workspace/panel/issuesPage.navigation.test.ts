@@ -62,4 +62,28 @@ describe('issues page in-page navigation wiring', () => {
         expect(html).toContain('data-issue-search="stale_table table /repo/models/stale.sql line 12"');
         expect(html).toContain('data-issue-search="missing_table external /repo/models/orders.sql line 44"');
     });
+
+    it('surfaces files analyzed through parser fallback as partial results', () => {
+        const detailedStats = createDetailedStats();
+        detailedStats.parseWarnings = 1;
+        detailedStats.parseWarningDetails = [{
+            filePath: '/repo/models/partial.sql',
+            fileName: 'partial.sql',
+            warnings: ['Reference parser failed; regex fallback used: Unexpected token'],
+        }];
+
+        const html = createIssuesPageHtml({
+            nonce: 'test',
+            detailedStats,
+            totalIssues: 3,
+            styles: '',
+            script: '',
+            escapeHtml: (value: string) => value,
+        });
+
+        expect(html).toContain('Fallback-parsed Files');
+        expect(html).toContain('partial.sql');
+        expect(html).toContain('Reference parser failed; regex fallback used: Unexpected token');
+        expect(html).not.toContain('No Issues Found');
+    });
 });

@@ -48,10 +48,218 @@ export function escapeHtml(value: string): string {
  */
 export function escapeForInlineScriptValue(value: unknown): string {
     return JSON.stringify(value)
-        .replace(/<\/script/gi, '<\\/script')
-        .replace(/<!--/g, '<\\!--')
-        .replace(/-->/g, '--\\>')
-        .replace(/\]\]>/g, ']\\]>');
+        // Unicode escapes are valid in both JSON and JavaScript string literals.
+        // Escaping angle brackets prevents script termination, HTML comments,
+        // and CDATA terminators without producing invalid JSON escapes such as
+        // \! or \> that break callers which store the serialized value.
+        .replace(/</g, '\\u003c')
+        .replace(/>/g, '\\u003e')
+        .replace(/\u2028/g, '\\u2028')
+        .replace(/\u2029/g, '\\u2029');
+}
+
+/**
+ * Return whether a hash at the supplied offset is being used as a SQL Server /
+ * Redshift temporary-table identifier instead of a MySQL hash comment.
+ *
+ * A leading `#word` is ambiguous without a dialect.  Treat it as an identifier
+ * only in table-name positions (or when used as a qualified name), so MySQL
+ * comments such as `#CONNECT BY ...` are still removed while `FROM #temp` and
+ * `CREATE TABLE ##temp` remain intact.
+ */
+export function isHashTempTableIdentifierAt(sql: string, offset: number): boolean {
+    // The scanner visits both characters in a global-temp `##name`; normalize
+    // the second hash back to the start of the identifier.
+    if (offset > 0 && sql[offset - 1] === '#') {
+        offset--;
+    }
+    if (sql[offset] !== '#') {
+        return false;
+    }
+
+    let nameStart = offset + 1;
+    if (sql[nameStart] === '#') {
+        nameStart++;
+    }
+    if (!/[A-Za-z_]/.test(sql[nameStart] || '')) {
+        return false;
+    }
+
+    let nameEnd = nameStart + 1;
+    while (nameEnd < sql.length && /[A-Za-z0-9_]/.test(sql[nameEnd])) {
+        nameEnd++;
+    }
+    if (sql[nameEnd] === '.') {
+        return true;
+    }
+
+    const before = sql.slice(Math.max(0, offset - 160), offset);
+    return /(?:\b(?:FROM|JOIN|INTO|UPDATE|INSERT|USING|REFERENCES|TABLE|TRUNCATE)\s+|\bDROP\s+TABLE(?:\s+IF\s+EXISTS)?\s+|\bCREATE\s+(?:(?:LOCAL|GLOBAL)\s+)?(?:TEMP(?:ORARY)?\s+)?TABLE\s+)$/i.test(before);
+}
+
+export interface StripSqlCommentsOptions {
+    /** Set false when the caller knows `#` always starts a MySQL-style comment. */
+    preserveHashTempIdentifiers?: boolean;
+}
+
+const DOLLAR_QUOTE_DELIMITER_PATTERN = /^\$(?:[_\p{L}][_\p{L}\p{M}\p{N}]*)?\$/u;
+const SQL_IDENTIFIER_CONTINUATION_PATTERN = /[_$\p{L}\p{M}\p{N}]/u;
+const DELIMITER_DIRECTIVE_PATTERN = /^[ \t]*DELIMITER[ \t]+$/i;
+
+function getPreviousCodePoint(sql: string, offset: number): string {
+    if (offset <= 0) {
+        return '';
+    }
+
+    const previousCodeUnit = sql.charCodeAt(offset - 1);
+    const startsSurrogatePair = previousCodeUnit >= 0xDC00
+        && previousCodeUnit <= 0xDFFF
+        && offset > 1
+        && sql.charCodeAt(offset - 2) >= 0xD800
+        && sql.charCodeAt(offset - 2) <= 0xDBFF;
+    return sql.slice(startsSurrogatePair ? offset - 2 : offset - 1, offset);
+}
+
+/**
+ * Return the dollar-quote delimiter opening at `offset`, or null when the
+ * dollar sign does not start a PostgreSQL dollar-quoted string.
+ *
+ * Two shapes look like a delimiter but are not one:
+ *  - `$` is a legal identifier continuation character, so `my$$tbl` is a single
+ *    name and `END$$` ends one. A `$` directly after an identifier character
+ *    therefore belongs to that identifier, matching PostgreSQL's own lexer.
+ *  - MySQL's `DELIMITER $$` declares a statement terminator rather than a
+ *    string, so procedure dumps must keep scanning their body normally.
+ *
+ * Only openings are filtered. A closing delimiter is located by searching for
+ * the same token, so `$$SELECT 1$$` still closes correctly.
+ */
+export function getDollarQuoteDelimiterAt(sql: string, offset: number): string | null {
+    if (sql[offset] !== '$') {
+        return null;
+    }
+    if (SQL_IDENTIFIER_CONTINUATION_PATTERN.test(getPreviousCodePoint(sql, offset))) {
+        return null;
+    }
+
+    const delimiter = DOLLAR_QUOTE_DELIMITER_PATTERN.exec(sql.slice(offset))?.[0];
+    if (!delimiter) {
+        return null;
+    }
+    const lineStart = Math.max(
+        sql.lastIndexOf('\n', offset - 1),
+        sql.lastIndexOf('\r', offset - 1)
+    ) + 1;
+    if (DELIMITER_DIRECTIVE_PATTERN.test(sql.slice(lineStart, offset))) {
+        return null;
+    }
+
+    return delimiter;
+}
+
+/** Return the exclusive end of a PostgreSQL dollar-quoted token at `offset`. */
+export function getDollarQuotedTokenEnd(sql: string, offset: number): number | null {
+    const delimiter = getDollarQuoteDelimiterAt(sql, offset);
+    if (!delimiter) {
+        return null;
+    }
+
+    const closingOffset = sql.indexOf(delimiter, offset + delimiter.length);
+    return closingOffset === -1 ? sql.length : closingOffset + delimiter.length;
+}
+
+/**
+ * Mask SQL comments with spaces while preserving every character position and
+ * newline. Quoted strings and identifiers remain unchanged, so regex matches in
+ * the returned text map directly back to the original SQL.
+ */
+export function maskSqlCommentsPreservingPositions(
+    sql: string,
+    options: StripSqlCommentsOptions = {}
+): string {
+    const len = sql.length;
+    const masked = sql.split('');
+    let i = 0;
+
+    const maskRange = (start: number, end: number): void => {
+        for (let position = start; position < end; position++) {
+            if (masked[position] !== '\n' && masked[position] !== '\r') {
+                masked[position] = ' ';
+            }
+        }
+    };
+
+    while (i < len) {
+        const ch = sql[i];
+
+        const dollarQuotedEnd = getDollarQuotedTokenEnd(sql, i);
+        if (dollarQuotedEnd !== null) {
+            i = dollarQuotedEnd;
+            continue;
+        }
+
+        if (ch === "'" || ch === '"' || ch === '`' || ch === '[') {
+            const closingQuote = ch === '[' ? ']' : ch;
+            i++;
+            while (i < len) {
+                if (sql[i] === '\\' && ch !== '[' && i + 1 < len) {
+                    i += 2;
+                    continue;
+                }
+                if (sql[i] === closingQuote) {
+                    if (i + 1 < len && sql[i + 1] === closingQuote) {
+                        i += 2;
+                        continue;
+                    }
+                    i++;
+                    break;
+                }
+                i++;
+            }
+            continue;
+        }
+
+        if (ch === '/' && i + 1 < len && sql[i + 1] === '*') {
+            const start = i;
+            let depth = 1;
+            i += 2;
+            while (i < len && depth > 0) {
+                if (sql[i] === '/' && i + 1 < len && sql[i + 1] === '*') {
+                    depth++;
+                    i += 2;
+                } else if (sql[i] === '*' && i + 1 < len && sql[i + 1] === '/') {
+                    depth--;
+                    i += 2;
+                } else {
+                    i++;
+                }
+            }
+            maskRange(start, i);
+            continue;
+        }
+
+        if (ch === '-' && i + 1 < len && sql[i + 1] === '-') {
+            const start = i;
+            while (i < len && sql[i] !== '\n' && sql[i] !== '\r') { i++; }
+            maskRange(start, i);
+            continue;
+        }
+
+        if (ch === '#') {
+            const preserveTempIdentifier = options.preserveHashTempIdentifiers !== false
+                && isHashTempTableIdentifierAt(sql, i);
+            if (!preserveTempIdentifier) {
+                const start = i;
+                while (i < len && sql[i] !== '\n' && sql[i] !== '\r') { i++; }
+                maskRange(start, i);
+                continue;
+            }
+        }
+
+        i++;
+    }
+
+    return masked.join('');
 }
 
 /**
@@ -60,13 +268,22 @@ export function escapeForInlineScriptValue(value: unknown): string {
  * and backtick-quoted identifiers. Strips --, /* *​/, and # comments.
  * Supports nested block comments used by PostgreSQL.
  */
-export function stripSqlComments(sql: string): string {
+export function stripSqlComments(sql: string, options: StripSqlCommentsOptions = {}): string {
     const len = sql.length;
     let out = '';
     let i = 0;
 
     while (i < len) {
         const ch = sql[i];
+
+        // PostgreSQL dollar-quoted string: pass through verbatim. Comment-like
+        // text inside the token is literal content, not SQL comments.
+        const dollarQuotedEnd = getDollarQuotedTokenEnd(sql, i);
+        if (dollarQuotedEnd !== null) {
+            out += sql.slice(i, dollarQuotedEnd);
+            i = dollarQuotedEnd;
+            continue;
+        }
 
         // Single-quoted string: pass through verbatim ('' escape)
         if (ch === "'") {
@@ -153,10 +370,11 @@ export function stripSqlComments(sql: string): string {
             continue;
         }
 
-        // Hash line comment: # (but not #identifier for temp tables)
+        // Hash line comment: # (but not a contextual #identifier/##identifier temp table)
         if (ch === '#') {
-            const nextCh = i + 1 < len ? sql[i + 1] : '';
-            if (!/[a-zA-Z0-9_]/.test(nextCh)) {
+            const preserveTempIdentifier = options.preserveHashTempIdentifiers !== false
+                && isHashTempTableIdentifierAt(sql, i);
+            if (!preserveTempIdentifier) {
                 while (i < len && sql[i] !== '\n' && sql[i] !== '\r') { i++; }
                 out += ' ';
                 continue;

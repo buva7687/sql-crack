@@ -1,5 +1,6 @@
 import type { SqlDialect } from '../../types';
 import { maskStringsAndComments, stripSqlComments } from './preprocessing';
+import { getDollarQuoteDelimiterAt } from '../../../shared/stringUtils';
 
 export interface DialectDetectionResult {
     dialect: SqlDialect | null;
@@ -68,9 +69,10 @@ function hasPostgresDollarQuoteLiteral(sql: string): boolean {
             continue;
         }
         if (sql[i] === '$') {
-            const delimiterMatch = sql.slice(i).match(/^\$([A-Za-z_][A-Za-z0-9_]*)?\$/);
-            if (delimiterMatch) {
-                const delimiter = delimiterMatch[0];
+            // Identifier-embedded dollars and MySQL `DELIMITER $$` are not
+            // dollar quotes, so they must not score PostgreSQL.
+            const delimiter = getDollarQuoteDelimiterAt(sql, i);
+            if (delimiter) {
                 const closePos = sql.indexOf(delimiter, i + delimiter.length);
                 if (closePos !== -1) {
                     return true;
@@ -98,7 +100,6 @@ export function detectDialectSyntaxPatterns(sql: string): {
     hasPostgresTypeCast: boolean;
     hasPostgresAtTimeZone: boolean;
     hasPostgresDollarQuotes: boolean;
-    hasPostgresArrayAccess: boolean;
     hasPostgresJsonOperators: boolean;
     hasMysqlBackticks: boolean;
     hasMysqlGroupByRollup: boolean;
@@ -170,7 +171,6 @@ export function detectDialectSyntaxPatterns(sql: string): {
         hasPostgresTypeCast: /::\s*[a-z_][\w$]*(?:\s*\(\s*\d+(?:\s*,\s*\d+)?\s*\))?/i.test(maskedSql),
         hasPostgresAtTimeZone: /\bAT\s+TIME\s+ZONE\b/i.test(maskedSql),
         hasPostgresDollarQuotes: hasPostgresDollarQuoteLiteral(sql),
-        hasPostgresArrayAccess: /\w+\[\d+\]/.test(maskedSql),
         hasPostgresJsonOperators: /->>|#>|\?&|\?\|/.test(maskedSql),
         hasMysqlBackticks: /`[\w-]+`/.test(maskedSql),
         hasMysqlGroupByRollup: /GROUP BY.*WITH ROLLUP/i.test(maskedSql),
@@ -227,7 +227,10 @@ export function detectDialectSyntaxPatterns(sql: string): {
 }
 
 export function detectDialect(sql: string): DialectDetectionResult {
-    const strippedSql = stripSqlComments(sql);
+    // Dialect detection must not reinterpret MySQL `#word` comments as T-SQL
+    // temp identifiers based on surrounding tokens. Temp names are not a
+    // dialect signal, so treating every unquoted hash as a comment is safe here.
+    const strippedSql = stripSqlComments(sql, { preserveHashTempIdentifiers: false });
     if (!strippedSql.trim()) {
         return {
             dialect: null,
@@ -350,12 +353,19 @@ export function detectDialect(sql: string): DialectDetectionResult {
         topMatch.dialect === 'Oracle'
         && (scores.Oracle || 0) === 1
         && syntax.hasOracleMinus;
+    const hasOnlyMysqlBacktickSignal =
+        topMatch.dialect === 'MySQL'
+        && (scores.MySQL || 0) === 1
+        && syntax.hasMysqlBackticks;
     const hasOnlyTeradataSampleSignal =
         topMatch.dialect === 'Teradata'
         && (scores.Teradata || 0) === 2
         && syntax.hasTeradataSample;
     const isHighConfidence =
-        (matchedDialects.length === 1 && !hasOnlyOracleMinusSignal && !hasOnlyTeradataSampleSignal) ||
+        (matchedDialects.length === 1
+            && !hasOnlyOracleMinusSignal
+            && !hasOnlyMysqlBacktickSignal
+            && !hasOnlyTeradataSampleSignal) ||
         (topMatch.score >= 3 && topMatch.score >= secondMatchScore + 2);
 
     if (!isHighConfidence) {

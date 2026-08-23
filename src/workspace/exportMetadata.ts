@@ -196,9 +196,15 @@ export function buildWorkspaceExportMetadataLines(context: WorkspaceExportContex
     return lines;
 }
 
+function sanitizeWorkspaceExportCommentLine(line: string): string {
+    return line
+        .replace(/[\r\n\u2028\u2029]+/g, ' ')
+        .replace(/`/g, '#96;');
+}
+
 export function buildWorkspaceExportCommentBlock(context: WorkspaceExportContext, prefix: string): string {
     return buildWorkspaceExportMetadataLines(context)
-        .map((line) => `${prefix} ${line}`)
+        .map((line) => prefix + ' ' + sanitizeWorkspaceExportCommentLine(line))
         .join('\n');
 }
 

@@ -1,4 +1,4 @@
-import { detectDialect } from '../../../src/webview/sqlParser';
+import { detectDialect, parseSql } from '../../../src/webview/sqlParser';
 
 describe('detectDialect', () => {
     it('detects Snowflake FLATTEN syntax with high confidence', () => {
@@ -14,10 +14,18 @@ describe('detectDialect', () => {
         expect(result.confidence).toBe('high');
     });
 
-    it('detects MySQL backtick syntax with high confidence', () => {
+    it('treats backtick quoting alone as an ambiguous low-confidence signal', () => {
         const result = detectDialect('SELECT `id` FROM `users`');
+        expect(result.dialect).toBeNull();
+        expect(result.scores.MySQL).toBe(1);
+        expect(result.confidence).toBe('low');
+    });
+
+    it('detects MySQL when backticks are combined with a MySQL-specific signal', () => {
+        const result = detectDialect('SELECT `id`, COUNT(*) FROM `users` GROUP BY `id` WITH ROLLUP');
         expect(result.dialect).toBe('MySQL');
         expect(result.confidence).toBe('high');
+        expect(result.scores.MySQL).toBeGreaterThanOrEqual(2);
     });
 
     it('detects SQL Server CROSS APPLY syntax with high confidence', () => {
@@ -30,6 +38,11 @@ describe('detectDialect', () => {
         const result = detectDialect('SELECT 1');
         expect(result.dialect).toBeNull();
         expect(result.confidence).toBe('none');
+    });
+
+    it('does not warn that generic numeric subscripting is PostgreSQL-specific', () => {
+        const result = parseSql('SELECT values_col[5] FROM measurements', 'SQLite');
+        expect(result.hints.some(hint => hint.message === 'PostgreSQL-specific syntax detected')).toBe(false);
     });
 
     it('ignores line comments during detection', () => {
@@ -172,6 +185,19 @@ describe('detectDialect', () => {
 
     it('ignores Oracle-like syntax inside comments', () => {
         const result = detectDialect('-- CONNECT BY PRIOR\nSELECT 1');
+        expect(result.scores.Oracle || 0).toBe(0);
+    });
+
+    it('ignores Oracle syntax inside a MySQL #comment without whitespace', () => {
+        const result = detectDialect('#CONNECT BY PRIOR id = parent_id\nSELECT 1');
+
+        expect(result.dialect).toBeNull();
+        expect(result.confidence).toBe('none');
+    });
+
+    it('does not mistake a hash comment after FROM for a temp-table dialect signal', () => {
+        const result = detectDialect('SELECT * FROM\n#CONNECT BY PRIOR id = parent_id\nusers');
+
         expect(result.scores.Oracle || 0).toBe(0);
     });
 
@@ -378,5 +404,41 @@ describe('detectDialect', () => {
     it('detects LOCKING TABLE <object> FOR ACCESS as Teradata', () => {
         const result = detectDialect('LOCKING TABLE customers FOR ACCESS SELECT * FROM customers');
         expect(result.scores.Teradata).toBeGreaterThanOrEqual(2);
+    });
+
+    it('does not score PostgreSQL for a MySQL DELIMITER procedure dump', () => {
+        const sql = [
+            'DELIMITER $$',
+            'CREATE PROCEDURE p()',
+            'BEGIN',
+            '  INSERT INTO body_tbl SELECT * FROM src_tbl;',
+            'END$$',
+            'DELIMITER ;',
+        ].join('\n');
+
+        expect(detectDialect(sql).scores.PostgreSQL || 0).toBe(0);
+    });
+
+    it('does not depend on DELIMITER directive alignment when excluding PostgreSQL', () => {
+        const sql = [
+            `DELIMITER${' '.repeat(40)}$$`,
+            'CREATE PROCEDURE p()',
+            'BEGIN',
+            '  SELECT 1;',
+            'END$$',
+            'DELIMITER ;',
+        ].join('\n');
+
+        expect(detectDialect(sql).scores.PostgreSQL || 0).toBe(0);
+    });
+
+    it('does not score PostgreSQL for identifiers containing double dollars', () => {
+        const result = detectDialect('SELECT * FROM my$$a JOIN my$$b ON 1 = 1');
+        expect(result.scores.PostgreSQL || 0).toBe(0);
+    });
+
+    it('still detects a genuine dollar-quoted function body as PostgreSQL', () => {
+        const sql = 'CREATE FUNCTION f() RETURNS int AS $$ SELECT 1; $$ LANGUAGE sql';
+        expect(detectDialect(sql).dialect).toBe('PostgreSQL');
     });
 });

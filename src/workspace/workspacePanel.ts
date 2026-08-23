@@ -37,7 +37,6 @@ import {
 import {
     formatDurationText,
     escapeHtmlText,
-    escapeForInlineScriptValue,
     generateNonce,
 } from './panel/text';
 import {
@@ -723,10 +722,13 @@ export class WorkspacePanel {
      */
     private getWebviewHtml(graph: WorkspaceDependencyGraph, searchFilter: SearchFilter = { query: '', nodeTypes: undefined, useRegex: false, caseSensitive: false }): string {
         const nonce = generateNonce();
-        const totalIssues = graph.stats.orphanedDefinitions.length + graph.stats.missingDefinitions.length + graph.stats.parseErrors;
+        const totalIssues = graph.stats.orphanedDefinitions.length
+            + graph.stats.missingDefinitions.length
+            + graph.stats.parseErrors
+            + (graph.stats.parseWarnings || 0);
 
-        // Generate graph data JSON for client script
-        const graphData = escapeForInlineScriptValue({
+        // Keep graph data structured until the final inline-script boundary.
+        const graphData = {
             nodes: graph.nodes.map(node => {
                 const columnSet = new Set<string>();
                 if (Array.isArray(node.definitions)) {
@@ -750,7 +752,7 @@ export class WorkspacePanel {
                     columns: Array.from(columnSet)
                 };
             })
-        });
+        };
 
         // Get styles and scripts from extracted modules
         const styles = getWebviewStyles(this._isDarkTheme, this._isHighContrast);
@@ -1025,7 +1027,10 @@ ${bodyContent}
         const detailedStats = this._currentGraph
             ? buildDetailedWorkspaceStats(this._currentGraph, this._indexManager.getIndex())
             : null;
-        const totalIssues = (detailedStats?.orphanedDetails.length || 0) + (detailedStats?.missingDetails.length || 0) + (detailedStats?.parseErrorDetails.length || 0);
+        const totalIssues = (detailedStats?.orphanedDetails.length || 0)
+            + (detailedStats?.missingDetails.length || 0)
+            + (detailedStats?.parseErrorDetails.length || 0)
+            + (detailedStats?.parseWarningDetails?.length || 0);
         const styles = getIssuesStyles(this._isDarkTheme, this._isHighContrast);
         const script = getIssuesScript(nonce);
         return createIssuesPageHtml({
