@@ -541,6 +541,15 @@ export class SchemaExtractor {
         return { nameQuoted: false, schemaQuoted: false, catalogQuoted: false };
     }
 
+    /**
+     * Statement index for a character offset. Counts against structuralSql so
+     * semicolons inside string literals and quoted or bracketed identifiers
+     * cannot inflate the count.
+     */
+    private getStatementIndexAt(structuralSql: string, charIndex: number): number {
+        return structuralSql.slice(0, charIndex).split(';').length - 1;
+    }
+
     private findDefinitionIdentifierParts(
         structuralSql: string,
         type: 'table' | 'view',
@@ -549,7 +558,7 @@ export class SchemaExtractor {
         const regex = this.createHeaderRegex(type);
         let match: RegExpExecArray | null;
         while ((match = regex.exec(structuralSql)) !== null) {
-            const matchStatementIndex = structuralSql.slice(0, match.index).split(';').length - 1;
+            const matchStatementIndex = this.getStatementIndexAt(structuralSql, match.index);
             if (matchStatementIndex === statementIndex) {
                 return this.getQualifiedIdentifierParts(match);
             }
@@ -614,6 +623,7 @@ export class SchemaExtractor {
             }
 
             const startIndex = match.index + match[0].length;
+            const statementIndex = this.getStatementIndexAt(sourceViews.structuralSql, match.index);
 
             // Restrict body detection to this CREATE statement. Searching the
             // whole remaining file can assign a later table's columns to CTAS.
@@ -651,6 +661,7 @@ export class SchemaExtractor {
                     catalogQuoted,
                     columns,
                     filePath,
+                    statementIndex,
                     lineNumber: loc.lineNumber,
                     sql: this.extractStatementFromIndex(
                         sql,
@@ -677,6 +688,7 @@ export class SchemaExtractor {
                     catalogQuoted,
                     columns: [],
                     filePath,
+                    statementIndex,
                     lineNumber: loc.lineNumber,
                     sql: this.extractStatementFromIndex(
                         sql,
@@ -720,6 +732,7 @@ export class SchemaExtractor {
                 catalogQuoted,
                 columns: [],
                 filePath,
+                statementIndex: this.getStatementIndexAt(sourceViews.structuralSql, match.index),
                 lineNumber: loc.lineNumber,
                 sql: this.extractStatementFromIndex(
                     sql,
@@ -770,7 +783,7 @@ export class SchemaExtractor {
             while (sqlStart < sql.length && /\s/.test(sql[sqlStart])) {
                 sqlStart++;
             }
-            const statementIndex = sourceViews.structuralSql.slice(0, statementStart).split(';').length - 1;
+            const statementIndex = this.getStatementIndexAt(sourceViews.structuralSql, statementStart);
             definitions.push({
                 type: 'table',
                 name,

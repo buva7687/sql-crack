@@ -557,4 +557,45 @@ CREATE TABLE accounts (real_id INT);
             expect(defs[0].sql).toBe('CREATE TABLE accounts (real_id INT);');
         });
     });
+
+    describe('regex fallback statement indexes', () => {
+        it('assigns statementIndex to definitions from the regex fallback path', () => {
+            const extractor = new SchemaExtractor();
+            // CREATE PROCEDURE makes the AST parse fail, forcing the regex path.
+            const { definitions, warnings } = extractor.extractDefinitionsWithStatus(
+                [
+                    'CREATE PROCEDURE p() BEGIN SELECT 1; END;',
+                    'CREATE TABLE t_a (id INT);',
+                    'CREATE TABLE t_b AS SELECT id FROM t_a;',
+                    'CREATE VIEW v_c AS SELECT id FROM t_b;',
+                ].join('\n'),
+                '/fallback.sql',
+                'MySQL'
+            );
+
+            expect(warnings.length).toBeGreaterThan(0);
+            for (const definition of definitions) {
+                expect(typeof definition.statementIndex).toBe('number');
+            }
+            const byName = new Map(definitions.map(d => [d.name, d.statementIndex]));
+            expect(byName.get('t_b')).toBe((byName.get('t_a') as number) + 1);
+            expect(byName.get('v_c')).toBe((byName.get('t_b') as number) + 1);
+        });
+
+        it('ignores semicolons inside quoted identifiers when indexing statements', () => {
+            const extractor = new SchemaExtractor();
+            const { definitions } = extractor.extractDefinitionsWithStatus(
+                [
+                    'CREATE PROCEDURE p() BEGIN SELECT 1; END;',
+                    'CREATE TABLE "we;ird" (id INT);',
+                    'CREATE TABLE after_it (id INT);',
+                ].join('\n'),
+                '/quoted.sql',
+                'PostgreSQL'
+            );
+
+            const byName = new Map(definitions.map(d => [d.name, d.statementIndex]));
+            expect(byName.get('after_it')).toBe((byName.get('we;ird') as number) + 1);
+        });
+    });
 });
