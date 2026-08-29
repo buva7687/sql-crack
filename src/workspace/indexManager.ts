@@ -20,7 +20,7 @@ import { normalizeFileExtensions } from '../shared/fileExtensions';
 import { getQualifiedKey, IdentifierQualification, normalizeIdentifier } from './identifiers';
 import { logger } from '../logger';
 
-const INDEX_VERSION = 6; // Bumped to persist workspace query/column-lineage analysis
+const INDEX_VERSION = 7; // Bumped for nested CTE query analysis and scoped source tables
 const DEFAULT_AUTO_INDEX_THRESHOLD = 50;
 const DEFAULT_CACHE_TTL_HOURS = 24;
 const DEFAULT_MAX_CACHE_BYTES = 4 * 1024 * 1024; // 4MB safety limit for workspaceState

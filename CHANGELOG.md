@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
-- **Index update coalescing**: Batched and debounced workspace index changes emit one consistent refresh and persist a cache format that includes the new query-analysis data.
+- **Index update coalescing**: Batched and debounced workspace index changes emit one consistent refresh and persist a cache format that includes the new query-analysis data. The cache schema is version 7, so any index built by an earlier build is rebuilt rather than reused.
 - **Graph rendering and layout**: View fitting reuses rendered cloud geometry instead of rerunning dagre, non-vertical initial layouts avoid a redundant fit, minimap viewport updates coalesce per animation frame, dependency line-range filtering is lazy, and barycenter ordering uses indexed positions.
 - **Lineage traversal reuse**: Directional flow results are cached per analyzer/options and the lineage landing page computes connection counts once for both popular and complete node lists.
 
