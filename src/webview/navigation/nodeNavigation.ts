@@ -228,7 +228,8 @@ interface FitViewOptions {
     onUpdateTransform: () => void;
     onUpdateZoomIndicator: () => void;
     onSetFitViewScale: (scale: number) => void;
-    layoutSubflowNodesVertical: (children: FlowNode[], edges: FlowEdge[]) => { width: number; height: number };
+    /** @deprecated fitView measures the child layout produced during render. */
+    layoutSubflowNodesVertical?: (children: FlowNode[], edges: FlowEdge[]) => { width: number; height: number };
 }
 
 export function fitViewFeature(options: FitViewOptions): void {
@@ -241,7 +242,6 @@ export function fitViewFeature(options: FitViewOptions): void {
         onUpdateTransform,
         onUpdateZoomIndicator,
         onSetFitViewScale,
-        layoutSubflowNodesVertical,
     } = options;
     const nodesForFit = renderNodes.length > 0 ? renderNodes : currentNodes;
     if (!svg || nodesForFit.length === 0) {
@@ -265,8 +265,16 @@ export function fitViewFeature(options: FitViewOptions): void {
             const cloudPadding = 15;
             const cloudGap = 30;
             const nodeHeight = 60;
-            const childEdges = node.childEdges || [];
-            const layoutSize = layoutSubflowNodesVertical(node.children, childEdges);
+            // Expanded children were laid out immediately before rendering.
+            // Measure those coordinates instead of running dagre again only
+            // to calculate the viewport bounds.
+            const layoutSize = node.children.reduce(
+                (bounds, child) => ({
+                    width: Math.max(bounds.width, child.x + child.width + 10),
+                    height: Math.max(bounds.height, child.y + child.height + 10),
+                }),
+                { width: 120, height: 100 }
+            );
             const cloudWidth = layoutSize.width + cloudPadding * 2;
             const cloudHeight = layoutSize.height + cloudPadding * 2 + 30;
             const offset = cloudOffsets.get(node.id) || {

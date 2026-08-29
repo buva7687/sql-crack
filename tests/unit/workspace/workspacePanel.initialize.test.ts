@@ -22,11 +22,37 @@ describe('WorkspacePanel initialization', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        WorkspacePanel.currentPanel = undefined;
         (vscode as any).__resetMockConfig?.();
         (vscode as any).__setMockConfig?.('sqlCrack', {
             workspaceAutoIndexThreshold: 50,
             workspaceGraphDefaultMode: 'tables',
         });
+    });
+
+    afterEach(() => {
+        WorkspacePanel.currentPanel = undefined;
+    });
+
+    it('updates the index dialect when revealing an existing panel for the same scope', async () => {
+        (vscode as any).ViewColumn = { Beside: 2 };
+        const setDialect = jest.fn();
+        const reveal = jest.fn();
+        WorkspacePanel.currentPanel = {
+            _scopeUri: undefined,
+            _dialect: 'MySQL',
+            _indexManager: { setDialect },
+            _panel: { reveal },
+        } as unknown as WorkspacePanel;
+
+        await WorkspacePanel.createOrShow(
+            vscode.Uri.file('/extension'),
+            {} as vscode.ExtensionContext,
+            'PostgreSQL'
+        );
+
+        expect(setDialect).toHaveBeenCalledWith('PostgreSQL');
+        expect(reveal).toHaveBeenCalled();
     });
 
     it('renders immediately for a large workspace with a valid cached index', async () => {

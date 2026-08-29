@@ -695,6 +695,7 @@ describe('nodeNavigation', () => {
             });
             const state = createState();
             const cloudOffsets = new Map([['cte', { offsetX: -200, offsetY: 0 }]]);
+            const layoutSubflowNodesVertical = jest.fn(() => ({ width: 200, height: 120 }));
 
             fitViewFeature({
                 svg: createMockSvg(800, 600),
@@ -705,10 +706,11 @@ describe('nodeNavigation', () => {
                 onUpdateTransform: jest.fn(),
                 onUpdateZoomIndicator: jest.fn(),
                 onSetFitViewScale: jest.fn(),
-                layoutSubflowNodesVertical: () => ({ width: 200, height: 120 }),
+                layoutSubflowNodesVertical,
             });
 
             expect(state.scale).toBeGreaterThan(0);
+            expect(layoutSubflowNodesVertical).not.toHaveBeenCalled();
         });
 
         it('clears zoom state on fit', () => {

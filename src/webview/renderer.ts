@@ -208,6 +208,7 @@ import {
 import { setupEventListeners as setupRendererEventListeners } from './interaction/eventListeners';
 import { pulseNodeFeature, pulseNodeInCloudFeature } from './interaction/nodePulse';
 import { selectNodeFeature } from './interaction/nodeSelection';
+import { restoreNodeBorderState } from './nodeBorderState';
 import type { RendererContext } from './types/rendererContext';
 import {
     updateDetailsPanelContent,
@@ -302,6 +303,8 @@ let matrixRainDrops: number[] = [];
 let matrixRainAnimationFrameId: number | null = null;
 let matrixRainDismissTimer: ReturnType<typeof setTimeout> | null = null;
 let matrixRainRemoveTimer: ReturnType<typeof setTimeout> | null = null;
+let compareModeActive = false;
+let minimapViewportFramePending = false;
 
 const ZERO_GRAVITY_PADDING = 180;
 const ZERO_GRAVITY_MAX_SPEED = 2.8;
@@ -994,6 +997,12 @@ export function initRenderer(container: HTMLElement): void {
     ensureSkipToGraphLink(container);
     syncUndoRedoUiState();
 
+    const compareModeStateHandler = ((event: Event) => {
+        compareModeActive = (event as CustomEvent<{ active?: boolean }>).detail?.active === true;
+    }) as EventListener;
+    document.addEventListener('compare-mode-state', compareModeStateHandler);
+    documentListeners.push({ type: 'compare-mode-state', handler: compareModeStateHandler });
+
     const bootstrap = createRendererBootstrap({
         container,
         existingSpinnerStyleElement: spinnerStyleElement,
@@ -1256,6 +1265,7 @@ export function initRenderer(container: HTMLElement): void {
             triggerMatrixRainOverlay,
             toggleZeroGravityMode,
             isZeroGravityModeActive,
+            isCompareModeActive: () => compareModeActive,
             showKeyboardShortcutsHelp,
             getKeyboardShortcuts,
             navigateToConnectedNode,
@@ -1332,9 +1342,13 @@ function updateTransform(): void {
         mainGroup.setAttribute('transform', `translate(${state.offsetX}, ${state.offsetY}) scale(${state.scale})`);
         // Update minimap viewport when panning/zooming.
         // Keep this direct so the viewport box tracks drag/zoom continuously.
-        requestAnimationFrame(() => {
-            updateMinimapViewport();
-        });
+        if (!minimapViewportFramePending) {
+            minimapViewportFramePending = true;
+            requestAnimationFrame(() => {
+                minimapViewportFramePending = false;
+                updateMinimapViewport();
+            });
+        }
         // Trigger virtualized re-render on pan/zoom
         throttledVirtualizedRender();
     }
@@ -1581,7 +1595,8 @@ export function render(result: ParseResult, options?: RenderOptions): void {
     if (!mainGroup) { return; }
     stopZeroGravityMode({ silent: true });
     const shouldResetCloudState = result.sql !== currentSql || result.nodes !== currentNodes;
-    const preserveInteractionState = options?.preserveInteractionState === true;
+    const preserveInteractionState = options?.preserveInteractionState === true
+        || (!shouldResetCloudState && currentNodes.length > 0);
     const preservedRenderState = preserveInteractionState ? capturePreservedRenderState() : null;
 
     if (!preserveInteractionState) {
@@ -1740,7 +1755,7 @@ export function render(result: ParseResult, options?: RenderOptions): void {
     }
 
     // Fit view
-    if (!canVirtualizeOnFirstPaint) {
+    if (!canVirtualizeOnFirstPaint && (!state.layoutType || state.layoutType === 'vertical')) {
         fitView();
     }
 
@@ -2451,7 +2466,6 @@ function fitView(): void {
         currentNodes,
         cloudOffsets,
         state,
-        layoutSubflowNodesVertical,
         onSetFitViewScale: (scale) => {
             fitViewScale = scale;
         },
@@ -3871,8 +3885,12 @@ export function highlightNodeAtLine(line: number): void {
             if (rect) {
                 const node = currentNodes.find(n => n.id === highlightedLineNodeId);
                 if (node) {
-                    rect.setAttribute('stroke', 'transparent');
-                    rect.setAttribute('stroke-width', '0');
+                    restoreNodeBorderState(rect);
+                    if (state.selectedNodeId === highlightedLineNodeId) {
+                        rect.setAttribute('stroke', UI_COLORS.white);
+                        rect.setAttribute('stroke-width', '3');
+                        rect.setAttribute('filter', 'url(#glow)');
+                    }
                 }
             }
         }

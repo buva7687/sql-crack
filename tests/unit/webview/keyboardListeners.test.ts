@@ -89,6 +89,7 @@ function createCallbacks(overrides: Partial<EventListenerCallbacks> = {}): Event
         triggerMatrixRainOverlay: jest.fn(),
         toggleZeroGravityMode: jest.fn(),
         isZeroGravityModeActive: jest.fn(() => false),
+        isCompareModeActive: jest.fn(() => false),
         showKeyboardShortcutsHelp: jest.fn(),
         getKeyboardShortcuts: jest.fn(() => []),
         navigateToConnectedNode: jest.fn(),
@@ -210,6 +211,46 @@ describe('keyboardListeners', () => {
         expect(callbacks.clearSearch).toHaveBeenCalled();
         expect(callbacks.resetView).toHaveBeenCalled();
         expect(preventDefault).not.toHaveBeenCalled();
+    });
+
+    it('lets SVG Escape exit fullscreen before clearing graph state', () => {
+        const svg = createKeyboardTarget();
+        const callbacks = createCallbacks();
+        registerSvgKeyboardListeners(createContext(createState({ isFullscreen: true }), svg, null), callbacks);
+
+        svg.emit('keydown', {
+            key: 'Escape',
+            preventDefault: jest.fn(),
+            stopPropagation: jest.fn(),
+        });
+
+        expect(callbacks.toggleFullscreen).toHaveBeenCalledWith(false);
+        expect(callbacks.selectNode).not.toHaveBeenCalled();
+        expect(callbacks.resetView).not.toHaveBeenCalled();
+    });
+
+    it('does not mutate the hidden graph while compare mode is active', () => {
+        const svg = createKeyboardTarget();
+        const callbacks = createCallbacks({ isCompareModeActive: jest.fn(() => true) });
+        const listeners = new Map<string, Listener>();
+        global.document = {
+            activeElement: { tagName: 'DIV' },
+            addEventListener: jest.fn((type: string, handler: Listener) => listeners.set(type, handler)),
+        } as unknown as Document;
+
+        registerSvgKeyboardListeners(createContext(createState(), svg, null), callbacks);
+        registerDocumentKeyboardListeners(createContext(createState(), svg, null), callbacks);
+
+        const svgPreventDefault = jest.fn();
+        svg.emit('keydown', { key: 'Escape', preventDefault: svgPreventDefault, stopPropagation: jest.fn() });
+        listeners.get('keydown')?.({
+            key: '1', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false,
+            preventDefault: jest.fn(),
+        });
+
+        expect(svgPreventDefault).not.toHaveBeenCalled();
+        expect(callbacks.selectNode).not.toHaveBeenCalled();
+        expect(callbacks.switchLayout).not.toHaveBeenCalled();
     });
 
     it('handles search focus, command bar, layout shortcuts, and arrow navigation', () => {

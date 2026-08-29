@@ -814,12 +814,15 @@ export class LineageBuilder implements LineageGraph {
     ): string | null {
         // 1. Check statement type from QueryAnalysis
         const statementType = query.statementType;
+        const statementIndex = typeof query.statementIndex === 'number'
+            ? query.statementIndex
+            : queryIndex;
 
         // 2. For data-modification statements, find the target from references.
         if (statementType === 'insert' || statementType === 'update' || statementType === 'delete' || statementType === 'merge') {
             for (const ref of analysis.references) {
                 if (ref.referenceType === statementType &&
-                    (ref.statementIndex === queryIndex || ref.statementIndex === undefined)) {
+                    (ref.statementIndex === statementIndex || ref.statementIndex === undefined)) {
                     const tableKey = getReferenceKey(ref);
                     return this.resolveTableId(tableKey, filePath);
                 }
@@ -849,7 +852,7 @@ export class LineageBuilder implements LineageGraph {
             if ((ref.referenceType === 'insert' ||
                  ref.referenceType === 'update' ||
                  ref.referenceType === 'merge') &&
-                (ref.statementIndex === queryIndex || ref.statementIndex === undefined)) {
+                (ref.statementIndex === statementIndex || ref.statementIndex === undefined)) {
                 const tableKey = getReferenceKey(ref);
                 const resolved = this.resolveTableId(tableKey, filePath);
                 if (resolved) {return resolved;}

@@ -165,6 +165,39 @@ describe('ReferenceExtractor behavioral coverage', () => {
         ]);
     });
 
+    it('keeps CTE scope intact across semicolons inside dollar-quoted literals', () => {
+        jest.spyOn((extractor as any).parser, 'astify').mockImplementation(() => {
+            throw new Error('force regex fallback');
+        });
+        const refs = extractor.extractReferences(
+            `WITH stage_one AS (
+                SELECT $$seed;v1$$ AS marker FROM src
+            ), stage_two AS (
+                SELECT * FROM stage_one
+            )
+            SELECT * FROM stage_two;`,
+            'dollar-cte.sql',
+            'PostgreSQL'
+        );
+
+        expect(refs).toEqual([
+            expect.objectContaining({ tableName: 'src', statementIndex: 0 }),
+        ]);
+    });
+
+    it('does not treat UPDATE embedded in a column name as an UPDATE statement', () => {
+        jest.spyOn((extractor as any).parser, 'astify').mockImplementation(() => {
+            throw new Error('force regex fallback');
+        });
+        const refs = extractor.extractReferences(
+            'SELECT updated_at FROM orders; SELECT * FROM (SELECT * FROM src) orders WHERE (',
+            'updated-column.sql',
+            'PostgreSQL'
+        );
+
+        expect(refs.map(ref => ref.tableName)).toEqual(expect.arrayContaining(['orders', 'src']));
+    });
+
     it('keeps a real top-level UPDATE after fallback CTE declarations', () => {
         jest.spyOn((extractor as any).parser, 'astify').mockImplementation(() => {
             throw new Error('force regex fallback');

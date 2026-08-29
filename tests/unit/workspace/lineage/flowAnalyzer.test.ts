@@ -120,6 +120,19 @@ describe('FlowAnalyzer', () => {
             expect(result.depth).toBeGreaterThanOrEqual(1);
         });
 
+        it('reuses directional traversals for identical requests without sharing mutable arrays', () => {
+            const graph = createMockGraph(chainNodes, chainEdges);
+            const fa = new FlowAnalyzer(graph);
+            const traversal = jest.spyOn(fa as any, 'collectDirectionalFlow');
+
+            const first = fa.getUpstream('C', { maxDepth: 5, excludeExternal: true });
+            const second = fa.getUpstream('C', { maxDepth: 5, excludeExternal: true });
+
+            expect(traversal).toHaveBeenCalledTimes(1);
+            expect(second.nodes).toEqual(first.nodes);
+            expect(second.nodes).not.toBe(first.nodes);
+        });
+
         it('handles a deep upstream chain without overflowing the call stack', () => {
             const nodeCount = 12000;
             const nodes: LineageNode[] = [];

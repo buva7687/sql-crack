@@ -139,6 +139,7 @@ export type ReferenceType =
  */
 export interface QueryAnalysis {
     statementType: StatementType;
+    statementIndex?: number;       // Index within the source file's parsed statements
 
     // Output (what this query produces)
     outputColumns: ColumnInfo[];

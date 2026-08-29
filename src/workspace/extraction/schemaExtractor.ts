@@ -241,7 +241,13 @@ export class SchemaExtractor {
         sourceViews: SqlSearchViews
     ): SchemaDefinition | null {
         try {
-            const { name: tableName, schema, catalog } = this.extractTableName(stmt);
+            const astIdentifier = this.extractTableName(stmt);
+            const sourceIdentifier = this.findDefinitionIdentifierParts(
+                sourceViews.structuralSql,
+                'table',
+                statementIndex
+            );
+            const { name: tableName, schema, catalog } = sourceIdentifier || astIdentifier;
             const columns = this.extractColumns(stmt);
             const identifierMetadata = this.findDefinitionIdentifierMetadata(
                 sourceViews.searchableSql,
@@ -289,7 +295,13 @@ export class SchemaExtractor {
         sourceViews: SqlSearchViews
     ): SchemaDefinition | null {
         try {
-            const { name: viewName, schema, catalog } = this.extractTableName(stmt);
+            const astIdentifier = this.extractTableName(stmt);
+            const sourceIdentifier = this.findDefinitionIdentifierParts(
+                sourceViews.structuralSql,
+                'view',
+                statementIndex
+            );
+            const { name: viewName, schema, catalog } = sourceIdentifier || astIdentifier;
             const columns = this.extractViewColumns(stmt);
             const identifierMetadata = this.findDefinitionIdentifierMetadata(
                 sourceViews.searchableSql,
@@ -529,6 +541,22 @@ export class SchemaExtractor {
         return { nameQuoted: false, schemaQuoted: false, catalogQuoted: false };
     }
 
+    private findDefinitionIdentifierParts(
+        structuralSql: string,
+        type: 'table' | 'view',
+        statementIndex: number
+    ): QualifiedIdentifierParts | null {
+        const regex = this.createHeaderRegex(type);
+        let match: RegExpExecArray | null;
+        while ((match = regex.exec(structuralSql)) !== null) {
+            const matchStatementIndex = structuralSql.slice(0, match.index).split(';').length - 1;
+            if (matchStatementIndex === statementIndex) {
+                return this.getQualifiedIdentifierParts(match);
+            }
+        }
+        return null;
+    }
+
     private getQualifiedIdentifierParts(match: RegExpExecArray): QualifiedIdentifierParts {
         const rawCatalog = match[3] ? match[1] : undefined;
         const rawSchema = match[3] ? match[2] : (match[2] ? match[1] : undefined);
@@ -548,7 +576,7 @@ export class SchemaExtractor {
         return new RegExp(
             `(?<![\\w$#@])CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:TEMP(?:ORARY)?\\s+)?` +
             `(?:MATERIALIZED\\s+)?${keyword}\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?` +
-            `(${SQL_IDENTIFIER_PATTERN})(?:\\s*\\.\\s*(${SQL_IDENTIFIER_PATTERN}))?`
+            `(${SQL_IDENTIFIER_PATTERN})(?:\\s*\\.\\s*(${SQL_IDENTIFIER_PATTERN})?)?`
                 + `(?:\\s*\\.\\s*(${SQL_IDENTIFIER_PATTERN}))?`,
             'gi'
         );
@@ -716,7 +744,7 @@ export class SchemaExtractor {
         const definitions: SchemaDefinition[] = [];
         const intoRegex = new RegExp(
             `\\bINTO\\s+(?:(?:TEMP(?:ORARY)?|UNLOGGED)(?:\\s+TABLE)?\\s+|TABLE\\s+)?`
-                + `(${SQL_IDENTIFIER_PATTERN})(?:\\s*\\.\\s*(${SQL_IDENTIFIER_PATTERN}))?`
+                + `(${SQL_IDENTIFIER_PATTERN})(?:\\s*\\.\\s*(${SQL_IDENTIFIER_PATTERN})?)?`
                 + `(?:\\s*\\.\\s*(${SQL_IDENTIFIER_PATTERN}))?`,
             'gi'
         );

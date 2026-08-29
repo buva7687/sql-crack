@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Workspace column lineage completeness**: Workspace scanning now carries query analysis from the reference AST pass into lineage construction, including DML transformations, target-column overrides, and statement-specific source metadata instead of reparsing or dropping valid column flows.
+- **SQL Flow interaction isolation**: Compare mode ignores graph keyboard shortcuts, SVG-focused Escape exits fullscreen correctly, same-query structural rerenders preserve selection/focus/search/column-lineage state, and cursor-follow cleanup restores selected and semantic node borders.
+- **SQL source-location fidelity**: Successful parses and fallback visualizations assign node locations against the original SQL rather than compatibility-rewritten text, while dialect hints and advanced analysis inspect the original source.
+- **Comment- and literal-safe analysis**: Duplicate-subquery detection ignores SQL-looking text in comments and literals, MySQL glued hash comments no longer create fallback JOIN tables, and workspace statement scoping handles dollar-quoted strings and bracketed identifiers containing semicolons.
+- **Workspace dialect and identifier handling**: An open workspace panel rebuilds its index when the configured/requested dialect changes; SQL Server `database..table` definitions retain the database and table identity; UPDATE fallback alias scanning is statement-bounded and no longer matches `UPDATE` inside identifiers.
+- **Projection and error readability**: Wide SELECT cards report the complete projected-column count even when labels are capped, and error guidance uses light/dark theme text tokens.
+
+### Performance
+
+- **Index update coalescing**: Batched and debounced workspace index changes emit one consistent refresh and persist a cache format that includes the new query-analysis data.
+- **Graph rendering and layout**: View fitting reuses rendered cloud geometry instead of rerunning dagre, non-vertical initial layouts avoid a redundant fit, minimap viewport updates coalesce per animation frame, dependency line-range filtering is lazy, and barycenter ordering uses indexed positions.
+- **Lineage traversal reuse**: Directional flow results are cached per analyzer/options and the lineage landing page computes connection counts once for both popular and complete node lists.
+
+### Tests
+
+- Added regression coverage for workspace query analysis/index batching, compare/fullscreen keyboard handling, interaction-state preservation, original SQL line locations, comment/literal masking, SQL Server omitted-schema names, dollar-quoted CTE scope, UPDATE identifier boundaries, wide projections, fallback hash comments, themed errors, cloud fitting, and cached lineage traversal.
+
 ## [0.9.2] - 2026-08-19
 
 ### Fixed

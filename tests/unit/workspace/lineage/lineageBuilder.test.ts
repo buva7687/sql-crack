@@ -19,6 +19,7 @@ import { LineageBuilder } from '../../../../src/workspace/lineage/lineageBuilder
 import { getQualifiedKey } from '../../../../src/workspace/identifiers';
 import { logger } from '../../../../src/logger';
 import { SchemaExtractor } from '../../../../src/workspace/extraction/schemaExtractor';
+import { ReferenceExtractor } from '../../../../src/workspace/extraction/referenceExtractor';
 import type { WorkspaceIndex, SchemaDefinition, FileAnalysis, TableReference } from '../../../../src/workspace/types';
 import type { ColumnInfo } from '../../../../src/workspace/extraction/types';
 
@@ -135,6 +136,37 @@ describe('LineageBuilder', () => {
 
             expect(builder.nodes.has('view:active_users')).toBe(true);
             expect(builder.nodes.get('view:active_users')!.type).toBe('view');
+        });
+
+        it('builds real column edges from extracted workspace query analysis', () => {
+            const sql = [
+                'CREATE TABLE source_data (id INT, name TEXT);',
+                'CREATE VIEW normalized_data (source_id, normalized_name) AS',
+                'SELECT id, UPPER(name) AS normalized_name',
+                'FROM source_data;',
+            ].join('\n');
+            const filePath = 'column-pipeline.sql';
+            const definitions = new SchemaExtractor().extractDefinitions(sql, filePath, 'PostgreSQL');
+            const extraction = new ReferenceExtractor().extractReferencesWithStatus(sql, filePath, 'PostgreSQL');
+            const analysis = makeFileAnalysis(filePath, definitions, extraction.references, extraction.queries);
+            const builder = new LineageBuilder({ includeExternal: true, includeColumns: true });
+
+            builder.buildFromIndex(makeIndex(definitions, new Map([[filePath, analysis]])));
+
+            expect(builder.columnEdges).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    sourceTableId: 'table:source_data',
+                    sourceColumnName: 'id',
+                    targetTableId: 'view:normalized_data',
+                    targetColumnName: 'source_id',
+                }),
+                expect.objectContaining({
+                    sourceTableId: 'table:source_data',
+                    sourceColumnName: 'name',
+                    targetTableId: 'view:normalized_data',
+                    targetColumnName: 'normalized_name',
+                }),
+            ]));
         });
 
         it('preserves quoted case and catalog-schema relation identities', () => {

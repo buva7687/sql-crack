@@ -5,6 +5,7 @@ import {
     uninstallFakeDocument,
 } from '../../helpers/fakeDom';
 import { getErrorGuidanceLines, renderErrorFeature } from '../../../src/webview/ui/errorRenderer';
+import { getComponentUiColors } from '../../../src/webview/constants';
 
 function createMainGroup(): SVGGElement {
     return createFakeElement('g', 'http://www.w3.org/2000/svg') as unknown as SVGGElement;
@@ -75,5 +76,24 @@ describe('errorRenderer', () => {
             'Tip: Try PostgreSQL dialect (most compatible).',
             'Change dialect using the dropdown in the top-left toolbar',
         ]));
+    });
+
+    it('uses readable light-theme tokens for source and guidance text', () => {
+        const mainGroup = createMainGroup();
+        renderErrorFeature({
+            mainGroup,
+            isDarkTheme: false,
+            message: 'Failed to recover query visualization',
+            sourceLine: 'SELECT broken',
+        });
+
+        const textNodes = ((mainGroup as unknown as FakeElement).children[0]?.children || [])
+            .filter(child => child.tagName === 'text');
+        const source = textNodes.find(child => child.textContent === '→ SELECT broken');
+        const guidance = textNodes.find(child => child.textContent?.startsWith('Try switching'));
+        const lightColors = getComponentUiColors(false);
+
+        expect(source?.getAttribute('fill')).toBe(lightColors.textMuted);
+        expect(guidance?.getAttribute('fill')).toBe(lightColors.textMuted);
     });
 });

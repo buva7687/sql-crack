@@ -7,6 +7,7 @@ import {
     ColumnReference
 } from './types';
 import { logger } from '../../logger';
+import { unwrapIdentifierValue } from '../../shared';
 import type {
     AstSelectStatement,
     AstColumn,
@@ -193,15 +194,17 @@ export class TransformExtractor {
         columns: ColumnReference[],
         tableAliases: Map<string, string>
     ): void {
-        if (!func.args) {return;}
-
-        const args = Array.isArray(func.args.expr)
-            ? func.args.expr
-            : [func.args.expr];
-
-        for (const arg of args) {
+        for (const arg of this.getArgumentExpressions(func.args)) {
             this.extractColumnsFromExpression(arg, columns, tableAliases);
         }
+    }
+
+    private getArgumentExpressions(args: unknown): AstExpression[] {
+        if (!args || typeof args !== 'object') {return [];}
+        const argNode = args as { expr?: AstExpression | AstExpression[]; value?: AstExpression | AstExpression[] };
+        const expressions = argNode.expr ?? argNode.value;
+        if (!expressions) {return [];}
+        return Array.isArray(expressions) ? expressions : [expressions];
     }
 
     /**
@@ -212,14 +215,8 @@ export class TransformExtractor {
         columns: ColumnReference[],
         tableAliases: Map<string, string>
     ): void {
-        if (aggr.args && aggr.args.expr) {
-            const args = Array.isArray(aggr.args.expr)
-                ? aggr.args.expr
-                : [aggr.args.expr];
-
-            for (const arg of args) {
-                this.extractColumnsFromExpression(arg, columns, tableAliases);
-            }
+        for (const arg of this.getArgumentExpressions(aggr.args)) {
+            this.extractColumnsFromExpression(arg, columns, tableAliases);
         }
 
         // Also extract from ORDER BY if present (for ARRAY_AGG, etc.)
@@ -269,14 +266,8 @@ export class TransformExtractor {
         tableAliases: Map<string, string>
     ): void {
         // Extract from function arguments
-        if (window.args && window.args.expr) {
-            const args = Array.isArray(window.args.expr)
-                ? window.args.expr
-                : [window.args.expr];
-
-            for (const arg of args) {
-                this.extractColumnsFromExpression(arg, columns, tableAliases);
-            }
+        for (const arg of this.getArgumentExpressions(window.args)) {
+            this.extractColumnsFromExpression(arg, columns, tableAliases);
         }
 
         // Extract from PARTITION BY
@@ -380,7 +371,10 @@ export class TransformExtractor {
     private classifyFunction(func: AstFunctionExpr): TransformationType {
         if (!func.name) {return 'scalar';}
 
-        const name = func.name.toUpperCase();
+        const functionName = typeof func.name === 'string'
+            ? func.name
+            : unwrapIdentifierValue(func.name);
+        const name = (functionName || '').toUpperCase();
 
         // String manipulation functions
         const stringFunctions = [
@@ -474,7 +468,10 @@ export class TransformExtractor {
             case 'aggr_func':
                 return `${expr.name.toLowerCase()}_result`;
             case 'function':
-                return `${expr.name?.toLowerCase() || 'func'}_result`;
+                return `${((typeof expr.name === 'string'
+                    ? expr.name
+                    : unwrapIdentifierValue(expr.name)
+                ) || 'func').toLowerCase()}_result`;
             case 'binary_expr':
                 return 'computed_value';
             case 'case':

@@ -51,6 +51,7 @@ export interface EventListenerCallbacks {
     triggerMatrixRainOverlay: () => void;
     toggleZeroGravityMode: (enable?: boolean) => void;
     isZeroGravityModeActive: () => boolean;
+    isCompareModeActive?: () => boolean;
     showKeyboardShortcutsHelp: (shortcuts: KeyboardShortcut[], isDarkTheme: boolean) => void;
     getKeyboardShortcuts: () => KeyboardShortcut[];
     navigateToConnectedNode: (direction: 'upstream' | 'downstream', nodeId: string) => void;

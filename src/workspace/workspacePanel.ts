@@ -11,6 +11,7 @@ import {
     SqlDialect,
 } from './types';
 import { logger } from '../logger';
+import { normalizeDialect } from '../shared/dialect';
 
 // Lineage modules
 import { LineageBuilder } from './lineage/lineageBuilder';
@@ -100,6 +101,7 @@ export class WorkspacePanel {
     private readonly _scopeUri: vscode.Uri | undefined;
     private _disposables: vscode.Disposable[] = [];
     private _indexManager: IndexManager;
+    private _dialect: SqlDialect;
     private _currentGraph: WorkspaceDependencyGraph | null = null;
     private _currentView: ViewMode | 'graph' | 'issues' = 'graph';
     /** Current graph mode (files/tables) - persists across refresh, initialized from settings */
@@ -233,6 +235,10 @@ export class WorkspacePanel {
                 // Different scope — dispose old panel and create new one
                 WorkspacePanel.currentPanel.dispose();
             } else {
+                if (WorkspacePanel.currentPanel._dialect !== dialect) {
+                    WorkspacePanel.currentPanel._dialect = dialect;
+                    WorkspacePanel.currentPanel._indexManager.setDialect(dialect);
+                }
                 WorkspacePanel.currentPanel._panel.reveal(column);
                 return;
             }
@@ -275,6 +281,7 @@ export class WorkspacePanel {
         this._extensionContext = context;
         this._extensionVersion = WorkspacePanel.resolveExtensionVersion();
         this._scopeUri = scopeUri;
+        this._dialect = dialect;
         this._indexManager = new IndexManager(context, dialect, scopeUri);
 
         // Detect theme from settings or VS Code theme
@@ -338,6 +345,15 @@ export class WorkspacePanel {
                         command: 'workspaceLineageDepthUpdated',
                         depth: lineageDepth
                     });
+                }
+                if (e.affectsConfiguration('sqlCrack.defaultDialect')) {
+                    const configured = vscode.workspace.getConfiguration('sqlCrack')
+                        .get<string>('defaultDialect', 'MySQL');
+                    const nextDialect = normalizeDialect(configured) as SqlDialect;
+                    if (nextDialect !== this._dialect) {
+                        this._dialect = nextDialect;
+                        this._indexManager.setDialect(nextDialect);
+                    }
                 }
             },
             null,

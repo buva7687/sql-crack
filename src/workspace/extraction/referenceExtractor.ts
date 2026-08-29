@@ -9,9 +9,14 @@ import {
     ExtractionOptions,
     DEFAULT_EXTRACTION_OPTIONS,
     ColumnReference,
-    ColumnUsageContext
+    ColumnUsageContext,
+    ColumnInfo,
+    QueryAnalysis,
+    StatementType,
+    Transformation
 } from './types';
 import { ColumnExtractor } from './columnExtractor';
+import { TransformExtractor } from './transformExtractor';
 import { escapeRegex, getDollarQuoteDelimiterAt, maskSqlCommentsPreservingPositions, unwrapIdentifierValue } from '../../shared';
 import { preprocessSqlForWorkspaceParsing } from '../parserConfig';
 import { getIdentifierSemantics, getQualifiedKey } from '../identifiers';
@@ -22,7 +27,8 @@ import type {
     AstColumn,
     AstExpression,
     AstTableIdentifier,
-    AstCTE
+    AstCTE,
+    AstSelectStatement
 } from './astTypes';
 
 interface TableLineLookup {
@@ -49,6 +55,7 @@ export class ReferenceExtractor {
     private parser: Parser;
     private options: ExtractionOptions;
     private columnExtractor: ColumnExtractor;
+    private transformExtractor: TransformExtractor;
     private _activeDialect: SqlDialect = 'MySQL'; // Per-call dialect for reserved word scoping
     private tableLineLookup: TableLineLookup | null = null;
 
@@ -56,6 +63,7 @@ export class ReferenceExtractor {
         this.parser = new Parser();
         this.options = { ...DEFAULT_EXTRACTION_OPTIONS, ...options };
         this.columnExtractor = new ColumnExtractor();
+        this.transformExtractor = new TransformExtractor();
     }
 
     /** Extract CTE name string from AST CTE name node (may be string or { value: string }) */
@@ -131,17 +139,18 @@ export class ReferenceExtractor {
         sql: string,
         filePath: string,
         dialect: SqlDialect = this.options.dialect
-    ): { references: TableReference[]; warnings: string[] } {
+    ): { references: TableReference[]; warnings: string[]; queries: QueryAnalysis[] } {
         this._activeDialect = dialect;
         this.tableLineLookup = null;
         const references: TableReference[] = [];
         const warnings: string[] = [];
+        let parsedStatements: AstStatement[] = [];
         const { sql: normalizedSql } = preprocessSqlForWorkspaceParsing(sql, dialect);
 
         // Pre-collect CTE names via regex BEFORE attempting AST parse.
         // This ensures the catch block (regex fallback) has CTE names available
         // even when the AST parser fails on complex multi-statement files.
-        const sqlNoComments = maskSqlCommentsPreservingPositions(normalizedSql);
+        const sqlNoComments = this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(normalizedSql));
         const reservedWords = new Set(['select', 'from', 'where', 'join', 'inner', 'left', 'right', 'outer', 'on', 'as', 'with', 'recursive']);
         const statementBoundaries = this.getStatementBoundaries(sqlNoComments);
         const getStatementIndex = (charIndex: number): number => this.getStatementIndex(statementBoundaries, charIndex);
@@ -217,6 +226,7 @@ export class ReferenceExtractor {
             const dbDialect = this.mapDialect(dialect);
             const ast = this.parser.astify(normalizedSql, { database: dbDialect });
             const statements = Array.isArray(ast) ? ast : [ast];
+            parsedStatements = statements.filter(Boolean) as AstStatement[];
 
             // Extract each statement with only its own CTE scope. A CTE name is
             // query-local and must not hide a physical table in a later statement.
@@ -260,10 +270,256 @@ export class ReferenceExtractor {
             Object.assign(reference, identifierSemantics);
         }
 
+        const deduplicatedReferences = this.deduplicateReferences(references);
         return {
-            references: this.deduplicateReferences(references),
+            references: deduplicatedReferences,
             warnings,
+            queries: this.buildQueryAnalyses(parsedStatements, deduplicatedReferences, warnings),
         };
+    }
+
+    /**
+     * Preserve the query/transform information already available from the AST
+     * parse so workspace column lineage can consume it without parsing a file a
+     * third time in WorkspaceScanner.
+     */
+    private buildQueryAnalyses(
+        statements: AstStatement[],
+        references: TableReference[],
+        warnings: string[]
+    ): QueryAnalysis[] {
+        const referencesByStatement = new Map<number, TableReference[]>();
+        for (const reference of references) {
+            const statementIndex = reference.statementIndex ?? 0;
+            const bucket = referencesByStatement.get(statementIndex) || [];
+            bucket.push(reference);
+            referencesByStatement.set(statementIndex, bucket);
+        }
+        return statements.map((statement, statementIndex) => {
+            const statementReferences = referencesByStatement.get(statementIndex) || [];
+            try {
+                return this.buildQueryAnalysis(statement, statementIndex, statementReferences);
+            } catch (error) {
+                warnings.push(this.formatParserWarning(`Query analysis for statement ${statementIndex + 1}`, error));
+                return this.createEmptyQueryAnalysis(statement, statementIndex, statementReferences);
+            }
+        });
+    }
+
+    private buildQueryAnalysis(
+        statement: AstStatement,
+        statementIndex: number,
+        statementReferences: TableReference[]
+    ): QueryAnalysis {
+        const selectStatement = this.getAnalysisSelectStatement(statement);
+        const inputTables = statementReferences.filter(reference =>
+            reference.referenceType !== 'insert'
+            && reference.referenceType !== 'update'
+            && reference.referenceType !== 'delete'
+            && reference.referenceType !== 'merge'
+        );
+        const lineNumber = statementReferences.reduce(
+            (earliest, reference) => Math.min(earliest, reference.lineNumber || earliest),
+            Number.MAX_SAFE_INTEGER
+        );
+        const queryLineNumber = lineNumber === Number.MAX_SAFE_INTEGER ? 1 : lineNumber;
+        const tableAliases = this.columnExtractor.buildAliasMap(selectStatement || statement);
+
+        let outputColumns: ColumnInfo[] = selectStatement
+            ? this.columnExtractor.extractSelectColumns(selectStatement, tableAliases)
+            : [];
+        let transformations: Transformation[] = selectStatement
+            ? this.transformExtractor.extractTransformations(selectStatement, tableAliases)
+            : this.extractUpdateTransformations(statement, tableAliases, queryLineNumber);
+
+        const sourceTableNames = new Set(inputTables.map(reference => reference.tableName).filter(Boolean));
+        const soleSourceTable = sourceTableNames.size === 1 ? [...sourceTableNames][0] : undefined;
+        transformations = transformations.map((transformation, index) => {
+            const inputColumns = transformation.inputColumns.map(column => ({
+                ...column,
+                tableName: column.tableName || soleSourceTable,
+                lineNumber: column.lineNumber || queryLineNumber,
+            }));
+            return {
+                ...transformation,
+                ...this.getTargetColumnOverride(statement, index),
+                inputColumns,
+                lineNumber: transformation.lineNumber || queryLineNumber,
+            };
+        });
+
+        if (outputColumns.length === 0 && transformations.length > 0) {
+            outputColumns = transformations.map(transformation => ({
+                name: transformation.outputColumn,
+                dataType: 'unknown',
+                nullable: true,
+                primaryKey: false,
+                expression: transformation.expression,
+                isComputed: transformation.operation !== 'direct',
+                lineNumber: transformation.lineNumber,
+            }));
+        }
+
+        const inputColumns = this.collectQueryInputColumns(
+            selectStatement,
+            transformations,
+            soleSourceTable,
+            queryLineNumber
+        );
+
+        const cteSource = selectStatement || statement;
+        const ctes = this.getWithClauses(cteSource).map(cte => {
+            const cteStatement = cte.stmt as AstStatement;
+            const name = this.getCTENameString(cte.name) || 'cte';
+            const columns = Array.isArray(cte.columns)
+                ? cte.columns.map(column => unwrapIdentifierValue(column)).filter((column): column is string => Boolean(column))
+                : undefined;
+            return {
+                name,
+                ...(columns && columns.length > 0 ? { columns } : {}),
+                query: this.buildQueryAnalysis(cteStatement, statementIndex, statementReferences),
+                isRecursive: Boolean((cte as any).recursive || (cteSource as any).recursive),
+                lineNumber: queryLineNumber,
+            };
+        });
+
+        return {
+            statementType: this.getQueryStatementType(statement),
+            statementIndex,
+            outputColumns,
+            inputTables,
+            inputColumns,
+            transformations,
+            ctes,
+            subqueries: [],
+            lineNumber: queryLineNumber,
+        };
+    }
+
+    private createEmptyQueryAnalysis(
+        statement: AstStatement,
+        statementIndex: number,
+        statementReferences: TableReference[]
+    ): QueryAnalysis {
+        const lineNumber = statementReferences.reduce(
+            (earliest, reference) => Math.min(earliest, reference.lineNumber || earliest),
+            Number.MAX_SAFE_INTEGER
+        );
+        return {
+            statementType: this.getQueryStatementType(statement),
+            statementIndex,
+            outputColumns: [],
+            inputTables: statementReferences,
+            inputColumns: [],
+            transformations: [],
+            ctes: [],
+            subqueries: [],
+            lineNumber: lineNumber === Number.MAX_SAFE_INTEGER ? 1 : lineNumber,
+        };
+    }
+
+    private getAnalysisSelectStatement(statement: AstStatement): AstSelectStatement | null {
+        if (statement?.type?.toLowerCase() === 'select') {
+            return statement as AstSelectStatement;
+        }
+        for (const candidate of [statement?.select, statement?.query_expr, statement?.values]) {
+            if (candidate && typeof candidate === 'object' && candidate.type?.toLowerCase() === 'select') {
+                return candidate as AstSelectStatement;
+            }
+        }
+        return null;
+    }
+
+    private getQueryStatementType(statement: AstStatement): StatementType {
+        const type = statement?.type?.toLowerCase();
+        if (type === 'create') {
+            const keyword = String(statement.keyword || '').toLowerCase();
+            if (keyword === 'view') {return 'create_view';}
+            if (keyword === 'table') {return 'create_table';}
+        }
+        if (type === 'select' || type === 'insert' || type === 'update'
+            || type === 'delete' || type === 'merge') {
+            return type;
+        }
+        return 'unknown';
+    }
+
+    private getTargetColumnOverride(
+        statement: AstStatement,
+        columnIndex: number
+    ): Pick<Transformation, 'outputColumn' | 'outputAlias'> | Record<string, never> {
+        const statementType = statement?.type?.toLowerCase();
+        const isInsert = statementType === 'insert';
+        const isCreateView = statementType === 'create'
+            && String(statement.keyword || '').toLowerCase() === 'view';
+        if ((!isInsert && !isCreateView) || !Array.isArray(statement.columns)) {
+            return {};
+        }
+        const targetColumn = unwrapIdentifierValue(statement.columns[columnIndex]);
+        if (!targetColumn) {
+            return {};
+        }
+        return { outputColumn: targetColumn, outputAlias: targetColumn };
+    }
+
+    private extractUpdateTransformations(
+        statement: AstStatement,
+        tableAliases: Map<string, string>,
+        lineNumber: number
+    ): Transformation[] {
+        if (statement?.type?.toLowerCase() !== 'update' || !Array.isArray(statement.set)) {
+            return [];
+        }
+        const transformations: Transformation[] = [];
+        for (const assignment of statement.set) {
+            const outputColumn = unwrapIdentifierValue(assignment.column);
+            const expression = assignment.value as AstExpression | undefined;
+            if (!outputColumn || !expression) {continue;}
+            transformations.push({
+                outputColumn,
+                inputColumns: this.transformExtractor.parseExpression(expression, tableAliases),
+                operation: this.transformExtractor.classifyTransformation(expression),
+                expression: this.expressionToSql(expression),
+                lineNumber,
+            });
+        }
+        return transformations;
+    }
+
+    private expressionToSql(expression: AstExpression): string {
+        try {
+            return this.parser.exprToSQL(expression as any);
+        } catch {
+            return expression.type || 'expression';
+        }
+    }
+
+    private collectQueryInputColumns(
+        selectStatement: AstSelectStatement | null,
+        transformations: Transformation[],
+        soleSourceTable: string | undefined,
+        lineNumber: number
+    ): ColumnReference[] {
+        const columns: ColumnReference[] = transformations.flatMap(transformation => transformation.inputColumns);
+        if (selectStatement) {
+            for (const context of ['select', 'where', 'join', 'group', 'order', 'having'] as ColumnUsageContext[]) {
+                columns.push(...this.columnExtractor.extractUsedColumns(selectStatement, context));
+            }
+        }
+
+        const unique = new Map<string, ColumnReference>();
+        for (const column of columns) {
+            const normalized = {
+                ...column,
+                tableName: column.tableName || soleSourceTable,
+                lineNumber: column.lineNumber || lineNumber,
+            };
+            const key = `${normalized.tableName || ''}|${normalized.columnName}|${normalized.usedIn}`;
+            if (!unique.has(key)) {
+                unique.set(key, normalized);
+            }
+        }
+        return [...unique.values()];
     }
 
     private formatParserWarning(scope: string, error: unknown): string {
@@ -1214,9 +1470,30 @@ export class ReferenceExtractor {
         const boundaries = [0];
         let inString = false;
         let stringChar = '';
+        let inBracketIdentifier = false;
 
         for (let index = 0; index < sql.length; index++) {
             const char = sql[index];
+            if (!inString && !inBracketIdentifier && char === '$') {
+                const delimiter = getDollarQuoteDelimiterAt(sql, index);
+                if (delimiter) {
+                    const close = sql.indexOf(delimiter, index + delimiter.length);
+                    index = close === -1 ? sql.length : close + delimiter.length - 1;
+                    continue;
+                }
+            }
+            if (!inString && char === '[') {
+                inBracketIdentifier = true;
+                continue;
+            }
+            if (inBracketIdentifier) {
+                if (char === ']' && sql[index + 1] === ']') {
+                    index++;
+                } else if (char === ']') {
+                    inBracketIdentifier = false;
+                }
+                continue;
+            }
             if (char === "'" || char === '"' || char === '`') {
                 if (!inString) {
                     inString = true;
@@ -1230,7 +1507,7 @@ export class ReferenceExtractor {
                 }
                 continue;
             }
-            if (!inString && char === ';') {
+            if (!inString && !inBracketIdentifier && char === ';') {
                 boundaries.push(index + 1);
             }
         }
@@ -2037,27 +2314,33 @@ export class ReferenceExtractor {
         addAlias: (name: string, charIndex: number) => void,
         reservedWords: Set<string>
     ): void {
-        const normalizedSql = sql.toUpperCase();
-        let updateIndex = 0;
-        while ((updateIndex = normalizedSql.indexOf('UPDATE', updateIndex)) !== -1) {
-            const fromIndex = normalizedSql.indexOf('FROM', updateIndex);
-            if (fromIndex === -1 || fromIndex > updateIndex + 500) {
-                updateIndex += 6;
+        const statementBoundaries = this.getStatementBoundaries(sql);
+        const updatePattern = /\bUPDATE\b/gi;
+        let updateMatch: RegExpExecArray | null;
+        while ((updateMatch = updatePattern.exec(sql)) !== null) {
+            const updateIndex = updateMatch.index;
+            const statementIndex = this.getStatementIndex(statementBoundaries, updateIndex);
+            const statementEnd = statementBoundaries[statementIndex + 1] ?? sql.length;
+            const fromPattern = /\bFROM\b/gi;
+            fromPattern.lastIndex = updateIndex + updateMatch[0].length;
+            const fromMatch = fromPattern.exec(sql);
+            if (!fromMatch || fromMatch.index >= statementEnd) {
                 continue;
             }
+            const fromIndex = fromMatch.index;
 
-            // Find the opening paren after FROM
-            const openParenIndex = sql.indexOf('(', fromIndex);
-            if (openParenIndex === -1) {
-                updateIndex += 6;
+            // This helper is specifically for UPDATE ... FROM (subquery) alias
+            // declarations. Do not borrow a parenthesis from a later expression.
+            const openParenIndex = sql.indexOf('(', fromIndex + fromMatch[0].length);
+            if (openParenIndex === -1 || openParenIndex >= statementEnd
+                || !/^\s*$/.test(sql.slice(fromIndex + fromMatch[0].length, openParenIndex))) {
                 continue;
             }
 
             // Find the matching closing paren using balanced counting
             let parenCount = 0;
             let closeParenIndex = -1;
-            const maxSearchLength = Math.min(sql.length, openParenIndex + 2000);
-            for (let i = openParenIndex; i < maxSearchLength; i++) {
+            for (let i = openParenIndex; i < statementEnd; i++) {
                 if (sql[i] === '(') {parenCount++;}
                 else if (sql[i] === ')') {
                     parenCount--;
@@ -2080,8 +2363,6 @@ export class ReferenceExtractor {
                     }
                 }
             }
-
-            updateIndex = fromIndex + 1;
         }
     }
 }

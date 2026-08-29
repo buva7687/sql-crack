@@ -12,6 +12,10 @@ export function registerSvgKeyboardListeners(
     }
 
     svg.addEventListener('keydown', (e) => {
+        if (callbacks.isCompareModeActive?.()) {
+            return;
+        }
+
         if (e.key === 'Tab') {
             const orderedNodes = callbacks.getKeyboardNavigationNodes();
             if (orderedNodes.length > 0) {
@@ -36,6 +40,10 @@ export function registerSvgKeyboardListeners(
             }
             if (state.showColumnFlows) {
                 callbacks.toggleColumnFlows(false);
+                return;
+            }
+            if (state.isFullscreen) {
+                callbacks.toggleFullscreen(false);
                 return;
             }
             callbacks.selectNode(null);
@@ -115,6 +123,10 @@ export function registerDocumentKeyboardListeners(
     }
 
     const keydownHandler = (e: KeyboardEvent) => {
+        if (callbacks.isCompareModeActive?.()) {
+            return;
+        }
+
         const isInputFocused = document.activeElement?.tagName === 'INPUT' ||
             document.activeElement?.tagName === 'TEXTAREA';
 

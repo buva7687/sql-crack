@@ -279,7 +279,11 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
     }
     
     const allSubqueries: SubqueryMatch[] = [];
-    const sqlLower = sql.toLowerCase();
+    // Keep offsets aligned with the original SQL while ensuring SELECT/FROM
+    // tokens and parentheses inside comments or literals cannot look like
+    // executable subqueries.
+    const maskedSql = maskStringsAndComments(sql);
+    const sqlLower = maskedSql.toLowerCase();
     
     // 1. Collect FROM subqueries (already have nodes)
     const subqueryNodes = nodes.filter(n => n.type === 'subquery');
@@ -300,20 +304,21 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
     
     // 2. Extract subqueries from SQL using balanced parentheses matching
     // This handles nested subqueries correctly by tracking parenthesis depth
-    const extractSubquery = (sql: string, startIndex: number): { sql: string; endIndex: number } | null => {
-        if (sql[startIndex] !== '(') {return null;}
+    const extractSubquery = (startIndex: number): { sql: string; masked: string; endIndex: number } | null => {
+        if (maskedSql[startIndex] !== '(') {return null;}
         
         let depth = 0;
         let i = startIndex;
         const start = i + 1; // Skip opening (
         
-        while (i < sql.length) {
-            if (sql[i] === '(') {depth++;}
-            if (sql[i] === ')') {
+        while (i < maskedSql.length) {
+            if (maskedSql[i] === '(') {depth++;}
+            if (maskedSql[i] === ')') {
                 depth--;
                 if (depth === 0) {
                     return {
                         sql: sql.substring(start, i).trim(),
+                        masked: maskedSql.substring(start, i).trim(),
                         endIndex: i
                     };
                 }
@@ -335,18 +340,18 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
         // Look backwards for opening parenthesis
         let parenPos = -1;
         for (let i = selectPos - 1; i >= 0 && i >= selectPos - 100; i--) {
-            if (sql[i] === '(') {
+            if (maskedSql[i] === '(') {
                 parenPos = i;
                 break;
             }
-            if (sql[i] === ')' || sql[i] === ';') {break;} // Not a subquery
+            if (maskedSql[i] === ')' || maskedSql[i] === ';') {break;} // Not a subquery
         }
         
         if (parenPos >= 0) {
-            const subquery = extractSubquery(sql, parenPos);
-            if (subquery && subquery.sql.toLowerCase().includes('from')) {
+            const subquery = extractSubquery(parenPos);
+            if (subquery && subquery.masked.toLowerCase().includes('from')) {
                 // Normalize: remove extra whitespace, lowercase, remove table aliases for comparison
-                let normalized = subquery.sql.replace(/\s+/g, ' ').toLowerCase();
+                let normalized = subquery.masked.replace(/\s+/g, ' ').toLowerCase();
                 // Remove table aliases (e.g., "orders o" -> "orders"), but not SQL keywords
                 normalized = normalized.replace(/\b(from|join|,)\s+(\w+)\s+(?:as\s+)?(\w+)\b/g, (match, clause, table, alias) => {
                     const sqlKeywords = new Set(['inner', 'outer', 'left', 'right', 'full', 'cross', 'natural', 'join', 'on', 'where', 'group', 'order', 'having', 'limit', 'union', 'intersect', 'except', 'select', 'from', 'set', 'into', 'values']);

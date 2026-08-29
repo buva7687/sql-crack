@@ -28,6 +28,7 @@ export interface FlowResult {
 export class FlowAnalyzer {
     private readonly incomingEdgesByNodeId: Map<string, LineageEdge[]>;
     private readonly outgoingEdgesByNodeId: Map<string, LineageEdge[]>;
+    private readonly directionalFlowCache = new Map<string, FlowResult>();
 
     constructor(private graph: LineageGraph) {
         this.incomingEdgesByNodeId = this.buildEdgeIndex('targetId');
@@ -56,6 +57,30 @@ export class FlowAnalyzer {
 
     private getOutgoingEdges(nodeId: string): LineageEdge[] {
         return this.outgoingEdgesByNodeId.get(nodeId) || [];
+    }
+
+    private getFlowCacheKey(
+        nodeId: string,
+        direction: 'upstream' | 'downstream',
+        options: FlowOptions
+    ): string {
+        return JSON.stringify([
+            direction,
+            nodeId,
+            options.maxDepth ?? -1,
+            options.includeColumns ?? false,
+            options.excludeExternal ?? false,
+            [...(options.filterTypes || [])].sort(),
+        ]);
+    }
+
+    private cloneFlowResult(result: FlowResult): FlowResult {
+        return {
+            nodes: [...result.nodes],
+            edges: [...result.edges],
+            paths: [...result.paths],
+            depth: result.depth,
+        };
     }
 
     private collectDirectionalFlow(
@@ -151,14 +176,28 @@ export class FlowAnalyzer {
      * Get all nodes upstream of a target (data sources)
      */
     getUpstream(nodeId: string, options: FlowOptions = {}): FlowResult {
-        return this.collectDirectionalFlow(nodeId, 'upstream', options);
+        const key = this.getFlowCacheKey(nodeId, 'upstream', options);
+        const cached = this.directionalFlowCache.get(key);
+        if (cached) {
+            return this.cloneFlowResult(cached);
+        }
+        const result = this.collectDirectionalFlow(nodeId, 'upstream', options);
+        this.directionalFlowCache.set(key, result);
+        return this.cloneFlowResult(result);
     }
 
     /**
      * Get all nodes downstream of a source (data consumers)
      */
     getDownstream(nodeId: string, options: FlowOptions = {}): FlowResult {
-        return this.collectDirectionalFlow(nodeId, 'downstream', options);
+        const key = this.getFlowCacheKey(nodeId, 'downstream', options);
+        const cached = this.directionalFlowCache.get(key);
+        if (cached) {
+            return this.cloneFlowResult(cached);
+        }
+        const result = this.collectDirectionalFlow(nodeId, 'downstream', options);
+        this.directionalFlowCache.set(key, result);
+        return this.cloneFlowResult(result);
     }
 
     /**

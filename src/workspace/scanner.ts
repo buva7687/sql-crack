@@ -167,6 +167,7 @@ export class WorkspaceScanner {
                 fileSize: stat.size,
                 definitions: definitionResult.definitions,
                 references: referenceResult.references,
+                queries: referenceResult.queries,
                 ...(parseWarnings.length > 0 ? { parseWarnings } : {})
             };
         } catch (error) {

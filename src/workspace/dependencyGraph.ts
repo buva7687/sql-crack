@@ -295,24 +295,25 @@ function buildTableGraph(
                 ? analysis.references.filter(ref => ref.statementIndex === def.statementIndex)
                 : [];
 
-            const nextDef = dependentDefinitions[definitionIndex + 1];
-            const refsByLineRange = analysis.references.filter(ref => {
-                if (!Number.isFinite(def.lineNumber) || def.lineNumber <= 0) {
+            let scopedReferences = refsByStatement;
+            if (scopedReferences.length === 0) {
+                const nextDef = dependentDefinitions[definitionIndex + 1];
+                scopedReferences = analysis.references.filter(ref => {
+                    if (!Number.isFinite(def.lineNumber) || def.lineNumber <= 0) {
+                        return true;
+                    }
+                    if (!Number.isFinite(ref.lineNumber) || ref.lineNumber <= 0) {
+                        return false;
+                    }
+                    if (ref.lineNumber < def.lineNumber) {
+                        return false;
+                    }
+                    if (nextDef && Number.isFinite(nextDef.lineNumber) && nextDef.lineNumber > def.lineNumber) {
+                        return ref.lineNumber < nextDef.lineNumber;
+                    }
                     return true;
-                }
-                if (!Number.isFinite(ref.lineNumber) || ref.lineNumber <= 0) {
-                    return false;
-                }
-                if (ref.lineNumber < def.lineNumber) {
-                    return false;
-                }
-                if (nextDef && Number.isFinite(nextDef.lineNumber) && nextDef.lineNumber > def.lineNumber) {
-                    return ref.lineNumber < nextDef.lineNumber;
-                }
-                return true;
-            });
-
-            const scopedReferences = refsByStatement.length > 0 ? refsByStatement : refsByLineRange;
+                });
+            }
 
             for (const ref of scopedReferences) {
                 const refKey = getReferenceKey(ref);
@@ -751,6 +752,9 @@ function layoutGraph(nodes: WorkspaceNode[], edges: WorkspaceEdge[]): void {
         for (let i = 1; i < sortedLevels.length; i++) {
             const level = sortedLevels[i];
             const levelNodes = levelGroups.get(level)!;
+            const currentPositions = new Map(levelNodes.map((node, index) => [node.id, index]));
+            const previousLevel = levelGroups.get(sortedLevels[i - 1])!;
+            const previousPositions = new Map(previousLevel.map((node, index) => [node.id, index]));
 
             // Calculate barycenter for each node based on connected nodes in previous level
             const barycenters: { node: WorkspaceNode; value: number }[] = [];
@@ -761,12 +765,11 @@ function layoutGraph(nodes: WorkspaceNode[], edges: WorkspaceEdge[]): void {
                     .filter(n => n && levels.get(n.id) === sortedLevels[i - 1]);
 
                 if (prevLevelConnections.length > 0) {
-                    const prevLevel = levelGroups.get(sortedLevels[i - 1])!;
-                    const positions = prevLevelConnections.map(n => prevLevel.indexOf(n!));
+                    const positions = prevLevelConnections.map(n => previousPositions.get(n!.id) ?? 0);
                     const avgPos = positions.reduce((a, b) => a + b, 0) / positions.length;
                     barycenters.push({ node, value: avgPos });
                 } else {
-                    barycenters.push({ node, value: levelNodes.indexOf(node) });
+                    barycenters.push({ node, value: currentPositions.get(node.id) ?? 0 });
                 }
             }
 
@@ -779,6 +782,9 @@ function layoutGraph(nodes: WorkspaceNode[], edges: WorkspaceEdge[]): void {
         for (let i = sortedLevels.length - 2; i >= 0; i--) {
             const level = sortedLevels[i];
             const levelNodes = levelGroups.get(level)!;
+            const currentPositions = new Map(levelNodes.map((node, index) => [node.id, index]));
+            const nextLevel = levelGroups.get(sortedLevels[i + 1])!;
+            const nextPositions = new Map(nextLevel.map((node, index) => [node.id, index]));
 
             const barycenters: { node: WorkspaceNode; value: number }[] = [];
 
@@ -788,12 +794,11 @@ function layoutGraph(nodes: WorkspaceNode[], edges: WorkspaceEdge[]): void {
                     .filter(n => n && levels.get(n.id) === sortedLevels[i + 1]);
 
                 if (nextLevelConnections.length > 0) {
-                    const nextLevel = levelGroups.get(sortedLevels[i + 1])!;
-                    const positions = nextLevelConnections.map(n => nextLevel.indexOf(n!));
+                    const positions = nextLevelConnections.map(n => nextPositions.get(n!.id) ?? 0);
                     const avgPos = positions.reduce((a, b) => a + b, 0) / positions.length;
                     barycenters.push({ node, value: avgPos });
                 } else {
-                    barycenters.push({ node, value: levelNodes.indexOf(node) });
+                    barycenters.push({ node, value: currentPositions.get(node.id) ?? 0 });
                 }
             }
 

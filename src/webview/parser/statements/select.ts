@@ -600,6 +600,7 @@ function processSelect(
             ctx.hasSelectStar = true;
         }
     });
+    const projectedColumnCount = Array.isArray(stmt.columns) ? stmt.columns.length : columns.length;
     // Extract column info for dead column detection
     const columnInfos: ColumnInfo[] = extractColumnInfos(stmt.columns, {
         expressionMode: 'formatted',
@@ -610,7 +611,7 @@ function processSelect(
         type: 'select',
         label: 'SELECT',
         description: 'Project columns',
-        details: columns.length <= 5 ? columns : [`${columns.length} columns`],
+        details: projectedColumnCount <= 5 ? columns : [`${projectedColumnCount} columns`],
         columns: columnInfos, // Store column info for dead column detection
         x: 0, y: 0, width: 140, height: 60
     });
@@ -1273,6 +1274,7 @@ function parseCteOrSubqueryInternals(
                 ctx.hasSelectStar = true;
             }
         });
+        const projectedColumnCount = stmt.columns.length;
         const columnInfos: ColumnInfo[] = extractColumnInfos(stmt.columns, {
             expressionMode: 'formatted',
             trackFunctionUsage: (functionName, category) => trackFunctionUsage(runtime, functionName, category)
@@ -1282,7 +1284,7 @@ function parseCteOrSubqueryInternals(
             type: 'select',
             label: 'SELECT',
             description: 'Project columns',
-            details: columns.length <= 5 ? columns : [`${columns.length} columns`],
+            details: projectedColumnCount <= 5 ? columns : [`${projectedColumnCount} columns`],
             columns: columnInfos,
             parentId: parentId,
             depth: depth + 1,

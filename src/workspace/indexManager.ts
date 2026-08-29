@@ -20,7 +20,7 @@ import { normalizeFileExtensions } from '../shared/fileExtensions';
 import { getQualifiedKey, IdentifierQualification, normalizeIdentifier } from './identifiers';
 import { logger } from '../logger';
 
-const INDEX_VERSION = 5; // Bumped for quoted and catalog-qualified relation identity
+const INDEX_VERSION = 6; // Bumped to persist workspace query/column-lineage analysis
 const DEFAULT_AUTO_INDEX_THRESHOLD = 50;
 const DEFAULT_CACHE_TTL_HOURS = 24;
 const DEFAULT_MAX_CACHE_BYTES = 4 * 1024 * 1024; // 4MB safety limit for workspaceState
@@ -76,13 +76,14 @@ export class IndexManager {
     private _changesSinceIndex: number = 0;
     private _persistTimer: NodeJS.Timeout | null = null;
     private _persistDebounceMs: number = 1000;
-    private _pendingDeletes: Set<string> = new Set();
     private _deletedDuringBuild: Set<string> = new Set();
     private _fileWatcherDisposables: vscode.Disposable[] = [];
     private _pendingDialectRebuildVersion: number = 0;
     private _completedDialectRebuildVersion: number = 0;
     private _dialectRebuildPromise: Promise<void> | null = null;
     private _lastCacheState: WorkspaceCacheState = 'missing';
+    private _indexUpdateBatchDepth: number = 0;
+    private _indexUpdatePending: boolean = false;
 
     constructor(context: vscode.ExtensionContext, dialect: SqlDialect = 'MySQL', scopeUri?: vscode.Uri) {
         this.context = context;
@@ -210,9 +211,7 @@ export class IndexManager {
         await this.persistIndex();
 
         // Notify listeners
-        if (this.onIndexUpdated) {
-            this.onIndexUpdated();
-        }
+        this.notifyIndexUpdated();
 
         return this.index;
     }
@@ -279,7 +278,7 @@ export class IndexManager {
             this.addFileToIndex(preservedAnalysis);
             this.index.lastUpdated = Date.now();
             this.schedulePersist();
-            this.onIndexUpdated?.();
+            this.notifyIndexUpdated();
             return;
         }
 
@@ -304,9 +303,7 @@ export class IndexManager {
         this.schedulePersist();
 
         // Notify listeners
-        if (this.onIndexUpdated) {
-            this.onIndexUpdated();
-        }
+        this.notifyIndexUpdated();
     }
 
     /**
@@ -327,9 +324,7 @@ export class IndexManager {
             this.schedulePersist();
 
             // Notify listeners
-            if (this.onIndexUpdated) {
-                this.onIndexUpdated();
-            }
+            this.notifyIndexUpdated();
         }
     }
 
@@ -544,6 +539,26 @@ export class IndexManager {
      */
     setOnIndexUpdated(callback: (() => void) | null): void {
         this.onIndexUpdated = callback;
+    }
+
+    private notifyIndexUpdated(): void {
+        if (this._indexUpdateBatchDepth > 0) {
+            this._indexUpdatePending = true;
+            return;
+        }
+        this.onIndexUpdated?.();
+    }
+
+    private beginIndexUpdateBatch(): void {
+        this._indexUpdateBatchDepth++;
+    }
+
+    private endIndexUpdateBatch(): void {
+        this._indexUpdateBatchDepth = Math.max(0, this._indexUpdateBatchDepth - 1);
+        if (this._indexUpdateBatchDepth === 0 && this._indexUpdatePending) {
+            this._indexUpdatePending = false;
+            this.onIndexUpdated?.();
+        }
     }
 
     /**
@@ -846,17 +861,10 @@ export class IndexManager {
         this._fileWatcherDisposables.push(
             this.fileWatcher.onDidChange(uri => queueUpdate(uri)),
             this.fileWatcher.onDidCreate(uri => queueUpdate(uri)),
-            this.fileWatcher.onDidDelete(uri => {
-                const key = uri.toString();
-                if (this.shouldIndexFile(uri) && !this._pendingDeletes.has(key)) {
-                    this._pendingDeletes.add(key);
-                    this._changesSinceIndex++;
-                    void this.removeFile(uri).finally(() => {
-                        this._pendingDeletes.delete(key);
-                        this.markChangeProcessed();
-                    });
-                }
-            })
+            // Deletes share the same debounce/drain as creates and changes. The
+            // queue's stat preflight distinguishes a still-missing file from a
+            // delete/recreate race and coalesces one panel refresh per drain.
+            this.fileWatcher.onDidDelete(uri => queueUpdate(uri))
         );
     }
 
@@ -890,50 +898,55 @@ export class IndexManager {
         }
 
         const run = async () => {
-            while (this.updateQueue.size > 0) {
-                if (this._buildPromise) {
-                    // A full build is in progress — defer queue processing until it completes
-                    await this._buildPromise;
-                }
-
-                const files = [...this.updateQueue];
-
-                for (const filePath of files) {
-                    // Claim each queued path individually so files re-queued during processing
-                    // remain in the set for a follow-up pass instead of being wiped up front.
-                    if (!this.updateQueue.delete(filePath)) {
-                        continue;
+            this.beginIndexUpdateBatch();
+            try {
+                while (this.updateQueue.size > 0) {
+                    if (this._buildPromise) {
+                        // A full build is in progress — defer queue processing until it completes
+                        await this._buildPromise;
                     }
-                    const uri = vscode.Uri.file(filePath);
-                    if (!this.shouldIndexFile(uri)) {
-                        this.markChangeProcessed();
-                        continue;
-                    }
-                    try {
-                        // Guard: skip if file was deleted while queued
-                        try {
-                            await vscode.workspace.fs.stat(uri);
-                        } catch (e) {
-                            if (this.isFileNotFoundError(e)) {
-                                logger.debug(`[IndexManager] Queued file no longer exists, removing: ${uri.fsPath}`);
-                                await this.removeFile(uri);
-                            } else {
-                                // A provider outage or permission error is not
-                                // evidence of deletion. Retry through analyzeFile;
-                                // if it remains unreadable, updateFile preserves
-                                // and marks the last-known-good analysis.
-                                logger.debug(`[IndexManager] File stat failed, preserving until analysis retry: ${uri.fsPath} ${String(e)}`);
-                                await this.updateFile(uri);
-                            }
+
+                    const files = [...this.updateQueue];
+
+                    for (const filePath of files) {
+                        // Claim each queued path individually so files re-queued during processing
+                        // remain in the set for a follow-up pass instead of being wiped up front.
+                        if (!this.updateQueue.delete(filePath)) {
                             continue;
                         }
-                        await this.updateFile(uri);
-                    } catch (err) {
-                        logger.debug(`[IndexManager] Update failed for ${filePath}: ${err}`);
-                    } finally {
-                        this.markChangeProcessed();
+                        const uri = vscode.Uri.file(filePath);
+                        if (!this.shouldIndexFile(uri)) {
+                            this.markChangeProcessed();
+                            continue;
+                        }
+                        try {
+                            // Guard: skip if file was deleted while queued
+                            try {
+                                await vscode.workspace.fs.stat(uri);
+                            } catch (e) {
+                                if (this.isFileNotFoundError(e)) {
+                                    logger.debug(`[IndexManager] Queued file no longer exists, removing: ${uri.fsPath}`);
+                                    await this.removeFile(uri);
+                                } else {
+                                    // A provider outage or permission error is not
+                                    // evidence of deletion. Retry through analyzeFile;
+                                    // if it remains unreadable, updateFile preserves
+                                    // and marks the last-known-good analysis.
+                                    logger.debug(`[IndexManager] File stat failed, preserving until analysis retry: ${uri.fsPath} ${String(e)}`);
+                                    await this.updateFile(uri);
+                                }
+                                continue;
+                            }
+                            await this.updateFile(uri);
+                        } catch (err) {
+                            logger.debug(`[IndexManager] Update failed for ${filePath}: ${err}`);
+                        } finally {
+                            this.markChangeProcessed();
+                        }
                     }
                 }
+            } finally {
+                this.endIndexUpdateBatch();
             }
         };
 

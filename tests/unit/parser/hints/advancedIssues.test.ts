@@ -95,6 +95,21 @@ describe('detectAdvancedIssues', () => {
             const dupHint = ctx.hints.find(h => h.message.includes('similar subqueries'));
             expect(dupHint).toBeUndefined();
         });
+
+        it('ignores duplicate-looking subqueries inside comments and literals', () => {
+            const ctx = createFreshContext('PostgreSQL');
+            const nodes = [makeNode({ id: 's1', type: 'select', label: 'SELECT' })];
+            const sql = `
+                SELECT '(SELECT id FROM hidden_table)' AS sample
+                FROM orders
+                /* (SELECT id FROM hidden_table) */
+                -- (SELECT id FROM hidden_table)
+            `;
+
+            detectAdvancedIssues(ctx, nodes, sql);
+
+            expect(ctx.hints.find(h => h.message.includes('similar subqueries'))).toBeUndefined();
+        });
     });
 
     describe('dead column detection', () => {

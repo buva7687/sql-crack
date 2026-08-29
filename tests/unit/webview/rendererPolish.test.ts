@@ -19,4 +19,19 @@ describe('renderer polish safeguards', () => {
         expect(source).toContain('reducedMotionStyleElement?.remove();');
         expect(source).toContain('clearTimeout(resizeObserverDebounceTimer);');
     });
+
+    it('preserves same-query interaction state and avoids redundant initial fitting', () => {
+        expect(source).toContain('|| (!shouldResetCloudState && currentNodes.length > 0)');
+        expect(source).toContain("if (!canVirtualizeOnFirstPaint && (!state.layoutType || state.layoutType === 'vertical'))");
+    });
+
+    it('coalesces minimap viewport work into one animation frame', () => {
+        expect(source).toContain('if (!minimapViewportFramePending)');
+        expect(source).toContain('minimapViewportFramePending = false;');
+    });
+
+    it('restores the selected border after cursor-follow highlighting moves away', () => {
+        expect(source).toContain('restoreNodeBorderState(rect);');
+        expect(source).toContain('if (state.selectedNodeId === highlightedLineNodeId)');
+    });
 });

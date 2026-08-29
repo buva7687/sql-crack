@@ -7,6 +7,7 @@ import type {
     SqlDialect
 } from '../../types';
 import { findMatchingParen } from './preprocessing';
+import { stripSqlComments } from '../../../shared';
 
 interface RoutineDdlInfo {
     action: 'CREATE' | 'ALTER' | 'DROP';
@@ -88,10 +89,9 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
     const trackTableUsage = (tableName: string): void => {
         tableUsage.set(tableName, (tableUsage.get(tableName) || 0) + 1);
     };
-    const commentStripped = sql
-        .replace(/\/\*[\s\S]*?\*\//g, '')
-        .replace(/--[^\n]*/g, '')
-        .replace(/#(?![A-Za-z0-9_])[^\n]*/g, '');
+    const commentStripped = stripSqlComments(sql, {
+        preserveHashTempIdentifiers: dialect === 'TransactSQL',
+    });
     const routineDdl = extractRoutineDdlInfo(commentStripped);
 
     const cteNames = new Set<string>();

@@ -489,10 +489,18 @@ export function highlightLineageNodesFeature(options: HighlightLineageNodesOptio
 
     clearLineageBadges(mainGroup);
 
-    mainGroup.querySelectorAll('.node-group').forEach((node) => {
+    const renderedNodes = Array.from(mainGroup.querySelectorAll<SVGGElement>('.node'));
+    const renderedNodeById = new Map(
+        renderedNodes
+            .map(node => [node.getAttribute('data-id'), node] as const)
+            .filter((entry): entry is readonly [string, SVGGElement] => entry[0] !== null)
+    );
+    const renderedEdges = Array.from(mainGroup.querySelectorAll<SVGPathElement>('.edge'));
+
+    renderedNodes.forEach((node) => {
         (node as SVGElement).style.opacity = '0.3';
     });
-    mainGroup.querySelectorAll('.edge-path, .edge-arrow').forEach((edge) => {
+    renderedEdges.forEach((edge) => {
         (edge as SVGElement).style.opacity = '0.15';
     });
 
@@ -512,13 +520,13 @@ export function highlightLineageNodesFeature(options: HighlightLineageNodesOptio
     };
 
     for (const step of flow.lineagePath) {
-        const nodeGroup = mainGroup.querySelector(`[data-node-id="${step.nodeId}"]`);
+        const nodeGroup = renderedNodeById.get(step.nodeId);
         if (!nodeGroup) {
             continue;
         }
         (nodeGroup as SVGElement).style.opacity = '1';
 
-        const rect = nodeGroup.querySelector('rect');
+        const rect = (nodeGroup.querySelector('.node-rect') || nodeGroup.querySelector('rect')) as SVGRectElement | null;
         if (!rect) {
             continue;
         }
@@ -537,7 +545,7 @@ export function highlightLineageNodesFeature(options: HighlightLineageNodesOptio
         nodeGroup.appendChild(badge);
     }
 
-    mainGroup.querySelectorAll('.edge-path').forEach((edgePath) => {
+    renderedEdges.forEach((edgePath) => {
         const edge = edgePath as SVGElement;
         const sourceId = edge.getAttribute('data-source');
         const targetId = edge.getAttribute('data-target');
@@ -557,10 +565,6 @@ export function highlightLineageNodesFeature(options: HighlightLineageNodesOptio
             }
         }
 
-        const arrow = mainGroup.querySelector(`.edge-arrow[data-source="${sourceId}"][data-target="${targetId}"]`);
-        if (arrow) {
-            (arrow as SVGElement).style.opacity = '1';
-        }
     });
 }
 
@@ -579,24 +583,20 @@ export function clearLineageHighlightsFeature(options: ClearLineageHighlightsOpt
 
     clearLineageBadges(mainGroup);
 
-    mainGroup.querySelectorAll('.node-group').forEach((node) => {
+    mainGroup.querySelectorAll('.node').forEach((node) => {
         (node as SVGElement).style.opacity = '1';
-        const rect = node.querySelector('rect');
+        const rect = node.querySelector('.node-rect') || node.querySelector('rect');
         if (!rect) {
             return;
         }
         restoreNodeBorderState(rect as SVGRectElement);
     });
 
-    mainGroup.querySelectorAll('.edge-path').forEach((edge) => {
+    mainGroup.querySelectorAll('.edge').forEach((edge) => {
         const edgeEl = edge as SVGElement;
         edgeEl.style.opacity = '1';
         edgeEl.setAttribute('stroke', isDarkTheme ? edgeColors.default : edgeColors.defaultLight);
         edgeEl.setAttribute('stroke-width', '1.5');
-    });
-
-    mainGroup.querySelectorAll('.edge-arrow').forEach((arrow) => {
-        (arrow as SVGElement).style.opacity = '1';
     });
 
     if (detailsPanel) {

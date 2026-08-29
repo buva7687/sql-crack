@@ -1,4 +1,4 @@
-import { STATUS_COLORS, UI_COLORS } from '../constants';
+import { STATUS_COLORS, getComponentUiColors } from '../constants';
 
 const PARSE_TIMEOUT_SETTING_LABEL = 'SQL Crack › Advanced: Parse Timeout Seconds';
 
@@ -62,6 +62,7 @@ export function renderErrorFeature(options: ErrorRenderOptions): void {
 
     const hasSourceLine = Boolean(sourceLine);
     const guidanceLines = getErrorGuidanceLines(message);
+    const colors = getComponentUiColors(isDarkTheme);
 
     const extraLines = (hasSourceLine ? 1 : 0) + guidanceLines.length;
     const baseOffset = extraLines > 0 ? -3 * extraLines : 0;
@@ -107,7 +108,7 @@ export function renderErrorFeature(options: ErrorRenderOptions): void {
         sourceText.setAttribute('x', '50%');
         sourceText.setAttribute('y', `${nextY}%`);
         sourceText.setAttribute('text-anchor', 'middle');
-        sourceText.setAttribute('fill', UI_COLORS.textMuted);
+        sourceText.setAttribute('fill', colors.textMuted);
         sourceText.setAttribute('font-size', '11');
         sourceText.setAttribute('font-family', 'SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace');
         sourceText.textContent = `→ ${sourceLine}`;
@@ -120,7 +121,7 @@ export function renderErrorFeature(options: ErrorRenderOptions): void {
         guidanceText.setAttribute('x', '50%');
         guidanceText.setAttribute('y', `${nextY}%`);
         guidanceText.setAttribute('text-anchor', 'middle');
-        guidanceText.setAttribute('fill', index === 0 ? UI_COLORS.textMuted : UI_COLORS.textDim);
+        guidanceText.setAttribute('fill', index === 0 ? colors.textMuted : colors.textDim);
         guidanceText.setAttribute('font-size', index === 0 ? '12' : '11');
         guidanceText.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
         guidanceText.textContent = line;

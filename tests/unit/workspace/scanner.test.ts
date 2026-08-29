@@ -233,6 +233,50 @@ describe('WorkspaceScanner', () => {
             expect(result.references.length).toBeGreaterThan(0);
         });
 
+        it('populates query transformations for workspace column lineage', async () => {
+            const sqlContent = [
+                'CREATE TABLE source_data (id INT, name TEXT);',
+                'CREATE VIEW normalized_data (source_id, normalized_name) AS',
+                'SELECT id, UPPER(name) AS normalized_name',
+                'FROM source_data;',
+            ].join('\n');
+            const pgScanner = new WorkspaceScanner('PostgreSQL');
+            (vscode.workspace.fs.stat as jest.Mock).mockResolvedValue({
+                type: 1,
+                ctime: Date.now(),
+                mtime: 1704067200000,
+                size: sqlContent.length,
+            });
+            (vscode.workspace.fs.readFile as jest.Mock).mockResolvedValueOnce(
+                new TextEncoder().encode(sqlContent)
+            );
+
+            const result = await pgScanner.analyzeFile(testUri);
+            const viewQuery = result.queries?.find(query => query.statementType === 'create_view');
+
+            expect(result.queries).toHaveLength(2);
+            expect(viewQuery).toEqual(expect.objectContaining({
+                statementIndex: 1,
+                inputTables: expect.arrayContaining([
+                    expect.objectContaining({ tableName: 'source_data' }),
+                ]),
+            }));
+            expect(viewQuery?.transformations).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    outputColumn: 'source_id',
+                    inputColumns: expect.arrayContaining([
+                        expect.objectContaining({ tableName: 'source_data', columnName: 'id' }),
+                    ]),
+                }),
+                expect.objectContaining({
+                    outputColumn: 'normalized_name',
+                    inputColumns: expect.arrayContaining([
+                        expect.objectContaining({ tableName: 'source_data', columnName: 'name' }),
+                    ]),
+                }),
+            ]));
+        });
+
         it('should handle file too large', async () => {
             // SETUP: File larger than default 10MB limit
             (vscode.workspace.fs.stat as jest.Mock).mockResolvedValue({

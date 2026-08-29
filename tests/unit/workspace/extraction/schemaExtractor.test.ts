@@ -66,6 +66,23 @@ describe('SchemaExtractor.extractDefinitions', () => {
             ]);
         });
 
+        it('preserves SQL Server database qualification when the schema is omitted', () => {
+            const defs = extractor.extractDefinitions(
+                'CREATE TABLE reporting..orders (id INT);',
+                '/sql/orders.sql',
+                'TransactSQL'
+            );
+
+            expect(defs).toEqual([
+                expect.objectContaining({
+                    catalog: 'reporting',
+                    schema: undefined,
+                    name: 'orders',
+                    columns: expect.arrayContaining([expect.objectContaining({ name: 'id' })]),
+                }),
+            ]);
+        });
+
         it('extracts multiple CREATE TABLE statements', () => {
             const sql = `
                 CREATE TABLE orders (id INT);

@@ -1193,5 +1193,32 @@ SELECT * FROM product_sales LIMIT 10
       const maxWidth = result.nodes.reduce((currentMax, node) => Math.max(currentMax, node.width), 0);
       expect(maxWidth).toBeLessThanOrEqual(420);
     });
+
+    it('reports the full projection count when display labels are capped', () => {
+      const projection = Array.from({ length: 25 }, (_, index) => `column_${index + 1}`).join(', ');
+      const result = parseSql(`SELECT ${projection} FROM wide_table`, 'PostgreSQL');
+      const selectNode = result.nodes.find(node => node.type === 'select' && !node.parentId);
+
+      expect(selectNode?.details).toEqual(['25 columns']);
+      expect(selectNode?.columns).toHaveLength(25);
+    });
+
+    it('assigns node lines from the original SQL after nested CTE preprocessing', () => {
+      const sql = [
+        'SELECT *',
+        'FROM outer_table o',
+        'JOIN (',
+        '  WITH nested AS (',
+        '    SELECT * FROM source_table',
+        '  )',
+        '  SELECT * FROM nested',
+        ') q ON q.id = o.id',
+      ].join('\n');
+      const result = parseSql(sql, 'PostgreSQL');
+      const outerTable = result.nodes.find(node => node.label.toLowerCase() === 'outer_table');
+
+      expect(outerTable?.startLine).toBe(2);
+      expect(result.sql).toBe(sql);
+    });
   });
 });

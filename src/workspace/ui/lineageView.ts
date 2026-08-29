@@ -29,6 +29,7 @@ export class LineageView {
         // Stats
         const stats = this.collectStats(graph);
         const totalNodeCount = searchableNodes.length;
+        const nodeConnections = this.calculateNodeConnections(graph, depth);
 
         if (searchableNodes.length === 0) {
             return this.generateEmptyState();
@@ -93,11 +94,11 @@ export class LineageView {
                                 </button>
                             </div>
                             <div class="lineage-popular-grid" id="lineage-popular-grid">
-                                ${this.generatePopularNodes(graph, 6, depth)}
+                                ${this.generatePopularNodes(nodeConnections, 6)}
                             </div>
                         </div>
                         <div class="lineage-tables-grid" id="lineage-tables-grid" style="display: none;">
-                            ${this.generateAllNodes(graph, depth)}
+                            ${this.generateAllNodes(nodeConnections)}
                         </div>
                         <div class="lineage-empty-filter" id="lineage-empty-filter" style="display: none;">
                             <p>No matching tables or views found</p>
@@ -422,7 +423,10 @@ export class LineageView {
     /**
      * Generate all nodes as filterable grid items
      */
-    private generateAllNodes(graph: LineageGraph, depth: number = 5): string {
+    private calculateNodeConnections(
+        graph: LineageGraph,
+        depth: number
+    ): Array<{ node: LineageNode; upstreamCount: number; downstreamCount: number; total: number }> {
         const flowAnalyzer = new FlowAnalyzer(graph);
         const nodeConnections: { node: LineageNode; upstreamCount: number; downstreamCount: number; total: number }[] = [];
 
@@ -438,6 +442,14 @@ export class LineageView {
                 nodeConnections.push({ node, upstreamCount, downstreamCount, total });
             }
         });
+
+        return nodeConnections;
+    }
+
+    private generateAllNodes(
+        connections: Array<{ node: LineageNode; upstreamCount: number; downstreamCount: number; total: number }>
+    ): string {
+        const nodeConnections = [...connections];
 
         // Sort by total connections descending (most connected first)
         nodeConnections.sort((a, b) => b.total - a.total);
@@ -467,26 +479,12 @@ export class LineageView {
     /**
      * Generate popular/most connected nodes
      */
-    private generatePopularNodes(graph: LineageGraph, limit: number, depth: number = 5): string {
-        const flowAnalyzer = new FlowAnalyzer(graph);
-        const nodeConnections: { node: LineageNode; upstreamCount: number; downstreamCount: number; total: number }[] = [];
-
-        graph.nodes.forEach((node) => {
-            if (node.type === 'table' || node.type === 'view') {
-                // Curated "Most Connected" should prioritize internal lineage density.
-                // External endpoints are still visible in full-node exploration views.
-                const upstream = flowAnalyzer.getUpstream(node.id, { maxDepth: depth, excludeExternal: true });
-                const downstream = flowAnalyzer.getDownstream(node.id, { maxDepth: depth, excludeExternal: true });
-                // Count only tables and views (exclude column nodes to match graph display)
-                const isDisplayableNode = (n: LineageNode) => n.type === 'table' || n.type === 'view';
-                const upstreamCount = upstream.nodes.filter(isDisplayableNode).length;
-                const downstreamCount = downstream.nodes.filter(isDisplayableNode).length;
-                const total = upstreamCount + downstreamCount;
-                if (total > 0) {
-                    nodeConnections.push({ node, upstreamCount, downstreamCount, total });
-                }
-            }
-        });
+    private generatePopularNodes(
+        connections: Array<{ node: LineageNode; upstreamCount: number; downstreamCount: number; total: number }>,
+        limit: number
+    ): string {
+        // Curated "Most Connected" prioritizes internal lineage density.
+        const nodeConnections = connections.filter(connection => connection.total > 0);
 
         // Sort by total connections descending
         nodeConnections.sort((a, b) => b.total - a.total);

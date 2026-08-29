@@ -66,6 +66,12 @@ describe('webview source coverage gaps', () => {
         expect(source).toContain("const items = columnList.querySelectorAll('[data-column-name]');");
         expect(source).toContain('state.highlightedColumnSources = lineage.sources.map((source) => source.nodeId).filter(Boolean);');
         expect(source).toContain('highlightPathToSelect(mainGroup, currentNodes, currentEdges, state.highlightedColumnSources, edgeColors.columnLineage);');
+        expect(source).toContain("querySelectorAll<SVGGElement>('.node')");
+        expect(source).toContain("querySelectorAll<SVGPathElement>('.edge')");
+        expect(source).toContain("node.getAttribute('data-id')");
+        expect(source).not.toContain("querySelectorAll('.node-group')");
+        expect(source).not.toContain("querySelectorAll('.edge-path')");
+        expect(source).not.toContain('data-node-id');
         expect(source).not.toMatch(/onclick=/);
     });
 });

@@ -744,9 +744,17 @@ function extractParseErrorLocation(
     err: unknown,
     originalError: string,
     sql: string,
-    syntaxHint: string | null
+    syntaxHint: string | null,
+    preferTokenLocation: boolean = false
 ): ParseErrorLocation | null {
     const errorObj = err as any;
+
+    if (preferTokenLocation && syntaxHint) {
+        const inferredOffset = inferErrorOffsetFromToken(sql, syntaxHint);
+        if (inferredOffset !== null) {
+            return getLineColumnFromOffset(sql, inferredOffset);
+        }
+    }
 
     const structuredLocation = errorObj?.location?.start;
     if (structuredLocation && typeof structuredLocation.line === 'number') {
@@ -1407,7 +1415,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
             fallbackResult.sql = originalSql;
             fallbackResult.hints.unshift(timeoutHint);
             layoutGraph(fallbackResult.nodes, fallbackResult.edges);
-            assignLineNumbers(fallbackResult.nodes, sql);
+            assignLineNumbers(fallbackResult.nodes, originalSql);
             return fallbackResult;
         }
 
@@ -1434,10 +1442,10 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
         generateHints(context, statements[0]);
 
         // Detect dialect-specific syntax patterns
-        detectDialectSpecificSyntax(context, sql, effectiveDialect);
+        detectDialectSpecificSyntax(context, originalSql, effectiveDialect);
 
         // Detect advanced issues (unused CTEs, dead columns, etc.)
-        detectAdvancedIssues(context, nodes, sql);
+        detectAdvancedIssues(context, nodes, originalSql);
 
         // Calculate enhanced complexity metrics
         calculateEnhancedMetrics(context, nodes, edges);
@@ -1494,7 +1502,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
         layoutGraph(nodes, edges);
 
         // Assign line numbers to nodes for editor sync
-        assignLineNumbers(nodes, sql);
+        assignLineNumbers(nodes, originalSql);
 
         // Extract column lineage
         const columnLineage = extractColumnLineage(innerSelectStmt, nodes);
@@ -1525,9 +1533,9 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
 
         // Enhance error messages with helpful dialect suggestions for common issues
         // This helps users quickly identify when they need to switch SQL dialects
-        const upperSql = sql.toUpperCase();
-        const hasIntervalQuoted = /INTERVAL\s*'[^']+'/i.test(sql);
-        const hasParenthesizedUnion = /\(\s*SELECT[\s\S]+\)\s*(UNION|INTERSECT|EXCEPT)/i.test(sql);
+        const upperSql = originalSql.toUpperCase();
+        const hasIntervalQuoted = /INTERVAL\s*'[^']+'/i.test(originalSql);
+        const hasParenthesizedUnion = /\(\s*SELECT[\s\S]+\)\s*(UNION|INTERSECT|EXCEPT)/i.test(originalSql);
 
         // Extract specific syntax issue from error message
         // Parser errors are typically: "Expected X but "Y" found" or "Unexpected token Y"
@@ -1538,10 +1546,16 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
         const syntaxHint = butFoundMatch ? butFoundMatch[1] :
                           (quotedFoundMatch ? quotedFoundMatch[1] :
                           (unexpectedMatch ? unexpectedMatch[1] : null));
-        const parseLocation = extractParseErrorLocation(err, originalError, sql, syntaxHint);
+        const parseLocation = extractParseErrorLocation(
+            err,
+            originalError,
+            originalSql,
+            syntaxHint,
+            sql !== originalSql
+        );
 
         // Check for || concatenation operator failure
-        const hasPipeConcat = /\|\|/.test(sql);
+        const hasPipeConcat = /\|\|/.test(originalSql);
 
         if (originalError.includes('found') || originalError.includes('Expected')) {
             if (hasPipeConcat && (syntaxHint === '|' || syntaxHint === '||' || originalError.includes('||'))) {
@@ -1582,12 +1596,12 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
 
         // Even when parsing fails, try to detect dialect-specific syntax
         // to provide helpful hints to users
-        detectDialectSpecificSyntax(context, sql, dialect);
+        detectDialectSpecificSyntax(context, originalSql, dialect);
 
         // If auto-detect is disabled and dialect-specific syntax was found,
         // nudge the user to enable it
         if (options.allowDialectFallback === false) {
-            const detectedResult = detectDialect(sql);
+            const detectedResult = detectDialect(originalSql);
             if (detectedResult.dialect && detectedResult.dialect !== dialect) {
                 context.hints.push({
                     type: 'info',
@@ -1617,7 +1631,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
         fallbackResult.hints.push(...context.hints);
 
         layoutGraph(fallbackResult.nodes, fallbackResult.edges);
-        assignLineNumbers(fallbackResult.nodes, sql);
+        assignLineNumbers(fallbackResult.nodes, originalSql);
         return fallbackResult;
     }
 }

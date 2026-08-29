@@ -1,5 +1,6 @@
 import { parseSql, setParseTimeout } from '../../../src/webview/sqlParser';
 import type { SqlDialect } from '../../../src/webview/types/parser';
+import { regexFallbackParse } from '../../../src/webview/parser/dialects/fallback';
 
 describe('Fallback line number assignment', () => {
     afterEach(() => {
@@ -66,5 +67,14 @@ WHERE :=: invalid_token`;
         expect(result.partial).toBe(true);
         const brokenTable = result.nodes.find(node => node.label.toLowerCase() === 'broken_table');
         expect(brokenTable?.startLine).toBe(2);
+    });
+
+    it('strips glued MySQL hash comments without inventing JOIN tables', () => {
+        const result = regexFallbackParse(
+            'SELECT * FROM orders #TODO join customers\nWHERE id > 0',
+            'MySQL'
+        );
+
+        expect(result.nodes.filter(node => node.type === 'table').map(node => node.label)).toEqual(['orders']);
     });
 });
