@@ -745,4 +745,46 @@ describe('ReferenceExtractor behavioral coverage', () => {
             })
         ]);
     });
+
+    it('does not attribute upstream tables to a CTE that only reads another CTE', () => {
+        const { queries } = extractor.extractReferencesWithStatus(
+            'WITH a AS (SELECT x FROM t1), b AS (SELECT x FROM a) SELECT x FROM b',
+            'chained.sql',
+            'MySQL'
+        );
+
+        const ctes = queries[0].ctes;
+        const sourceTable = (name: string) => ctes
+            .find(cte => cte.name.toLowerCase() === name)!
+            .query.inputTables.map(table => table.tableName.toLowerCase());
+
+        expect(sourceTable('a')).toEqual(['t1']);
+        // `b` reads only the CTE `a`, which has no TableReference of its own.
+        expect(sourceTable('b')).toEqual([]);
+        expect(ctes.find(cte => cte.name.toLowerCase() === 'b')!.query.transformations[0].inputColumns)
+            .toEqual([expect.objectContaining({ tableName: 'a', columnName: 'x' })]);
+    });
+
+    it('keeps real tables when a CTE reads both a CTE and a table', () => {
+        const { queries } = extractor.extractReferencesWithStatus(
+            'WITH a AS (SELECT x FROM t1), b AS (SELECT a.x FROM a JOIN t2 ON a.x = t2.x) SELECT x FROM b',
+            'mixed.sql',
+            'MySQL'
+        );
+
+        const b = queries[0].ctes.find(cte => cte.name.toLowerCase() === 'b')!;
+        expect(b.query.inputTables.map(table => table.tableName.toLowerCase())).toEqual(['t2']);
+    });
+
+    it('still reports every source table for a CTE reading multiple tables', () => {
+        const { queries } = extractor.extractReferencesWithStatus(
+            'WITH a AS (SELECT t1.x FROM t1 JOIN t3 ON t1.x = t3.x) SELECT x FROM a',
+            'multi.sql',
+            'MySQL'
+        );
+
+        const a = queries[0].ctes.find(cte => cte.name.toLowerCase() === 'a')!;
+        expect(a.query.inputTables.map(table => table.tableName.toLowerCase()).sort())
+            .toEqual(['t1', 't3']);
+    });
 });

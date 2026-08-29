@@ -314,7 +314,8 @@ export class ReferenceExtractor {
     private buildQueryAnalysis(
         statement: AstStatement,
         statementIndex: number,
-        statementReferences: TableReference[]
+        statementReferences: TableReference[],
+        cteNamesInScope: ReadonlySet<string> = new Set()
     ): QueryAnalysis {
         const selectStatement = this.getAnalysisSelectStatement(statement);
         const allInputTables = statementReferences.filter(reference =>
@@ -338,7 +339,18 @@ export class ReferenceExtractor {
                 name.toLowerCase() === reference.tableName.toLowerCase()
             ))
             : allInputTables;
-        const inputTables = scopedInputTables.length > 0 ? scopedInputTables : allInputTables;
+        // A direct source naming an in-scope CTE has no TableReference by
+        // design, so an empty scoped result is accurate rather than a lookup
+        // failure. Widen to the whole statement only when a source cannot be
+        // accounted for as either a reference or a CTE.
+        const unresolvedDirectSources = directSourceTableNames.filter(name =>
+            !cteNamesInScope.has(name.toLowerCase())
+            && !allInputTables.some(reference =>
+                reference.tableName.toLowerCase() === name.toLowerCase())
+        );
+        const inputTables = scopedInputTables.length > 0 || unresolvedDirectSources.length === 0
+            ? scopedInputTables
+            : allInputTables;
 
         let outputColumns: ColumnInfo[] = selectStatement
             ? this.columnExtractor.extractSelectColumns(selectStatement, tableAliases)
@@ -401,7 +413,15 @@ export class ReferenceExtractor {
         );
 
         const cteSource = selectStatement || statement;
-        const ctes = this.getWithClauses(cteSource).flatMap(cte => {
+        const withClauses = this.getWithClauses(cteSource);
+        const nestedCteNamesInScope = new Set(cteNamesInScope);
+        for (const cte of withClauses) {
+            const siblingName = this.getCTENameString(cte.name);
+            if (siblingName) {
+                nestedCteNamesInScope.add(siblingName.toLowerCase());
+            }
+        }
+        const ctes = withClauses.flatMap(cte => {
             const cteStatement = this.getCteStatement(cte);
             if (!cteStatement) {
                 return [];
@@ -413,7 +433,12 @@ export class ReferenceExtractor {
             return [{
                 name,
                 ...(columns && columns.length > 0 ? { columns } : {}),
-                query: this.buildQueryAnalysis(cteStatement, statementIndex, statementReferences),
+                query: this.buildQueryAnalysis(
+                    cteStatement,
+                    statementIndex,
+                    statementReferences,
+                    nestedCteNamesInScope
+                ),
                 isRecursive: Boolean((cte as any).recursive || (cteSource as any).recursive),
                 lineNumber: queryLineNumber,
             }];
