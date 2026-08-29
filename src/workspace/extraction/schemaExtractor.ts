@@ -753,7 +753,8 @@ export class SchemaExtractor {
         while ((match = intoRegex.exec(sourceViews.searchableSql)) !== null) {
             const parts = this.getQualifiedIdentifierParts(match);
             const name = parts.name;
-            if (/^(?:OUTFILE|DUMPFILE)$/i.test(name)) {
+            if (/^(?:OUTFILE|DUMPFILE)$/i.test(name)
+                || (name.startsWith('@') && !this.isQuotedIdentifier(parts.rawName))) {
                 continue;
             }
 

@@ -112,6 +112,24 @@ describe('Item #3: MERGE Statement Visualization', () => {
             expect(sourceNode).toBeDefined();
         });
 
+        it('uses the MERGE predicate after JOIN conditions inside the USING subquery', () => {
+            const sql = `
+                MERGE INTO target_table t
+                USING (
+                    SELECT a.id
+                    FROM source_a a
+                    JOIN source_b b ON a.group_id = b.group_id
+                ) s
+                ON t.[on] = CASE WHEN s.id > 0 THEN s.id ELSE -1 END
+                WHEN MATCHED THEN UPDATE SET t.value = s.id
+            `;
+            const result = parseSql(sql, 'Snowflake' as SqlDialect);
+            const mergeNode = result.nodes.find((node: any) => node.label.startsWith('MERGE INTO'));
+
+            expect(mergeNode?.description).toContain('ON: t.[on] = CASE WHEN s.id > 0 THEN s.id ELSE -1 END');
+            expect(mergeNode?.description).not.toContain('ON: a.group_id = b.group_id');
+        });
+
         it('does not promote nested scalar-subquery tables to direct merge sources', () => {
             const sql = `
                 MERGE INTO target_table t

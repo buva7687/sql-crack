@@ -1125,6 +1125,32 @@ WHERE amount_1 > 0
       expect(result.validationError).toBeDefined();
       expect(result.validationError?.type).toBe('query_count_limit');
     });
+
+    it('preserves original line numbers when limiting the statement count', () => {
+      const sql = [
+        'SELECT * FROM first_table;',
+        '',
+        '-- retain this spacing and comment',
+        '',
+        'SELECT * FROM second_table;',
+        '',
+        '',
+        'SELECT * FROM omitted_table;',
+      ].join('\n');
+      const result = parseSqlBatch(sql, 'MySQL', {
+        maxSqlSizeBytes: 1024 * 1024,
+        maxQueryCount: 2,
+      });
+
+      expect(result.queries).toHaveLength(2);
+      expect(result.queryLineRanges).toEqual([
+        { startLine: 1, endLine: 1 },
+        { startLine: 3, endLine: 5 },
+      ]);
+      const secondTable = result.queries[1].nodes.find(node => node.label === 'second_table');
+      expect(secondTable?.startLine).toBe(5);
+      expect(result.queries.some(query => query.nodes.some(node => node.label === 'omitted_table'))).toBe(false);
+    });
   });
 
   describe('Fixture: edge-cases/parse-errors.sql', () => {

@@ -84,6 +84,15 @@ describe('Item #1: Regex-Based Partial Parser Fallback', () => {
             expect(result.partial).toBe(true);
             expect(result.nodes.length).toBeGreaterThan(0);
         });
+
+        it('uses the final top-level ON as the MERGE predicate', () => {
+            const sql = 'MERGE INTO target t USING source_a a JOIN source_b b ON a.id = b.id ON t.id = a.id WHEN MATCHED THEN UPDATE SET t.value = a.value';
+            const result = parseSql(sql, 'MySQL' as SqlDialect);
+            const mergeNode = result.nodes.find((node: any) => node.operationType === 'MERGE');
+
+            expect(mergeNode?.description).toContain('ON: t.id = a.id');
+            expect(mergeNode?.description).not.toContain('ON: a.id = b.id');
+        });
     });
 
     describe('Routine DDL Fallback', () => {
@@ -188,6 +197,22 @@ describe('Item #1: Regex-Based Partial Parser Fallback', () => {
 
             expect(result.partial).toBe(true);
             expect(result.stats.joins).toBeGreaterThanOrEqual(2);
+        });
+
+        it('does not count CTE-flow or MERGE-flow edges as JOINs', () => {
+            const cteResult = parseSql(
+                'WITH cte AS (SELECT * FROM source_table) SELECT * FROM cte WHERE :=: INVALID_SYNTAX',
+                'MySQL' as SqlDialect
+            );
+            const mergeResult = parseSql(
+                'MERGE INTO target USING source ON target.id = source.id WHEN MATCHED THEN UPDATE SET target.value = source.value',
+                'MySQL' as SqlDialect
+            );
+
+            expect(cteResult.edges.some((edge: any) => edge.clauseType === 'flow')).toBe(true);
+            expect(cteResult.stats.joins).toBe(0);
+            expect(mergeResult.edges.some((edge: any) => edge.clauseType === 'merge_source')).toBe(true);
+            expect(mergeResult.stats.joins).toBe(0);
         });
 
         it('should detect CTEs in stats', () => {

@@ -1,4 +1,4 @@
-import { EDGE_COLORS, UI_COLORS } from '../constants';
+import { EDGE_COLORS, UI_COLORS, getComponentUiColors } from '../constants';
 import { FlowNode, ViewState } from '../types';
 import { escapeRegex } from '../../shared';
 import { restoreNodeBorderState } from '../nodeBorderState';
@@ -62,7 +62,15 @@ export function selectNodeFeature(options: SelectNodeFeatureOptions): void {
             return;
         }
 
-        restoreNodeBorderState(rect as SVGRectElement);
+        if (group.classList.contains('search-match')) {
+            const searchStroke = state.isDarkTheme
+                ? EDGE_COLORS.highlight
+                : getComponentUiColors(state.isDarkTheme).accent;
+            rect.setAttribute('stroke', searchStroke);
+            rect.setAttribute('stroke-width', '2');
+        } else {
+            restoreNodeBorderState(rect as SVGRectElement);
+        }
         rect.setAttribute('filter', 'url(#shadow)');
     });
 

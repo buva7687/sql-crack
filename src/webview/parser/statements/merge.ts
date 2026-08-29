@@ -1,6 +1,7 @@
 import type { FlowEdge, FlowNode, ParseResult, QueryStats, SqlDialect } from '../../types';
 import { regexFallbackParse } from '../dialects/fallback';
 import { findMatchingParen, maskStringsAndComments } from '../dialects/preprocessing';
+import { extractMergeOnCondition } from '../mergeCondition';
 import { stripSqlComments } from '../../../shared/stringUtils';
 
 const MERGE_COMPATIBILITY_DIALECTS: SqlDialect[] = ['TransactSQL', 'Oracle', 'Snowflake', 'BigQuery', 'Teradata', 'PostgreSQL'];
@@ -85,14 +86,6 @@ function extractInsertColumns(sql: string): string[] {
         return [];
     }
     return insertMatch[1].split(',').map(column => column.trim()).filter(Boolean);
-}
-
-function extractOnCondition(sql: string): string | null {
-    const onMatch = sql.match(/\bON\s+([\s\S]+?)(?=\s*WHEN\b|$)/i);
-    if (!onMatch) {
-        return null;
-    }
-    return onMatch[1].trim().replace(/\s+/g, ' ');
 }
 
 function extractSourceTablesFromSubquery(sql: string): string[] {
@@ -242,7 +235,7 @@ export function tryParseCompatibleMergeStatement(sql: string, dialect: SqlDialec
     const whenClauses = extractWhenClauses(commentStripped);
     const updateCols = extractUpdateColumns(commentStripped);
     const insertCols = extractInsertColumns(commentStripped);
-    const onCondition = extractOnCondition(commentStripped);
+    const onCondition = extractMergeOnCondition(commentStripped);
 
     const result = regexFallbackParse(sql, dialect);
     const { message, suggestion } = buildCompatibilityHint(dialect);

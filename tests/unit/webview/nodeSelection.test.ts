@@ -12,6 +12,9 @@ type FakeRect = {
 type FakeNodeGroup = {
     querySelector: jest.Mock<FakeRect | null, [string]>;
     getAttribute: jest.Mock<string | null, [string]>;
+    classList: {
+        contains: jest.Mock<boolean, [string]>;
+    };
 };
 
 type FakeEdge = {
@@ -75,10 +78,13 @@ function createRect(): FakeRect {
     };
 }
 
-function createNodeGroup(id: string, rect: FakeRect): FakeNodeGroup {
+function createNodeGroup(id: string, rect: FakeRect, searchMatch = false): FakeNodeGroup {
     return {
         querySelector: jest.fn((selector: string) => (selector === '.node-rect' ? rect : null)),
         getAttribute: jest.fn((name: string) => (name === 'data-id' ? id : null)),
+        classList: {
+            contains: jest.fn((className: string) => className === 'search-match' && searchMatch),
+        },
     };
 }
 
@@ -174,6 +180,38 @@ describe('nodeSelection', () => {
         expect(edgeA.setAttribute).toHaveBeenCalledWith('stroke-width', '2');
         expect(edgeA.setAttribute).toHaveBeenCalledWith('marker-end', 'url(#arrowhead)');
         expect(edgeB.setAttribute).toHaveBeenCalledWith('stroke', EDGE_COLORS.default);
+    });
+
+    it('preserves every search-match border when navigating between results', () => {
+        const selectedRect = createRect();
+        const previousMatchRect = createRect();
+        const otherMatchRect = createRect();
+        const groups = [
+            createNodeGroup('current', selectedRect, true),
+            createNodeGroup('previous', previousMatchRect, true),
+            createNodeGroup('other', otherMatchRect, true),
+        ];
+        const mainGroup = {
+            querySelectorAll: jest.fn((selector: string) => selector === '.node' ? groups : []),
+        };
+
+        selectNodeFeature({
+            nodeId: 'current',
+            state: createState({ searchTerm: 'order', searchResults: ['current', 'previous', 'other'] }),
+            mainGroup: mainGroup as any,
+            currentNodes: [],
+            currentSql: '',
+            highlightConnectedEdges: jest.fn(),
+            onUpdateDetailsPanel: jest.fn(),
+            onUpdateBreadcrumb: jest.fn(),
+        });
+
+        expect(selectedRect.setAttribute).toHaveBeenCalledWith('stroke', UI_COLORS.white);
+        expect(previousMatchRect.setAttribute).toHaveBeenCalledWith('stroke', EDGE_COLORS.highlight);
+        expect(previousMatchRect.setAttribute).toHaveBeenCalledWith('stroke-width', '2');
+        expect(otherMatchRect.setAttribute).toHaveBeenCalledWith('stroke', EDGE_COLORS.highlight);
+        expect(previousMatchRect.removeAttribute).not.toHaveBeenCalledWith('stroke');
+        expect(otherMatchRect.removeAttribute).not.toHaveBeenCalledWith('stroke');
     });
 
     it('finds nested nodes for navigation and falls back to SQL line lookup for tables', () => {

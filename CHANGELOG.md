@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Comment- and literal-safe analysis**: Duplicate-subquery detection ignores SQL-looking text in comments and literals, MySQL glued hash comments no longer create fallback JOIN tables, and workspace statement scoping handles dollar-quoted strings and bracketed identifiers containing semicolons.
 - **Workspace dialect and identifier handling**: An open workspace panel rebuilds its index when the configured/requested dialect changes; SQL Server `database..table` definitions retain the database and table identity; UPDATE fallback alias scanning is statement-bounded and no longer matches `UPDATE` inside identifiers.
 - **Projection and error readability**: Wide SELECT cards report the complete projected-column count even when labels are capped, and error guidance uses light/dark theme text tokens.
+- **Release-audit edge cases**: SQL Flow search navigation preserves every match border, MERGE predicates are isolated from `JOIN ... ON` clauses inside `USING`, fallback JOIN statistics exclude CTE/MERGE flow edges, query-count truncation retains original source lines, and workspace extraction rejects T-SQL `SELECT ... INTO @variable` pseudo-definitions.
 
 ### Performance
 
@@ -24,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Tests
 
-- Added regression coverage for workspace query analysis/index batching, compare/fullscreen keyboard handling, interaction-state preservation, original SQL line locations, comment/literal masking, SQL Server omitted-schema names, dollar-quoted CTE scope, UPDATE identifier boundaries, wide projections, fallback hash comments, themed errors, cloud fitting, and cached lineage traversal.
+- Added regression coverage for workspace query analysis/index batching, compare/fullscreen keyboard handling, interaction-state preservation, original SQL line locations, comment/literal masking, SQL Server omitted-schema names, dollar-quoted CTE scope, UPDATE identifier boundaries, wide projections, fallback hash comments, themed errors, cloud fitting, cached lineage traversal, search-match selection, nested-source MERGE predicates, fallback JOIN statistics, query-limit line mapping, and T-SQL `INTO` variables.
 
 ## [0.9.2] - 2026-08-19
 

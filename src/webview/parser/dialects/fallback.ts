@@ -7,6 +7,7 @@ import type {
     SqlDialect
 } from '../../types';
 import { findMatchingParen } from './preprocessing';
+import { extractMergeOnCondition } from '../mergeCondition';
 import { stripSqlComments } from '../../../shared';
 
 interface RoutineDdlInfo {
@@ -298,8 +299,7 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
             const sourceTable = normalizeObjectName(mergeSourceMatch[1]);
 
             // Extract ON condition
-            const onMatch = commentStripped.match(/\bON\s+(.+?)(?=\s*WHEN\b)/is);
-            const onCondition = onMatch ? onMatch[1].trim().replace(/\s+/g, ' ') : '';
+            const onCondition = extractMergeOnCondition(commentStripped);
 
             // Extract UPDATE SET columns
             const updateCols: string[] = [];
@@ -324,6 +324,7 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
             for (const w of whenClauses) {
                 descParts.push(`${w.type} → ${w.action}`);
             }
+            if (onCondition) { descParts.push(`ON: ${onCondition}`); }
             if (updateCols.length > 0) { descParts.push(`SET: ${updateCols.join(', ')}`); }
             if (insertCols.length > 0) { descParts.push(`INSERT: ${insertCols.join(', ')}`); }
             const description = descParts.join(' | ');
@@ -405,9 +406,10 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
     else if (upperSql.startsWith('ALTER')) { statementType = 'ALTER'; }
     else if (upperSql.startsWith('DROP')) { statementType = 'DROP'; }
 
+    const joinCount = edges.filter(edge => edge.clauseType === 'join').length;
     const stats: QueryStats = {
         tables: tableNames.size,
-        joins: edges.length,
+        joins: joinCount,
         subqueries: (commentStripped.match(/\(\s*SELECT\b/gi) || []).length,
         ctes: cteNames.size,
         aggregations: (commentStripped.match(/\b(COUNT|SUM|AVG|MIN|MAX|GROUP_CONCAT)\b/gi) || []).length,
@@ -415,7 +417,7 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
         unions: (commentStripped.match(/\bUNION\b/gi) || []).length,
         conditions: (commentStripped.match(/\bWHERE\b/gi) || []).length + (commentStripped.match(/\bHAVING\b/gi) || []).length,
         complexity: 'Simple',
-        complexityScore: tableNames.size * 1 + edges.length * 3,
+        complexityScore: tableNames.size * 1 + joinCount * 3,
     };
 
     if (stats.complexityScore >= 30) { stats.complexity = 'Very Complex'; }

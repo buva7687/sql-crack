@@ -490,6 +490,28 @@ describe('SchemaExtractor.extractDefinitions', () => {
 
             expect(defs).toEqual([]);
         });
+
+        it('does not treat a T-SQL SELECT INTO variable as a table definition', () => {
+            const defs = extractor.extractDefinitions(
+                'SELECT COUNT(*) INTO @row_count FROM dbo.users;',
+                '/sql/select-into-variable.sql',
+                'TransactSQL'
+            );
+
+            expect(defs).toEqual([]);
+        });
+
+        it('retains a quoted T-SQL table whose name starts with an at sign', () => {
+            const defs = extractor.extractDefinitions(
+                'SELECT id INTO [@audit_table] FROM dbo.users;',
+                '/sql/select-into-quoted-at-table.sql',
+                'TransactSQL'
+            );
+
+            expect(defs).toEqual([
+                expect.objectContaining({ name: '@audit_table', nameQuoted: true }),
+            ]);
+        });
     });
 
     describe('edge cases', () => {

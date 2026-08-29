@@ -326,6 +326,16 @@ export function parseSqlBatch(
     limits: ValidationLimits = DEFAULT_VALIDATION_LIMITS,
     options: BatchParseOptions = {}
 ): BatchParseResult {
+    return parseSqlBatchInternal(sql, dialect, limits, options);
+}
+
+function parseSqlBatchInternal(
+    sql: string,
+    dialect: SqlDialect,
+    limits: ValidationLimits,
+    options: BatchParseOptions,
+    statementLimit?: number
+): BatchParseResult {
     // Validate SQL before parsing
     const validationError = validateSql(sql, limits);
     if (validationError) {
@@ -347,7 +357,12 @@ export function parseSqlBatch(
             const encoded = encoder.encode(sql);
             const truncatedSql = decoder.decode(encoded.slice(0, limits.maxSqlSizeBytes));
             // Recursively parse with infinite limit to avoid double-validation
-            const partialResult = parseSqlBatch(truncatedSql, dialect, { ...limits, maxSqlSizeBytes: Infinity }, options);
+            const partialResult = parseSqlBatchInternal(
+                truncatedSql,
+                dialect,
+                { ...limits, maxSqlSizeBytes: Infinity },
+                options
+            );
             // Add truncation warning
             partialResult.queries.forEach(q => {
                 q.hints.push({
@@ -364,11 +379,16 @@ export function parseSqlBatch(
         
         // For query count limits, parse first N statements
         if (validationError.type === 'query_count_limit') {
-            const allStatements = splitSqlStatements(sql);
-            const truncatedStatements = allStatements.slice(0, limits.maxQueryCount);
-            const truncatedSql = truncatedStatements.join(';\n');
-            // Recursively parse with infinite limit
-            const partialResult = parseSqlBatch(truncatedSql, dialect, { ...limits, maxQueryCount: Infinity }, options);
+            // Keep the original SQL intact so statement and node line numbers
+            // remain anchored to the source file. The internal limit controls
+            // iteration without rebuilding statements from trimmed fragments.
+            const partialResult = parseSqlBatchInternal(
+                sql,
+                dialect,
+                { ...limits, maxQueryCount: Infinity },
+                options,
+                limits.maxQueryCount
+            );
             // Add truncation warning
             partialResult.queries.forEach(q => {
                 q.hints.push({
@@ -400,7 +420,10 @@ export function parseSqlBatch(
         };
     }
 
-    const statements = splitSqlStatementsForDialect(sql, dialect);
+    const allStatements = splitSqlStatementsForDialect(sql, dialect);
+    const statements = statementLimit === undefined
+        ? allStatements
+        : allStatements.slice(0, statementLimit);
     const queries: ParseResult[] = [];
     const queryLineRanges: Array<{ startLine: number; endLine: number }> = [];
 
