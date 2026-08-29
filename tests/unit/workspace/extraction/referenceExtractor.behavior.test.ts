@@ -405,6 +405,72 @@ describe('ReferenceExtractor behavioral coverage', () => {
         ]);
     });
 
+    it('builds nested CTE query analysis from the wrapped SELECT AST', () => {
+        const result = extractor.extractReferencesWithStatus(
+            'WITH c AS (SELECT UPPER(name) AS uname FROM source) SELECT uname FROM c;',
+            'cte-analysis.sql',
+            'MySQL'
+        );
+        const cteQuery = result.queries[0].ctes[0].query;
+
+        expect(cteQuery.statementType).toBe('select');
+        expect(cteQuery.inputTables).toEqual([
+            expect.objectContaining({ tableName: 'source' }),
+        ]);
+        expect(cteQuery.outputColumns.map(column => column.name)).toEqual(['uname']);
+        expect(cteQuery.transformations).toEqual([
+            expect.objectContaining({
+                outputColumn: 'uname',
+                inputColumns: [expect.objectContaining({ tableName: 'source', columnName: 'name' })],
+            }),
+        ]);
+    });
+
+    it('aligns INSERT output columns with explicit target columns', () => {
+        const result = extractor.extractReferencesWithStatus(
+            'INSERT INTO tgt (a, b) SELECT UPPER(x), SUM(y) FROM src;',
+            'insert-analysis.sql',
+            'MySQL'
+        );
+        const query = result.queries[0];
+
+        expect(query.outputColumns.map(column => column.name)).toEqual(['a', 'b']);
+        expect(query.transformations.map(transform => transform.outputColumn)).toEqual(['a', 'b']);
+        expect(query.outputColumns.map(column => column.expression)).toEqual(
+            query.transformations.map(transform => transform.expression)
+        );
+    });
+
+    it('keeps later PostgreSQL fallback statements separate after an unbalanced array bracket', () => {
+        const result = extractor.extractReferencesWithStatus(
+            'SELECT arr[1 FROM first_table; SELECT * FROM second_table;',
+            'broken-array.sql',
+            'PostgreSQL'
+        );
+
+        expect(result.warnings).toHaveLength(1);
+        expect(result.references).toEqual(expect.arrayContaining([
+            expect.objectContaining({ tableName: 'first_table', statementIndex: 0 }),
+            expect.objectContaining({ tableName: 'second_table', statementIndex: 1 }),
+        ]));
+    });
+
+    it('still treats semicolons inside T-SQL bracketed identifiers as quoted content', () => {
+        jest.spyOn((extractor as any).parser, 'astify').mockImplementation(() => {
+            throw new Error('force regex fallback');
+        });
+        const refs = extractor.extractReferences(
+            'SELECT * FROM [odd;table]; SELECT * FROM second_table;',
+            'bracketed-table.sql',
+            'TransactSQL'
+        );
+
+        expect(refs).toEqual(expect.arrayContaining([
+            expect.objectContaining({ tableName: 'odd;table', statementIndex: 0 }),
+            expect.objectContaining({ tableName: 'second_table', statementIndex: 1 }),
+        ]));
+    });
+
     it('keeps JOIN condition subquery references in the owning statement', () => {
         const refs = extractor.extractReferences(
             [

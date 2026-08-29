@@ -8,7 +8,7 @@ import {
     FileAnalysis,
     TableReference
 } from '../types';
-import { ColumnInfo } from '../extraction/types';
+import { ColumnInfo, QueryAnalysis } from '../extraction/types';
 import { getColumnKey, getDisplayName, getQualifiedKey, parseQualifiedKey } from '../identifiers';
 import { getDollarQuotedTokenEnd } from '../../shared/stringUtils';
 import {
@@ -291,23 +291,27 @@ export class LineageBuilder implements LineageGraph {
         // CTEs are referenced in queries but we need to find their definitions
         // We'll use the ReferenceExtractor to parse files and extract CTE definitions
         const cteNames = new Map<string, { name: string; filePath: string; lineNumber: number }>();
+        const collectQueryCtes = (query: QueryAnalysis, filePath: string): void => {
+            for (const cte of query.ctes || []) {
+                const cteKey = cte.name.toLowerCase();
+                if (!cteNames.has(cteKey)) {
+                    cteNames.set(cteKey, {
+                        name: cte.name,
+                        filePath,
+                        lineNumber: cte.lineNumber,
+                    });
+                }
+                if (cte.query) {
+                    collectQueryCtes(cte.query, filePath);
+                }
+            }
+        };
         
         // Extract CTEs from query analysis (if available)
         for (const [filePath, analysis] of index.files) {
             if (analysis.queries) {
                 for (const query of analysis.queries) {
-                    if (query.ctes) {
-                        for (const cte of query.ctes) {
-                            const cteKey = cte.name.toLowerCase();
-                            if (!cteNames.has(cteKey)) {
-                                cteNames.set(cteKey, {
-                                    name: cte.name,
-                                    filePath: filePath,
-                                    lineNumber: cte.lineNumber
-                                });
-                            }
-                        }
-                    }
+                    collectQueryCtes(query, filePath);
                 }
             }
         }
@@ -705,48 +709,69 @@ export class LineageBuilder implements LineageGraph {
 
         for (let queryIndex = 0; queryIndex < analysis.queries.length; queryIndex++) {
             const query = analysis.queries[queryIndex];
+            this.addCteColumnEdges(filePath, query);
             if (!query.transformations || query.transformations.length === 0) {continue;}
 
             // Resolve target table for this query
             const targetTableId = this.resolveTargetTableId(query, queryIndex, analysis, filePath);
             if (!targetTableId) {continue;}
 
-            for (const transform of query.transformations) {
-                // Skip if no input columns (literal values)
-                if (!transform.inputColumns || transform.inputColumns.length === 0) {continue;}
+            this.addQueryColumnEdges(filePath, query, targetTableId);
+        }
+    }
 
-                // For each input column, create a column edge
-                for (const inputCol of transform.inputColumns) {
-                    // Resolve source table
-                    const sourceTableId = this.resolveTableId(
-                        inputCol.tableName || inputCol.tableAlias,
-                        filePath
-                    );
+    private addCteColumnEdges(filePath: string, query: QueryAnalysis): void {
+        for (const cte of query.ctes || []) {
+            const targetTableId = this.resolveTableId(cte.name, filePath);
+            if (targetTableId && cte.query) {
+                this.addQueryColumnEdges(filePath, cte.query, targetTableId);
+            }
+            if (cte.query) {
+                this.addCteColumnEdges(filePath, cte.query);
+            }
+        }
+    }
 
-                    if (!sourceTableId) {continue;} // Skip if source table not found
+    private addQueryColumnEdges(
+        filePath: string,
+        query: QueryAnalysis,
+        targetTableId: string
+    ): void {
+        for (const transform of query.transformations || []) {
+            // Skip if no input columns (literal values)
+            if (!transform.inputColumns || transform.inputColumns.length === 0) {continue;}
 
-                    // Create column edge
-                    const columnEdge: ColumnLineageEdge = {
-                        id: `${sourceTableId}.${inputCol.columnName}->${targetTableId}.${transform.outputColumn}`,
-                        sourceTableId,
-                        sourceColumnName: inputCol.columnName,
-                        targetTableId,
-                        targetColumnName: transform.outputColumn,
-                        sourceColumnId: this.resolveColumnNodeId(sourceTableId, inputCol.columnName),
-                        targetColumnId: this.resolveColumnNodeId(targetTableId, transform.outputColumn),
-                        transformationType: this.mapTransformationType(transform.operation),
-                        expression: transform.expression,
-                        filePath,
-                        lineNumber: transform.lineNumber || 0,
-                        metadata: {
-                            outputAlias: transform.outputAlias
-                        }
-                    };
+            // For each input column, create a column edge
+            for (const inputCol of transform.inputColumns) {
+                // Resolve source table
+                const sourceTableId = this.resolveTableId(
+                    inputCol.tableName || inputCol.tableAlias,
+                    filePath
+                );
 
-                    if (!this.columnEdgeIds.has(columnEdge.id)) {
-                        this.columnEdgeIds.add(columnEdge.id);
-                        this.columnEdges.push(columnEdge);
+                if (!sourceTableId) {continue;} // Skip if source table not found
+
+                // Create column edge
+                const columnEdge: ColumnLineageEdge = {
+                    id: `${sourceTableId}.${inputCol.columnName}->${targetTableId}.${transform.outputColumn}`,
+                    sourceTableId,
+                    sourceColumnName: inputCol.columnName,
+                    targetTableId,
+                    targetColumnName: transform.outputColumn,
+                    sourceColumnId: this.resolveColumnNodeId(sourceTableId, inputCol.columnName),
+                    targetColumnId: this.resolveColumnNodeId(targetTableId, transform.outputColumn),
+                    transformationType: this.mapTransformationType(transform.operation),
+                    expression: transform.expression,
+                    filePath,
+                    lineNumber: transform.lineNumber || 0,
+                    metadata: {
+                        outputAlias: transform.outputAlias
                     }
+                };
+
+                if (!this.columnEdgeIds.has(columnEdge.id)) {
+                    this.columnEdgeIds.add(columnEdge.id);
+                    this.columnEdges.push(columnEdge);
                 }
             }
         }
@@ -839,15 +864,7 @@ export class LineageBuilder implements LineageGraph {
             return this.resolveDefinitionTargetId(query, queryIndex, analysis, filePath, 'table');
         }
 
-        // 5. For CTEs, check if this query is a CTE definition
-        if (query.ctes && query.ctes.length > 0) {
-            // The main query's output might flow into a later CTE or main query
-            // For now, use the first CTE as the target
-            const cteName = query.ctes[0].name;
-            return this.resolveTableId(cteName, filePath);
-        }
-
-        // 6. Try to find target from statement-level references
+        // 5. Try to find target from statement-level references
         for (const ref of analysis.references) {
             if ((ref.referenceType === 'insert' ||
                  ref.referenceType === 'update' ||
@@ -859,15 +876,21 @@ export class LineageBuilder implements LineageGraph {
             }
         }
 
-        // 7. Fallback: If this file has exactly one definition and this is a data modification query
-        if (analysis.definitions.length === 1) {
-            const def = analysis.definitions[0];
+        // 6. A materializing SELECT (for example SELECT INTO) can have a
+        // definition even though its query type is SELECT. Match by statement
+        // identity so an unrelated definition elsewhere in the file cannot
+        // become the target of an ordinary SELECT.
+        const statementDefinitions = analysis.definitions.filter(definition =>
+            definition.statementIndex === statementIndex
+        );
+        if (statementDefinitions.length === 1) {
+            const def = statementDefinitions[0];
             const tableKey = getDefinitionKey(def);
             const resolved = this.resolveTableId(tableKey, filePath);
             if (resolved) {return resolved;}
         }
 
-        // 8. Fallback: Check for SELECT INTO or INSERT patterns in SQL
+        // 7. Fallback: Check for SELECT INTO or INSERT patterns in SQL
         if (query.sql) {
             const sql = maskSqlCommentsPreservingPositions(query.sql);
             const identitySource = analysis.definitions.find(def => def.identifierCaseFolding)

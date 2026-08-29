@@ -169,6 +169,38 @@ describe('LineageBuilder', () => {
             ]));
         });
 
+        it('targets CTE transformations without assigning the outer SELECT to the first CTE', () => {
+            const sql = [
+                'CREATE TABLE source (name TEXT);',
+                'WITH c AS (SELECT UPPER(name) AS uname FROM source)',
+                'SELECT uname FROM c;',
+            ].join('\n');
+            const filePath = 'cte-pipeline.sql';
+            const definitions = new SchemaExtractor().extractDefinitions(sql, filePath, 'MySQL');
+            const extraction = new ReferenceExtractor().extractReferencesWithStatus(sql, filePath, 'MySQL');
+            const analysis = makeFileAnalysis(filePath, definitions, extraction.references, extraction.queries);
+            const builder = new LineageBuilder({ includeExternal: true, includeColumns: true });
+
+            builder.buildFromIndex(makeIndex(definitions, new Map([[filePath, analysis]])));
+
+            expect(builder.columnEdges).toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    sourceTableId: 'table:source',
+                    sourceColumnName: 'name',
+                    targetTableId: 'cte:c',
+                    targetColumnName: 'uname',
+                }),
+            ]));
+            expect(builder.columnEdges).not.toEqual(expect.arrayContaining([
+                expect.objectContaining({
+                    sourceTableId: 'table:source',
+                    sourceColumnName: 'uname',
+                    targetTableId: 'cte:c',
+                }),
+            ]));
+            expect(builder.columnEdges.some(edge => edge.targetTableId === 'table:source')).toBe(false);
+        });
+
         it('preserves quoted case and catalog-schema relation identities', () => {
             const definitions = [
                 makeDef('Users', 'table', [], { nameQuoted: true }),

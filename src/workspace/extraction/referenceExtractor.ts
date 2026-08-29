@@ -109,6 +109,11 @@ export class ReferenceExtractor {
         return Array.isArray(stmt.with) ? stmt.with : [stmt.with];
     }
 
+    private getCteStatement(cte: AstCTE): AstStatement | null {
+        return (cte.stmt?.ast || cte.stmt || cte.ast
+            || cte.definition?.ast || cte.definition || null) as AstStatement | null;
+    }
+
     /**
      * Check if a name is a SQL reserved word (dialect-scoped for Teradata-only keywords)
      */
@@ -312,7 +317,7 @@ export class ReferenceExtractor {
         statementReferences: TableReference[]
     ): QueryAnalysis {
         const selectStatement = this.getAnalysisSelectStatement(statement);
-        const inputTables = statementReferences.filter(reference =>
+        const allInputTables = statementReferences.filter(reference =>
             reference.referenceType !== 'insert'
             && reference.referenceType !== 'update'
             && reference.referenceType !== 'delete'
@@ -324,6 +329,16 @@ export class ReferenceExtractor {
         );
         const queryLineNumber = lineNumber === Number.MAX_SAFE_INTEGER ? 1 : lineNumber;
         const tableAliases = this.columnExtractor.buildAliasMap(selectStatement || statement);
+        const directSourceTableNames = [...new Set(
+            [...tableAliases.values()]
+                .filter((name): name is string => typeof name === 'string' && name.length > 0)
+        )];
+        const scopedInputTables = directSourceTableNames.length > 0
+            ? allInputTables.filter(reference => directSourceTableNames.some(name =>
+                name.toLowerCase() === reference.tableName.toLowerCase()
+            ))
+            : allInputTables;
+        const inputTables = scopedInputTables.length > 0 ? scopedInputTables : allInputTables;
 
         let outputColumns: ColumnInfo[] = selectStatement
             ? this.columnExtractor.extractSelectColumns(selectStatement, tableAliases)
@@ -333,7 +348,9 @@ export class ReferenceExtractor {
             : this.extractUpdateTransformations(statement, tableAliases, queryLineNumber);
 
         const sourceTableNames = new Set(inputTables.map(reference => reference.tableName).filter(Boolean));
-        const soleSourceTable = sourceTableNames.size === 1 ? [...sourceTableNames][0] : undefined;
+        const soleSourceTable = directSourceTableNames.length === 1
+            ? directSourceTableNames[0]
+            : (sourceTableNames.size === 1 ? [...sourceTableNames][0] : undefined);
         transformations = transformations.map((transformation, index) => {
             const inputColumns = transformation.inputColumns.map(column => ({
                 ...column,
@@ -348,7 +365,23 @@ export class ReferenceExtractor {
             };
         });
 
-        if (outputColumns.length === 0 && transformations.length > 0) {
+        const targetColumnNames = this.getTargetColumnNames(statement);
+        if (targetColumnNames.length > 0) {
+            outputColumns = targetColumnNames.map((name, index) => {
+                const transformation = transformations[index];
+                return {
+                    name,
+                    dataType: 'unknown',
+                    nullable: true,
+                    primaryKey: false,
+                    ...(transformation ? {
+                        expression: transformation.expression,
+                        isComputed: transformation.operation !== 'direct',
+                        lineNumber: transformation.lineNumber,
+                    } : {}),
+                };
+            });
+        } else if (outputColumns.length === 0 && transformations.length > 0) {
             outputColumns = transformations.map(transformation => ({
                 name: transformation.outputColumn,
                 dataType: 'unknown',
@@ -368,19 +401,22 @@ export class ReferenceExtractor {
         );
 
         const cteSource = selectStatement || statement;
-        const ctes = this.getWithClauses(cteSource).map(cte => {
-            const cteStatement = cte.stmt as AstStatement;
+        const ctes = this.getWithClauses(cteSource).flatMap(cte => {
+            const cteStatement = this.getCteStatement(cte);
+            if (!cteStatement) {
+                return [];
+            }
             const name = this.getCTENameString(cte.name) || 'cte';
             const columns = Array.isArray(cte.columns)
                 ? cte.columns.map(column => unwrapIdentifierValue(column)).filter((column): column is string => Boolean(column))
                 : undefined;
-            return {
+            return [{
                 name,
                 ...(columns && columns.length > 0 ? { columns } : {}),
                 query: this.buildQueryAnalysis(cteStatement, statementIndex, statementReferences),
                 isRecursive: Boolean((cte as any).recursive || (cteSource as any).recursive),
                 lineNumber: queryLineNumber,
-            };
+            }];
         });
 
         return {
@@ -448,18 +484,23 @@ export class ReferenceExtractor {
         statement: AstStatement,
         columnIndex: number
     ): Pick<Transformation, 'outputColumn' | 'outputAlias'> | Record<string, never> {
+        const targetColumn = this.getTargetColumnNames(statement)[columnIndex];
+        return targetColumn
+            ? { outputColumn: targetColumn, outputAlias: targetColumn }
+            : {};
+    }
+
+    private getTargetColumnNames(statement: AstStatement): string[] {
         const statementType = statement?.type?.toLowerCase();
         const isInsert = statementType === 'insert';
         const isCreateView = statementType === 'create'
             && String(statement.keyword || '').toLowerCase() === 'view';
         if ((!isInsert && !isCreateView) || !Array.isArray(statement.columns)) {
-            return {};
+            return [];
         }
-        const targetColumn = unwrapIdentifierValue(statement.columns[columnIndex]);
-        if (!targetColumn) {
-            return {};
-        }
-        return { outputColumn: targetColumn, outputAlias: targetColumn };
+        return statement.columns
+            .map(column => unwrapIdentifierValue(column))
+            .filter((column): column is string => Boolean(column));
     }
 
     private extractUpdateTransformations(
@@ -713,8 +754,7 @@ export class ReferenceExtractor {
                 }
 
                 // Extract references from CTE definition
-                const cteStmt = cte.stmt?.ast || cte.stmt || cte.ast ||
-                    cte.definition?.ast || cte.definition;
+                const cteStmt = this.getCteStatement(cte);
                 if (cteStmt) {
                     const cteAliasMap = this.createCteDefinitionAliasMap(aliasMap, cte.name);
                     this.extractFromStatement(
@@ -741,8 +781,7 @@ export class ReferenceExtractor {
                         this.addCTEName(aliasMap.cteNames, cte.name);
                     }
 
-                    const cteStmt = cte.stmt?.ast || cte.stmt || cte.ast ||
-                        cte.definition?.ast || cte.definition;
+                    const cteStmt = this.getCteStatement(cte);
                     if (cteStmt) {
                         const cteAliasMap = this.createCteDefinitionAliasMap(aliasMap, cte.name);
                         this.extractFromStatement(
@@ -833,8 +872,7 @@ export class ReferenceExtractor {
                 }
 
                 // Extract references from CTE definition
-                const cteStmt = cte.stmt?.ast || cte.stmt || cte.ast ||
-                    cte.definition?.ast || cte.definition;
+                const cteStmt = this.getCteStatement(cte);
                 if (cteStmt) {
                     const cteAliasMap = this.createCteDefinitionAliasMap(aliasMap, cte.name);
                     this.extractFromStatement(
@@ -957,8 +995,7 @@ export class ReferenceExtractor {
                 }
 
                 // Extract references from CTE definition
-                const cteStmt = cte.stmt?.ast || cte.stmt || cte.ast ||
-                    cte.definition?.ast || cte.definition;
+                const cteStmt = this.getCteStatement(cte);
                 if (cteStmt) {
                     const cteAliasMap = this.createCteDefinitionAliasMap(aliasMap, cte.name);
                     this.extractFromStatement(
@@ -1072,8 +1109,7 @@ export class ReferenceExtractor {
                 }
 
                 // Extract references from CTE definition
-                const cteStmt = cte.stmt?.ast || cte.stmt || cte.ast ||
-                    cte.definition?.ast || cte.definition;
+                const cteStmt = this.getCteStatement(cte);
                 if (cteStmt) {
                     const cteAliasMap = this.createCteDefinitionAliasMap(aliasMap, cte.name);
                     this.extractFromStatement(
@@ -1471,6 +1507,7 @@ export class ReferenceExtractor {
         let inString = false;
         let stringChar = '';
         let inBracketIdentifier = false;
+        const supportsBracketIdentifiers = this.supportsBracketIdentifiers();
 
         for (let index = 0; index < sql.length; index++) {
             const char = sql[index];
@@ -1482,7 +1519,7 @@ export class ReferenceExtractor {
                     continue;
                 }
             }
-            if (!inString && char === '[') {
+            if (supportsBracketIdentifiers && !inString && char === '[') {
                 inBracketIdentifier = true;
                 continue;
             }
@@ -1513,6 +1550,10 @@ export class ReferenceExtractor {
         }
 
         return boundaries;
+    }
+
+    private supportsBracketIdentifiers(): boolean {
+        return this._activeDialect === 'TransactSQL' || this._activeDialect === 'SQLite';
     }
 
     private getStatementIndex(boundaries: number[], charIndex: number): number {
@@ -1636,10 +1677,11 @@ export class ReferenceExtractor {
     private isTopLevelFromListPosition(sql: string, statementStart: number, position: number): boolean {
         let depth = 0;
         let fromListActive = false;
+        const supportsBracketIdentifiers = this.supportsBracketIdentifiers();
 
         for (let index = statementStart; index < position;) {
             const char = sql[index];
-            if (char === '"' || char === '`' || char === '[') {
+            if (char === '"' || char === '`' || (supportsBracketIdentifiers && char === '[')) {
                 const closing = char === '[' ? ']' : char;
                 index++;
                 while (index < position) {
@@ -1821,10 +1863,11 @@ export class ReferenceExtractor {
             const statementIndex = getStatementIndex(charIndex);
             const statementStart = statementBoundaries[statementIndex] ?? 0;
             let depth = 0;
+            const supportsBracketIdentifiers = this.supportsBracketIdentifiers();
 
             for (let index = statementStart; index < charIndex;) {
                 const char = sqlNoComments[index];
-                if (char === '"' || char === '`' || char === '[') {
+                if (char === '"' || char === '`' || (supportsBracketIdentifiers && char === '[')) {
                     const closingQuote = char === '[' ? ']' : char;
                     index++;
                     while (index < charIndex) {
