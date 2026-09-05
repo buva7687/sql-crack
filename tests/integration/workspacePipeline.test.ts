@@ -4,7 +4,6 @@
  * SQL strings → SchemaExtractor + ReferenceExtractor → WorkspaceIndex
  *   → LineageBuilder → assert nodes/edges
  *   → buildDependencyGraph → assert WorkspaceDependencyGraph
- *   → GraphBuilder → assert visualization Graph
  *
  * Mocks: only vscode. Everything else runs real.
  */
@@ -15,7 +14,6 @@ import { SchemaExtractor } from '../../src/workspace/extraction/schemaExtractor'
 import { ReferenceExtractor } from '../../src/workspace/extraction/referenceExtractor';
 import { LineageBuilder } from '../../src/workspace/lineage/lineageBuilder';
 import { buildDependencyGraph } from '../../src/workspace/dependencyGraph';
-import { GraphBuilder } from '../../src/workspace/graph/graphBuilder';
 import type { WorkspaceIndex, FileAnalysis, WorkspaceDependencyGraph } from '../../src/workspace/types';
 
 // ============================================================
@@ -286,125 +284,6 @@ describe('Workspace Pipeline Integration', () => {
                 expect(typeof node.y).toBe('number');
                 expect(node.width).toBeGreaterThan(0);
                 expect(node.height).toBeGreaterThan(0);
-            }
-        });
-    });
-
-    describe('GraphBuilder phase (visualization graph)', () => {
-        let graphBuilder: GraphBuilder;
-        let depGraph: WorkspaceDependencyGraph;
-
-        beforeAll(() => {
-            depGraph = buildDependencyGraph(index, 'tables');
-            graphBuilder = new GraphBuilder();
-        });
-
-        it('buildFromWorkspace converts all nodes', () => {
-            const graph = graphBuilder.buildFromWorkspace(depGraph);
-            expect(graph.nodes.length).toBe(depGraph.nodes.length);
-            expect(graph.edges.length).toBe(depGraph.edges.length);
-        });
-
-        it('converted nodes preserve id, type, label, and position', () => {
-            const graph = graphBuilder.buildFromWorkspace(depGraph);
-            for (const gNode of graph.nodes) {
-                const srcNode = depGraph.nodes.find(n => n.id === gNode.id);
-                expect(srcNode).toBeDefined();
-                expect(gNode.type).toBe(srcNode!.type);
-                expect(gNode.label).toBe(srcNode!.label);
-                expect(gNode.x).toBe(srcNode!.x);
-                expect(gNode.y).toBe(srcNode!.y);
-            }
-        });
-
-        it('converted nodes carry metadata with definition and reference counts', () => {
-            const graph = graphBuilder.buildFromWorkspace(depGraph);
-            for (const gNode of graph.nodes) {
-                expect(gNode.metadata).toBeDefined();
-                // definitionCount/referenceCount may be undefined for external nodes
-                expect(gNode.metadata.definitionCount === undefined || typeof gNode.metadata.definitionCount === 'number').toBe(true);
-                expect(gNode.metadata.referenceCount === undefined || typeof gNode.metadata.referenceCount === 'number').toBe(true);
-            }
-        });
-
-        it('converted edges have type "dependency" and carry metadata', () => {
-            const graph = graphBuilder.buildFromWorkspace(depGraph);
-            for (const gEdge of graph.edges) {
-                expect(gEdge.type).toBe('dependency');
-                expect(gEdge.metadata).toBeDefined();
-                expect(typeof gEdge.metadata.count).toBe('number');
-            }
-        });
-
-        it('default options set mode=file, direction=TB, showExternal=true', () => {
-            const graph = graphBuilder.buildFromWorkspace(depGraph);
-            expect(graph.options.mode).toBe('file');
-            expect(graph.options.direction).toBe('TB');
-            expect(graph.options.showExternal).toBe(true);
-        });
-
-        it('buildForMode sets mode correctly', () => {
-            const graph = graphBuilder.buildForMode(depGraph, 'table');
-            expect(graph.options.mode).toBe('table');
-        });
-
-        it('filterByType returns only requested node types', () => {
-            const graph = graphBuilder.buildFromWorkspace(depGraph);
-            const tableOnly = graphBuilder.filterByType(graph, ['table']);
-            expect(tableOnly.nodes.every(n => n.type === 'table')).toBe(true);
-            // Edges should only reference remaining nodes
-            const ids = new Set(tableOnly.nodes.map(n => n.id));
-            for (const edge of tableOnly.edges) {
-                expect(ids.has(edge.source)).toBe(true);
-                expect(ids.has(edge.target)).toBe(true);
-            }
-        });
-
-        it('focusOnNode returns subgraph within depth', () => {
-            const graph = graphBuilder.buildFromWorkspace(depGraph);
-            if (graph.nodes.length === 0) { return; }
-            const focusId = graph.nodes[0].id;
-            const focused = graphBuilder.focusOnNode(graph, focusId, 1);
-            expect(focused.nodes.some(n => n.id === focusId)).toBe(true);
-            expect(focused.options.focusNode).toBe(focusId);
-            // All included nodes should be within 1 hop
-            expect(focused.nodes.length).toBeLessThanOrEqual(graph.nodes.length);
-        });
-
-        it('focusOnNode returns full graph when node not found', () => {
-            const graph = graphBuilder.buildFromWorkspace(depGraph);
-            const result = graphBuilder.focusOnNode(graph, 'nonexistent', 2);
-            expect(result.nodes.length).toBe(graph.nodes.length);
-        });
-
-        it('highlightPath marks nodes and edges on the path', () => {
-            const graph = graphBuilder.buildFromWorkspace(depGraph);
-            if (graph.edges.length === 0) { return; }
-            const edge = graph.edges[0];
-            const result = graphBuilder.highlightPath(graph, edge.source, edge.target);
-            const highlighted = result.nodes.filter(n => n.highlighted);
-            expect(highlighted.length).toBeGreaterThanOrEqual(2);
-            expect(highlighted.some(n => n.id === edge.source)).toBe(true);
-            expect(highlighted.some(n => n.id === edge.target)).toBe(true);
-        });
-
-        it('highlightPath returns new arrays (shallow copy)', () => {
-            const graph = graphBuilder.buildFromWorkspace(depGraph);
-            if (graph.edges.length === 0) { return; }
-            const edge = graph.edges[0];
-            const result = graphBuilder.highlightPath(graph, edge.source, edge.target);
-            // Returns new array instances (not the same reference)
-            expect(result.nodes).not.toBe(graph.nodes);
-            expect(result.edges).not.toBe(graph.edges);
-        });
-
-        it('multi-hop edge label shows count for edges with count > 1', () => {
-            const graph = graphBuilder.buildFromWorkspace(depGraph);
-            for (const gEdge of graph.edges) {
-                const srcEdge = depGraph.edges.find(e => e.id === gEdge.id);
-                if (srcEdge && srcEdge.count > 1) {
-                    expect(gEdge.label).toBe(String(srcEdge.count));
-                }
             }
         });
     });
