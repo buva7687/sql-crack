@@ -82,6 +82,11 @@ describe('default layout initialization', () => {
         expect(switchLayoutBody).not.toContain("currentNodes.find(n => n.id === sourceId)");
         expect(switchLayoutBody).not.toContain("currentNodes.find(n => n.id === targetId)");
     });
+
+    it('cancels an older deferred layout frame when a newer layout wins', () => {
+        expect(rendererSource).toContain('const switchGeneration = ++layoutSwitchGeneration;');
+        expect(rendererSource).toContain('if (switchGeneration !== layoutSwitchGeneration) { return; }');
+    });
 });
 
 describe('SQL Server dialect in package.json', () => {

@@ -311,6 +311,7 @@ describe('parser worker migration prep', () => {
         expect(indexSource).toContain('const hydrateToken = parseRequestId;');
         expect(indexSource).toContain('if (batchResult && parseRequestId === hydrateToken) {');
         expect(indexSource).toContain('if (currentQueryIndex !== newIndex) {');
+        expect(indexSource).toContain('if (currentQueryIndex !== newIndex) { return; }');
         expect(indexSource).toContain('if (requestId !== parseRequestId) {');
     });
 

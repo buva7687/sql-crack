@@ -1709,6 +1709,7 @@ async function performSwitchToQueryIndex(newIndex: number): Promise<void> {
     if (savedState) {
         // Use requestAnimationFrame to ensure render completes first
         requestAnimationFrame(() => {
+            if (currentQueryIndex !== newIndex) { return; }
             setViewState(savedState);
             schedulePersistUiState();
         });

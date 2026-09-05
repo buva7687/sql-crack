@@ -248,6 +248,7 @@ let legendResizeHandler: (() => void) | null = null;
 let legendResizeDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let rendererResizeObserver: ResizeObserver | null = null;
 let resetActiveDragState: (() => void) | null = null;
+let layoutSwitchGeneration = 0;
 let resizeObserverDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 /** Scale when view was last "fit to view" - used so we display 100% at fit view instead of raw scale */
 let fitViewScale: number = 1;
@@ -1303,6 +1304,7 @@ export function initRenderer(container: HTMLElement): void {
 export function cleanupRenderer(): void {
     resetActiveDragState?.();
     resetActiveDragState = null;
+    layoutSwitchGeneration += 1;
     stopZeroGravityMode({ silent: true });
     clearMatrixRainOverlay();
     documentListeners.forEach(({ type, handler }) => {
@@ -2996,9 +2998,11 @@ export function switchLayout(layoutType: LayoutType): void {
     if (showLoadingIndicator) {
         showGlobalLoading('Calculating layout...');
     }
+    const switchGeneration = ++layoutSwitchGeneration;
 
     // Use requestAnimationFrame to allow UI to update before heavy computation
     requestAnimationFrame(() => {
+        if (switchGeneration !== layoutSwitchGeneration) { return; }
         const previousLayout = state.layoutType;
         try {
             state.layoutType = layoutType;
