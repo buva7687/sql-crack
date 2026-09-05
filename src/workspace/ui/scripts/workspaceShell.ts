@@ -149,6 +149,23 @@ export function getWorkspaceShellScriptFragment(): string {
                 return;
             }
 
+            // Context Menu / Shift+F10: open actions for the selected node.
+            if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+                if (!selectedNodeId) return;
+                const sel = document.querySelector('.node[data-id="' + CSS.escape(selectedNodeId) + '"]');
+                if (!sel) return;
+                e.preventDefault();
+                e.stopPropagation();
+                const rect = sel.getBoundingClientRect();
+                showContextMenuAt(sel, rect.left + Math.min(rect.width, 24), rect.top + Math.min(rect.height, 24), {
+                    id: selectedNodeId,
+                    label: sel.getAttribute('data-label') || selectedNodeId,
+                    type: sel.getAttribute('data-type') || 'file',
+                    filePath: sel.getAttribute('data-filepath')
+                });
+                return;
+            }
+
             // Enter: Open file for selected node
             if (e.key === 'Enter') {
                 if (!selectedNodeId) return;

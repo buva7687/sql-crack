@@ -57,6 +57,9 @@ describe('workspace panel selection sidebar actions', () => {
         expect(html).toContain('id="btn-search-prev"');
         expect(html).toContain('id="btn-search-next"');
         expect(html).toContain('id="graph-search-count"');
+        expect(html).toContain('id="context-menu" class="context-menu" role="menu"');
+        expect(html).toContain('aria-label="Node actions" aria-hidden="true"');
+        expect(html).toContain('role="menuitem" tabindex="-1"');
     });
 
     it('includes lineage guidance hint in graph mode help tooltip', () => {

@@ -273,41 +273,41 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
         </div>
 
         <!-- Context Menu -->
-        <div id="context-menu" class="context-menu">
-            <div class="context-menu-item" data-action="showUpstream">
+        <div id="context-menu" class="context-menu" role="menu" aria-label="Node actions" aria-hidden="true">
+            <div class="context-menu-item" data-action="showUpstream" role="menuitem" tabindex="-1">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M12 19V5M5 12l7-7 7 7"/>
                 </svg>
                 Show Upstream
             </div>
-            <div class="context-menu-item" data-action="showDownstream">
+            <div class="context-menu-item" data-action="showDownstream" role="menuitem" tabindex="-1">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M12 5v14M5 12l7 7 7-7"/>
                 </svg>
                 Show Downstream
             </div>
-            <div class="context-menu-item" data-action="analyzeImpact">
+            <div class="context-menu-item" data-action="analyzeImpact" role="menuitem" tabindex="-1">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
                 </svg>
                 Analyze Impact
             </div>
             <div class="context-menu-divider"></div>
-            <div class="context-menu-item" data-action="copyName">
+            <div class="context-menu-item" data-action="copyName" role="menuitem" tabindex="-1">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
                     <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                 </svg>
                 Copy Name
             </div>
-            <div class="context-menu-item" data-action="copyFilePath">
+            <div class="context-menu-item" data-action="copyFilePath" role="menuitem" tabindex="-1">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                     <polyline points="14 2 14 8 20 8"/>
                 </svg>
                 Copy File Path
             </div>
-            <div class="context-menu-item" data-action="copyConnections">
+            <div class="context-menu-item" data-action="copyConnections" role="menuitem" tabindex="-1">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
                     <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
@@ -315,21 +315,21 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
                 Copy Connections
             </div>
             <div class="context-menu-divider"></div>
-            <div class="context-menu-item" data-action="openFile">
+            <div class="context-menu-item" data-action="openFile" role="menuitem" tabindex="-1">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                     <polyline points="14 2 14 8 20 8"/>
                 </svg>
                 Open File
             </div>
-            <div class="context-menu-item" data-action="visualize">
+            <div class="context-menu-item" data-action="visualize" role="menuitem" tabindex="-1">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="3"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/>
                     <path d="M14.5 9.5L17 7M9.5 14.5L7 17"/>
                 </svg>
                 Visualize Dependencies
             </div>
-            <div class="context-menu-item" data-action="exportLineage">
+            <div class="context-menu-item" data-action="exportLineage" role="menuitem" tabindex="-1">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                     <polyline points="7 10 12 15 17 10"/>

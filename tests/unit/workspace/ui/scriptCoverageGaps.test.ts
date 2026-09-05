@@ -70,7 +70,22 @@ describe('workspace ui script coverage gaps', () => {
         expect(source).toContain("const action = item.getAttribute('data-action');");
         expect(source).toContain("item.classList.contains('disabled')");
         expect(source).toContain("navigator.clipboard.writeText");
+        expect(source).toContain("contextMenu?.addEventListener('keydown'");
+        expect(source).toContain("e.key === 'Escape'");
+        expect(source).toContain("e.key === 'Enter' || e.key === ' '");
+        expect(source).toContain("['ArrowDown', 'ArrowUp', 'Home', 'End']");
+        expect(source).toContain('getEnabledContextMenuItems()[0]?.focus();');
+        expect(source).toContain('function showContextMenuAt(target, clientX, clientY, nodeData)');
+        expect(source).toContain('hideContextMenu(true);');
         expect(source).not.toMatch(/onclick=/);
+    });
+
+    it('opens the selected node context menu from the keyboard', () => {
+        const source = readWorkspaceScript('workspaceShell.ts');
+
+        expect(source).toContain("e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')");
+        expect(source).toContain('showContextMenuAt(sel,');
+        expect(source).toContain("filePath: sel.getAttribute('data-filepath')");
     });
 
     it('keeps escaped impact summary rendering and expandable transitive groups', () => {

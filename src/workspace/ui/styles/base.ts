@@ -518,8 +518,8 @@ export function getContextMenuStyles(): string {
             padding: 8px 14px; cursor: pointer; font-size: 12px;
             color: var(--text-secondary); transition: all 0.1s;
         }
-        .context-menu-item:hover {
-            background: var(--accent); color: white;
+        .context-menu-item:hover, .context-menu-item:focus-visible {
+            background: var(--accent-surface); color: var(--text-on-accent); outline: none;
         }
         .context-menu-item svg { width: 14px; height: 14px; flex-shrink: 0; }
         .context-menu-divider {

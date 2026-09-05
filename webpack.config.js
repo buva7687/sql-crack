@@ -16,6 +16,9 @@ const webpack = require('webpack');
 module.exports = (_env, argv = {}) => {
   const resolvedMode = argv.mode || process.env.NODE_ENV;
   const isProduction = resolvedMode === 'production';
+  const sharedOutputKeep = isProduction
+    ? /^(?:extension|webview|parser\.worker)\.js$|^webview\.js\.LICENSE\.txt$/
+    : /^(?:extension|webview|parser\.worker)\.js(?:\.map)?$|^webview\.js\.LICENSE\.txt$/;
 
   /**@type {import('webpack').Configuration}*/
   const extensionConfig = {
@@ -25,7 +28,10 @@ module.exports = (_env, argv = {}) => {
     output: {
       path: path.resolve(__dirname, 'dist'),
       filename: 'extension.js',
-      libraryTarget: 'commonjs2'
+      libraryTarget: 'commonjs2',
+      clean: {
+        keep: sharedOutputKeep
+      }
     },
     externals: {
       vscode: 'commonjs vscode'

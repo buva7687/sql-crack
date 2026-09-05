@@ -6,14 +6,27 @@ export function getContextMenuScriptFragment(): string {
         // ========== Context Menu ==========
         const contextMenu = document.getElementById('context-menu');
         let contextMenuTarget = null;
+        let contextMenuReturnFocus = null;
 
-        function showContextMenu(e, nodeData) {
-            e.preventDefault();
+        function getEnabledContextMenuItems() {
+            if (!contextMenu) return [];
+            return Array.from(contextMenu.querySelectorAll('.context-menu-item')).filter(item =>
+                item.style.display !== 'none'
+                && !item.classList.contains('disabled')
+                && item.getAttribute('aria-disabled') !== 'true'
+            );
+        }
+
+        function showContextMenuAt(target, clientX, clientY, nodeData) {
             contextMenuTarget = nodeData;
+            contextMenuReturnFocus = target && typeof target.focus === 'function'
+                ? target
+                : (document.activeElement instanceof HTMLElement ? document.activeElement : null);
 
-            contextMenu.style.left = e.clientX + 'px';
-            contextMenu.style.top = e.clientY + 'px';
+            contextMenu.style.left = clientX + 'px';
+            contextMenu.style.top = clientY + 'px';
             contextMenu.classList.add('visible');
+            contextMenu.setAttribute('aria-hidden', 'false');
 
             /**
              * Dynamically show/hide context menu items based on graph mode and node type.
@@ -86,11 +99,23 @@ export function getContextMenuScriptFragment(): string {
                     visualizeItem.style.display = 'none';
                 }
             }
+
+            getEnabledContextMenuItems()[0]?.focus();
         }
 
-        function hideContextMenu() {
+        function showContextMenu(e, nodeData) {
+            e.preventDefault();
+            showContextMenuAt(e.target, e.clientX, e.clientY, nodeData);
+        }
+
+        function hideContextMenu(restoreFocus = false) {
             contextMenu?.classList.remove('visible');
+            contextMenu?.setAttribute('aria-hidden', 'true');
             contextMenuTarget = null;
+            if (restoreFocus && contextMenuReturnFocus?.isConnected) {
+                contextMenuReturnFocus.focus();
+            }
+            contextMenuReturnFocus = null;
         }
 
         document.addEventListener('click', (e) => {
@@ -103,6 +128,36 @@ export function getContextMenuScriptFragment(): string {
             if (!e.target.closest('.node')) {
                 hideContextMenu();
             }
+        });
+
+        contextMenu?.addEventListener('keydown', (e) => {
+            const items = getEnabledContextMenuItems();
+            const activeIndex = items.indexOf(document.activeElement);
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                e.stopPropagation();
+                hideContextMenu(true);
+                return;
+            }
+            if (e.key === 'Tab') {
+                hideContextMenu();
+                return;
+            }
+            if (e.key === 'Enter' || e.key === ' ') {
+                if (activeIndex >= 0) {
+                    e.preventDefault();
+                    items[activeIndex].click();
+                }
+                return;
+            }
+            if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key) || items.length === 0) return;
+            e.preventDefault();
+            let nextIndex;
+            if (e.key === 'Home') nextIndex = 0;
+            else if (e.key === 'End') nextIndex = items.length - 1;
+            else if (e.key === 'ArrowDown') nextIndex = (activeIndex + 1 + items.length) % items.length;
+            else nextIndex = (activeIndex - 1 + items.length) % items.length;
+            items[nextIndex].focus();
         });
 
         contextMenu?.querySelectorAll('.context-menu-item').forEach(item => {
@@ -229,7 +284,7 @@ export function getContextMenuScriptFragment(): string {
                         }
                         break;
                 }
-                hideContextMenu();
+                hideContextMenu(true);
             });
         });
     `;
