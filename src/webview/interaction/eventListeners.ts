@@ -6,10 +6,18 @@ import type { EventListenerCallbacks, EventListenerContext } from './eventListen
 
 export type { EventListenerCallbacks, EventListenerContext } from './eventListenerTypes';
 
-export function setupEventListeners(context: EventListenerContext, callbacks: EventListenerCallbacks): void {
-    registerDragListeners(context, callbacks);
+export interface EventListenerController {
+    resetDragState: () => void;
+}
+
+export function setupEventListeners(
+    context: EventListenerContext,
+    callbacks: EventListenerCallbacks
+): EventListenerController {
+    const resetDragState = registerDragListeners(context, callbacks);
     registerZoomPanListeners(context, callbacks);
     registerSvgKeyboardListeners(context, callbacks);
     registerDocumentKeyboardListeners(context, callbacks);
     registerTooltipListeners(context, callbacks);
+    return { resetDragState };
 }

@@ -20,7 +20,8 @@ describe('audit section 2 performance regression guards', () => {
 
     it('P5/P8/P9/P12: renderer uses pure escaping, debounced legend resize, cloud reset, and avoids innerHTML graph wipes', () => {
         const source = readFileSync(join(__dirname, '../../src/webview/renderer.ts'), 'utf8');
-        expect(source).toContain("replace(/&/g, '&amp;')");
+        expect(source).toContain("import { escapeHtml } from '../shared/stringUtils';");
+        expect(source).not.toContain('function escapeHtml(text: string)');
         expect(source).toContain('let legendResizeDebounceTimer: ReturnType<typeof setTimeout> | null = null;');
         expect(source).toContain('cloudOffsets.clear();');
         expect(source).toContain('cloudElements.clear();');

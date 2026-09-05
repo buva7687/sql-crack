@@ -3,16 +3,17 @@ import type { EventListenerCallbacks, EventListenerContext } from './eventListen
 export function registerDragListeners(
     context: EventListenerContext,
     callbacks: EventListenerCallbacks
-): void {
+): () => void {
     const { state, getSvg, getMainGroup, getCurrentNodes, cloudOffsets } = context;
     const svg = getSvg();
     if (!svg) {
-        return;
+        return () => {};
     }
     let activeDraggedCloudNode: ReturnType<EventListenerContext['getCurrentNodes']>[number] | null = null;
     let activeDraggedNode: ReturnType<EventListenerContext['getCurrentNodes']>[number] | null = null;
     let activeDraggedNodeGroup: SVGGElement | null = null;
     let activeDraggedNodeRectOrigin: { x: number; y: number } | null = null;
+    let activePointerId: number | null = null;
 
     const clearDragCaches = (): void => {
         activeDraggedCloudNode = null;
@@ -111,8 +112,9 @@ export function registerDragListeners(
         }
     });
 
-    const completeDrag = () => {
-        const shouldRecordHistory = state.isDragging || state.isDraggingNode || state.isDraggingCloud;
+    const resetDragState = (recordHistory: boolean): void => {
+        const shouldRecordHistory = recordHistory
+            && (state.isDragging || state.isDraggingNode || state.isDraggingCloud);
 
         if (state.isDraggingCloud && state.draggingCloudNodeId) {
             const cloudGroup = getMainGroup()?.querySelector(`.cloud-container[data-node-id="${state.draggingCloudNodeId}"]`) as SVGGElement;
@@ -135,6 +137,7 @@ export function registerDragListeners(
         state.draggingCloudNodeId = null;
         state.dragPointerLastClientX = null;
         state.dragPointerLastClientY = null;
+        activePointerId = null;
         clearDragCaches();
         svg.style.cursor = 'grab';
 
@@ -143,10 +146,11 @@ export function registerDragListeners(
         }
     };
 
+    const completeDrag = () => resetDragState(true);
+
     svg.addEventListener('mouseup', completeDrag);
     svg.addEventListener('mouseleave', completeDrag);
 
-    let activePointerId: number | null = null;
     svg.addEventListener('pointerdown', (e) => {
         if (e.pointerType === 'mouse' || e.pointerType === 'touch') {
             return;
@@ -190,4 +194,6 @@ export function registerDragListeners(
 
     svg.addEventListener('pointerup', completePointerDrag);
     svg.addEventListener('pointercancel', completePointerDrag);
+
+    return () => resetDragState(false);
 }

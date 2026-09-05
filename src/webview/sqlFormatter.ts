@@ -3,7 +3,7 @@
  * Formats SQL with proper indentation, capitalized keywords, and line breaks
  */
 
-import { getDollarQuoteDelimiterAt } from '../shared/stringUtils';
+import { escapeHtml, getDollarQuoteDelimiterAt } from '../shared/stringUtils';
 
 const SQL_KEYWORDS = [
     'SELECT', 'FROM', 'WHERE', 'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'FULL',
@@ -448,7 +448,7 @@ export function highlightSql(sql: string, isDarkTheme = true): string {
 
     // Convert tokens to HTML
     return tokens.map(token => {
-        const escaped = escapeHtmlSimple(token.value);
+        const escaped = escapeHtml(token.value);
         switch (token.type) {
             case 'keyword':
                 return `<span style="color: ${palette.keyword}; font-weight: 600;">${escaped}</span>`;
@@ -484,11 +484,4 @@ function getHighlightPalette(isDarkTheme: boolean): HighlightPalette {
         number: '#c2410c',
         comment: '#475569',
     };
-}
-
-function escapeHtmlSimple(text: string): string {
-    return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;');
 }

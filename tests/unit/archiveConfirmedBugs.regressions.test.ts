@@ -167,9 +167,9 @@ describe('resolved former PARTIAL issue regression anchors', () => {
         expect(source).toContain("if (stmt.startsWith('*/', cursor)) {");
     });
 
-    it('#21 batchTabs escapeHtml includes single-quote replacement', () => {
+    it('#21 batchTabs uses the quote-safe shared escapeHtml implementation', () => {
         const source = readSource('src/webview/ui/batchTabs.ts');
-        expect(source).toContain(".replace(/'/g, '&#039;')");
+        expect(source).toContain("import { escapeHtml, stripSqlComments } from '../../shared/stringUtils';");
     });
 
     it('#22 issuesPage allowlists item.type for CSS class and escapes text content', () => {

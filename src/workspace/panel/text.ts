@@ -1,4 +1,5 @@
 import { createCspNonce } from '../../nonce';
+import { escapeHtml } from '../../shared/stringUtils';
 
 // Canonical inline-script escaper lives in shared/stringUtils; re-exported here
 // for existing workspace-panel importers.
@@ -14,14 +15,7 @@ export function formatDurationText(ms: number): string {
     return `${Math.round(ms / 60000)}m`;
 }
 
-export function escapeHtmlText(text: string): string {
-    return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-}
+export const escapeHtmlText = escapeHtml;
 
 export function generateNonce(): string {
     return createCspNonce();

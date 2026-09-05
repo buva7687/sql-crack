@@ -2,12 +2,8 @@
 
 import { BatchParseResult } from '../sqlParser';
 import { ICONS } from '../../shared/icons';
-import { stripSqlComments } from '../../shared/stringUtils';
+import { escapeHtml, stripSqlComments } from '../../shared/stringUtils';
 import { Z_INDEX } from '../../shared/zIndex';
-
-function escapeHtml(text: string): string {
-    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
-}
 
 export interface BatchTabsCallbacks {
     onQuerySelect: (index: number) => void;

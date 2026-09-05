@@ -141,8 +141,7 @@ describe('highlightSql', () => {
     it('highlights string literals', () => {
         const result = highlightSql("WHERE name = 'test'");
         expect(result).toContain('color: #c3e88d');
-        // escapeHtmlSimple only escapes &, <, > — single quotes pass through
-        expect(result).toContain("'test'");
+        expect(result).toContain('&#039;test&#039;');
     });
 
     it('highlights numeric literals', () => {

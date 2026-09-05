@@ -12,7 +12,7 @@ export function getUtilityScriptFragment(): string {
         }
 
         function escapeHtmlSafe(text) {
-            return escapeHtml(text).replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+            return escapeHtmlAttr(text).replace(/'/g, '&#039;');
         }
 
         function trackUxEvent(eventName, metadata) {

@@ -349,4 +349,35 @@ describe('dragListeners', () => {
         expect(state.isDragging).toBe(false);
         expect(upPreventDefault).toHaveBeenCalled();
     });
+
+    it('resets active drag state without recording history before a rerender', () => {
+        const state = createState({
+            isDragging: true,
+            isDraggingNode: true,
+            isDraggingCloud: true,
+            draggingNodeId: 'old-node',
+            draggingCloudNodeId: 'old-cloud',
+            dragPointerLastClientX: 10,
+            dragPointerLastClientY: 20,
+        });
+        const svg = createSvg();
+        svg.style.cursor = 'grabbing';
+        const callbacks = createCallbacks();
+        const resetDragState = registerDragListeners(
+            createContext(state, svg, null, [], new Map()),
+            callbacks
+        );
+
+        resetDragState();
+
+        expect(state.isDragging).toBe(false);
+        expect(state.isDraggingNode).toBe(false);
+        expect(state.isDraggingCloud).toBe(false);
+        expect(state.draggingNodeId).toBeNull();
+        expect(state.draggingCloudNodeId).toBeNull();
+        expect(state.dragPointerLastClientX).toBeNull();
+        expect(state.dragPointerLastClientY).toBeNull();
+        expect(svg.style.cursor).toBe('grab');
+        expect(callbacks.recordLayoutHistorySnapshot).not.toHaveBeenCalled();
+    });
 });

@@ -108,6 +108,7 @@ import {
 } from './rendering/clusterProjection';
 import { getScrollbarColors, getComponentUiColors, COLUMN_LINEAGE_BANNER_THEME } from './constants/colors';
 import type { ColorblindMode } from '../shared/theme';
+import { escapeHtml } from '../shared/stringUtils';
 import type { GridStyle } from '../shared/themeTokens';
 import { MONO_FONT_STACK } from '../shared/themeTokens';
 import { EDGE_THEME } from '../shared/themeTokens';
@@ -246,6 +247,7 @@ let legendResizeObserver: ResizeObserver | null = null;
 let legendResizeHandler: (() => void) | null = null;
 let legendResizeDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let rendererResizeObserver: ResizeObserver | null = null;
+let resetActiveDragState: (() => void) | null = null;
 let resizeObserverDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 /** Scale when view was last "fit to view" - used so we display 100% at fit view instead of raw scale */
 let fitViewScale: number = 1;
@@ -1219,7 +1221,7 @@ export function initRenderer(container: HTMLElement): void {
 
     // Setup event listeners
     const rendererContext = getRendererContext();
-    setupRendererEventListeners(
+    const eventListenerController = setupRendererEventListeners(
         {
             state: rendererContext.state,
             getSvg: rendererContext.dom.getSvg,
@@ -1272,6 +1274,7 @@ export function initRenderer(container: HTMLElement): void {
             navigateToSiblingNode,
         }
     );
+    resetActiveDragState = eventListenerController.resetDragState;
 
     // Setup ResizeObserver for auto-resize when panel changes
     rendererResizeObserver?.disconnect();
@@ -1298,6 +1301,8 @@ export function initRenderer(container: HTMLElement): void {
  * Call this when the renderer is disposed to prevent memory leaks.
  */
 export function cleanupRenderer(): void {
+    resetActiveDragState?.();
+    resetActiveDragState = null;
     stopZeroGravityMode({ silent: true });
     clearMatrixRainOverlay();
     documentListeners.forEach(({ type, handler }) => {
@@ -1592,6 +1597,7 @@ function restorePreservedRenderState(snapshot: PreservedRenderState): void {
 }
 
 export function render(result: ParseResult, options?: RenderOptions): void {
+    resetActiveDragState?.();
     if (!mainGroup) { return; }
     stopZeroGravityMode({ silent: true });
     const shouldResetCloudState = result.sql !== currentSql || result.nodes !== currentNodes;
@@ -2133,16 +2139,6 @@ function showSqlClausePanel(edge: FlowEdge): void {
 
 function getClauseTypeColor(clauseType: string): string {
     return CONDITION_COLORS[clauseType] || CONDITION_COLORS.default;
-}
-
-function escapeHtml(text: string): string {
-    // Pure string escaping avoids per-call DOM element allocations on large hint/detail renders.
-    return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
 }
 
 function updateBreadcrumb(nodeId: string | null): void {

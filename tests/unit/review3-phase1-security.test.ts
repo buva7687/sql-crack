@@ -116,11 +116,9 @@ describe('XSS: sanitizeExtensionHtml URL handling', () => {
 describe('XSS: batchTabs label escaping', () => {
     const source = readFileSync(join(__dirname, '../../src/webview/ui/batchTabs.ts'), 'utf8');
 
-    it('should define an escapeHtml function', () => {
-        expect(source).toContain('function escapeHtml(');
-        expect(source).toContain("replace(/&/g, '&amp;')");
-        expect(source).toContain("replace(/</g, '&lt;')");
-        expect(source).toContain("replace(/>/g, '&gt;')");
+    it('should use the canonical shared escapeHtml function', () => {
+        expect(source).toContain("import { escapeHtml, stripSqlComments } from '../../shared/stringUtils';");
+        expect(source).not.toContain('function escapeHtml(');
     });
 
     it('should escape extractQueryLabel output in tab innerHTML', () => {
