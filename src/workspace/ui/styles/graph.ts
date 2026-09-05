@@ -160,9 +160,9 @@ export function getLineageGraphStyles(): string {
             color: var(--text-primary);
         }
         .filter-chip.active {
-            background: var(--accent);
-            border-color: var(--accent);
-            color: white;
+            background: var(--accent-surface);
+            border-color: var(--accent-surface);
+            color: var(--text-on-accent);
         }
 
         /* File Filter */
@@ -390,9 +390,9 @@ export function getLineageGraphStyles(): string {
             background: var(--bg-tertiary);
         }
         .direction-btn.active {
-            background: var(--accent);
-            border-color: var(--accent);
-            color: white;
+            background: var(--accent-surface);
+            border-color: var(--accent-surface);
+            color: var(--text-on-accent);
         }
         .direction-btn svg { width: 14px; height: 14px; }
 
@@ -913,9 +913,11 @@ export function getLineageNodeStyles(): string {
             cursor: pointer;
             transition: all 0.1s;
         }
-        .lineage-context-menu .context-item:hover {
-            background: var(--accent);
-            color: white;
+        .lineage-context-menu .context-item:hover,
+        .lineage-context-menu .context-item:focus-visible {
+            background: var(--accent-surface);
+            color: var(--text-on-accent);
+            outline: none;
         }
         .lineage-context-menu .context-item[hidden] {
             display: none;
@@ -1240,8 +1242,8 @@ export function getLineageNodeStyles(): string {
             justify-content: center;
             width: 24px;
             height: 24px;
-            background: var(--accent);
-            color: white;
+            background: var(--accent-surface);
+            color: var(--text-on-accent);
             border-radius: 50%;
             font-size: 12px;
             font-weight: 600;
@@ -1774,8 +1776,8 @@ export function getGraphStyles(): string {
             padding: 2px 6px; border-radius: 3px; font-size: 9px;
             font-weight: 700; text-transform: uppercase;
         }
-        .issue-type.table { background: var(--node-table); color: white; }
-        .issue-type.view { background: var(--node-view); color: white; }
+        .issue-type.table { background: var(--node-table); color: var(--text-on-node); }
+        .issue-type.view { background: var(--node-view); color: var(--text-on-node); }
         .issue-type.missing { background: var(--error-surface); color: var(--text-on-accent); }
         .issue-info { flex: 1; min-width: 0; }
         .issue-name { font-size: 12px; font-weight: 500; color: var(--text-primary); }

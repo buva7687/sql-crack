@@ -282,9 +282,9 @@ export function getSharedViewStyles(): string {
             color: var(--accent);
         }
         .view-filter-chip.active {
-            background: var(--accent);
-            border-color: var(--accent);
-            color: white;
+            background: var(--accent-surface);
+            border-color: var(--accent-surface);
+            color: var(--text-on-accent);
         }
         @media (max-width: 760px) {
             .view-sort-group {
@@ -464,8 +464,8 @@ export function getSharedViewStyles(): string {
             white-space: nowrap;
         }
         .table-item-name mark {
-            background: var(--accent);
-            color: white;
+            background: var(--accent-surface);
+            color: var(--text-on-accent);
             padding: 0 2px;
             border-radius: 2px;
         }
@@ -855,8 +855,8 @@ export function getIssuesPanelStyles(): string {
             padding: 4px 10px; border-radius: var(--radius-sm); font-size: 10px;
             font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
         }
-        .item-type.table { background: var(--node-table); color: #fff; }
-        .item-type.view { background: var(--node-view); color: #fff; }
+        .item-type.table { background: var(--node-table); color: var(--text-on-node); }
+        .item-type.view { background: var(--node-view); color: var(--text-on-node); }
 
         .item-info { flex: 1; min-width: 0; }
         .item-name { font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 3px; }

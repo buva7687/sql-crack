@@ -1,5 +1,26 @@
 import { getBaseStyles, getCssVariables, getIssuesStyles, getWebviewStyles } from '../../../../src/workspace/ui/sharedStyles';
 
+function readCssVariable(css: string, name: string): string {
+    const match = css.match(new RegExp(`${name}:\\s*(#[0-9a-f]{6})`, 'i'));
+    if (!match) { throw new Error(`Missing CSS variable ${name}`); }
+    return match[1];
+}
+
+function relativeLuminance(hex: string): number {
+    const channels = hex.slice(1).match(/.{2}/g)!.map(channel => parseInt(channel, 16) / 255);
+    const [r, g, b] = channels.map(channel => (
+        channel <= 0.03928 ? channel / 12.92 : Math.pow((channel + 0.055) / 1.055, 2.4)
+    ));
+    return (0.2126 * r) + (0.7152 * g) + (0.0722 * b);
+}
+
+function contrastRatio(first: string, second: string): number {
+    const firstLuminance = relativeLuminance(first);
+    const secondLuminance = relativeLuminance(second);
+    return (Math.max(firstLuminance, secondLuminance) + 0.05)
+        / (Math.min(firstLuminance, secondLuminance) + 0.05);
+}
+
 describe('workspace sharedStyles accessibility rules', () => {
     it('contains reduced-motion overrides for lineage flow animations and panel transitions', () => {
         const css = getBaseStyles();
@@ -89,6 +110,21 @@ describe('workspace sharedStyles accessibility rules', () => {
 
         expect(darkVars).toContain('--text-on-warning: #111827');
         expect(lightVars).toContain('--text-on-warning: #111827');
+    });
+
+    it('keeps table and view badge text above WCAG AA contrast in both themes', () => {
+        for (const variables of [getCssVariables(true), getCssVariables(false)]) {
+            const foreground = readCssVariable(variables, '--text-on-node');
+            expect(contrastRatio(foreground, readCssVariable(variables, '--node-table'))).toBeGreaterThanOrEqual(4.5);
+            expect(contrastRatio(foreground, readCssVariable(variables, '--node-view'))).toBeGreaterThanOrEqual(4.5);
+        }
+
+        const graphCss = getWebviewStyles(true);
+        const issuesCss = getIssuesStyles(true);
+        expect(graphCss).toContain('.issue-type.table { background: var(--node-table); color: var(--text-on-node); }');
+        expect(graphCss).toContain('.issue-type.view { background: var(--node-view); color: var(--text-on-node); }');
+        expect(issuesCss).toContain('.item-type.table { background: var(--node-table); color: var(--text-on-node); }');
+        expect(issuesCss).toContain('.item-type.view { background: var(--node-view); color: var(--text-on-node); }');
     });
 
     it('defines accessible filled-surface tokens in both themes', () => {
@@ -186,13 +222,26 @@ describe('workspace sharedStyles accessibility rules', () => {
     it('uses surface-appropriate foreground tokens for lineage badges and connection pills', () => {
         const css = getWebviewStyles(true);
 
-        expect(css).toContain('.badge-primary {\n            background: var(--accent); color: var(--text-on-accent);');
+        expect(css).toContain('.badge-primary {\n            background: var(--accent-surface); color: var(--text-on-accent);');
         expect(css).toContain('.badge-not-null {\n            background: var(--warning); color: var(--text-on-warning);');
-        expect(css).toContain('.connection-count.has-connections { background: var(--accent); color: var(--text-on-accent); }');
+        expect(css).toContain('.connection-count.has-connections { background: var(--accent-surface); color: var(--text-on-accent); }');
         expect(css).not.toContain('.badge-primary {\n            background: var(--accent); color: white;');
         expect(css).not.toContain('.badge-not-null {\n            background: var(--warning); color: white;');
         expect(css).toContain('.section-badge.warning { background: var(--warning); color: var(--text-on-warning); }');
         expect(css).toContain('.issue-type.missing { background: var(--error-surface); color: var(--text-on-accent); }');
+    });
+
+    it('uses the accessible accent surface for filled controls and highlighted text', () => {
+        const css = getWebviewStyles(true);
+
+        expect(contrastRatio(
+            readCssVariable(css, '--text-on-accent'),
+            readCssVariable(css, '--accent-surface')
+        )).toBeGreaterThanOrEqual(4.5);
+        expect(css).toContain('.icon-btn.active { background: var(--accent-surface); color: var(--text-on-accent); }');
+        expect(css).toContain('.view-filter-chip.active {\n            background: var(--accent-surface);');
+        expect(css).toContain('.filter-chip.active {\n            background: var(--accent-surface);');
+        expect(css).not.toMatch(/background:\s*var\(--accent\);[^}]*color:\s*(?:white|#fff|var\(--text-on-accent\))/);
     });
 
     it('keeps the workspace command overlay above the lineage panel', () => {

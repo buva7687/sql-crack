@@ -75,7 +75,7 @@ export function getBaseStyles(): string {
             cursor: pointer; transition: all 0.15s;
         }
         .icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
-        .icon-btn.active { background: var(--accent); color: white; }
+        .icon-btn.active { background: var(--accent-surface); color: var(--text-on-accent); }
         .icon-btn svg { width: 16px; height: 16px; }
         .icon-btn.btn-disabled { opacity: 0.35; cursor: default; pointer-events: none; }
 
@@ -300,7 +300,7 @@ export function getBaseStyles(): string {
         }
         .view-tab:hover { color: var(--text-secondary); background: var(--bg-tertiary); border-color: var(--border-color); }
         .view-tab.active {
-            background: var(--accent); color: white; border-color: var(--accent);
+            background: var(--accent-surface); color: var(--text-on-accent); border-color: var(--accent-surface);
         }
         .view-tab svg { width: 14px; height: 14px; margin-right: 4px; vertical-align: middle; }
 
@@ -320,7 +320,7 @@ export function getBaseStyles(): string {
             border-radius: var(--radius-md); cursor: pointer; transition: all 0.15s;
         }
         .graph-mode-btn:hover { color: var(--text-secondary); background: var(--bg-tertiary); }
-        .graph-mode-btn.active { background: var(--accent); color: white; }
+        .graph-mode-btn.active { background: var(--accent-surface); color: var(--text-on-accent); }
         .graph-mode-help {
             display: inline-flex; align-items: center; justify-content: center;
             width: 18px; height: 18px; margin-left: 4px;

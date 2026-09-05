@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Release-audit UI and accessibility**: Batch-query labels now use comment-aware SQL stripping; workspace node/status badges and filled controls meet WCAG AA contrast; graph context menus support focus, keyboard activation/navigation, and Escape; and generated host markup shares one canonical HTML escaper.
+- **Interaction and build resilience**: SQL Flow cancels stale drag state during rerenders, deferred viewport restores verify the active query, rapid layout switches discard older animation frames, and production builds clean obsolete webpack chunks without deleting current shared chunks. The unused duplicate workspace graph layer and its misleading tests were removed.
 - **Workspace column lineage completeness**: Workspace scanning now carries query analysis from the reference AST pass into lineage construction, including DML transformations, target-column overrides, statement-specific source metadata, and recursively analyzed CTE transformations. CTE outputs are targeted from their own nested queries instead of assigning the outer SELECT to the first CTE.
 - **SQL Flow interaction isolation**: Compare mode ignores graph keyboard shortcuts, SVG-focused Escape exits fullscreen correctly, same-query structural rerenders preserve selection/focus/search/column-lineage state, and cursor-follow cleanup restores selected and semantic node borders.
 - **SQL source-location fidelity**: Successful parses and fallback visualizations assign node locations against the original SQL rather than compatibility-rewritten text, while dialect hints and advanced analysis inspect the original source.
@@ -21,12 +23,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Performance
 
+- **Large fallback parsing**: Regex-fallback reference locations reuse one masked SQL/boundary index instead of rescanning the full file per match, eliminating the measured quadratic extension-host freeze.
+- **Dialect preprocessing and lineage lookup**: Syntax rewrites assemble edits in one pass instead of repeatedly rebuilding the SQL string, and workspace column lineage resolves parent nodes through an index instead of scanning every node for each edge.
 - **Index update coalescing**: Batched and debounced workspace index changes emit one consistent refresh and persist a cache format that includes the new query-analysis data. The cache schema is version 7, so any index built by an earlier build is rebuilt rather than reused.
 - **Graph rendering and layout**: View fitting reuses rendered cloud geometry instead of rerunning dagre, non-vertical initial layouts avoid a redundant fit, minimap viewport updates coalesce per animation frame, dependency line-range filtering is lazy, and barycenter ordering uses indexed positions.
 - **Lineage traversal reuse**: Directional flow results are cached per analyzer/options and the lineage landing page computes connection counts once for both popular and complete node lists.
 
+### Security
+
+- Updated the transitive `fflate` production dependency to 0.8.3, clearing the malformed-ZIP denial-of-service advisory from the production dependency audit.
+
 ### Tests
 
+- Added regression coverage for comment-safe query labels, accessible surface contrast, keyboard-operable context menus, clean webpack output, shared escaping, drag cancellation, and stale deferred-frame guards.
 - Added regression coverage for workspace query analysis/index batching, nested CTE analysis/lineage, explicit INSERT outputs, dialect-aware bracket boundaries, compare/fullscreen keyboard handling, interaction-state preservation, original SQL line locations, comment/literal masking, SQL Server omitted-schema names, dollar-quoted CTE scope, UPDATE identifier boundaries, wide projections, fallback hash comments, themed errors, cloud fitting, cached lineage traversal, search-match selection, nested-source MERGE predicates, fallback JOIN statistics, query-limit line mapping, and T-SQL `INTO` variables.
 
 ## [0.9.2] - 2026-08-19
