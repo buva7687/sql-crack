@@ -88,6 +88,37 @@ describe('ReferenceExtractor behavioral coverage', () => {
         ]);
     });
 
+    it('uses fallback match offsets directly for repeated references', () => {
+        jest.spyOn((extractor as any).parser, 'astify').mockImplementation(() => {
+            throw new Error('force regex fallback');
+        });
+        const locationSpy = jest.spyOn(extractor as any, 'findTableReferenceLocation');
+        const refs = extractor.extractReferences(
+            [
+                '/* header',
+                '   with multiple lines */',
+                'SELECT * FROM [warehouse].[sales].[orders] orders;',
+                'SELECT * FROM [warehouse].[sales].[orders];',
+            ].join('\n'),
+            'fallback.sql',
+            'TransactSQL'
+        );
+
+        expect(locationSpy).not.toHaveBeenCalled();
+        expect(refs.map(ref => ref.lineNumber)).toEqual([3, 4]);
+        expect(refs[0].alias).toBe('orders');
+        expect(refs).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                catalog: 'warehouse',
+                schema: 'sales',
+                tableName: 'orders',
+                nameQuoted: true,
+                schemaQuoted: true,
+                catalogQuoted: true,
+            }),
+        ]));
+    });
+
     it('extracts real tables from subqueries without leaking the subquery alias', () => {
         const refs = extractor.extractReferences(
             `

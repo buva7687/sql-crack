@@ -1876,6 +1876,12 @@ export class ReferenceExtractor {
         const sqlNoComments = this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(sql));
 
         const statementBoundaries = this.getStatementBoundaries(sqlNoComments);
+        const lineStarts = [0];
+        for (let index = 0; index < sqlNoComments.length; index++) {
+            if (sqlNoComments[index] === '\n') {
+                lineStarts.push(index + 1);
+            }
+        }
 
         // Helper to find statement index for a given character position
         // NOTE: charIndex should be from sqlNoComments (comment-stripped SQL) since
@@ -1883,6 +1889,20 @@ export class ReferenceExtractor {
         // (used for grouping), but NOT for line numbers (which must use original SQL).
         const getStatementIndex = (charIndex: number): number =>
             this.getStatementIndex(statementBoundaries, charIndex);
+
+        const getLineNumber = (charIndex: number): number => {
+            let low = 0;
+            let high = lineStarts.length;
+            while (low < high) {
+                const middle = Math.floor((low + high) / 2);
+                if (lineStarts[middle] <= charIndex) {
+                    low = middle + 1;
+                } else {
+                    high = middle;
+                }
+            }
+            return low;
+        };
 
         const hasPriorTopLevelStatementVerb = (charIndex: number): boolean => {
             const statementIndex = getStatementIndex(charIndex);
@@ -1988,17 +2008,14 @@ export class ReferenceExtractor {
                 const schema = rawSchema ? this.unquoteIdentifier(rawSchema) : undefined;
                 const catalog = rawCatalog ? this.unquoteIdentifier(rawCatalog) : undefined;
                 const statementIndex = getStatementIndex(match.index);
-                const loc = this.findTableReferenceLocation(
-                    sql,
-                    tableName,
-                    context,
-                    schema,
-                    statementIndex,
-                    catalog
-                );
-                if (!loc) {
-                    continue;
-                }
+                // The fallback regex runs against a position-preserving mask, so the
+                // captured identifier already provides its exact source location.
+                // Re-searching the complete SQL for every match made this path O(n²).
+                const aliasOffset = hasAlias && match[4]
+                    ? match[0].lastIndexOf(match[4])
+                    : match[0].length;
+                const tableOffset = match[0].lastIndexOf(rawName, Math.max(0, aliasOffset - 1));
+                const tableIndex = match.index + Math.max(0, tableOffset);
                 references.push({
                     tableName,
                     alias: hasAlias ? match[4] : undefined,
@@ -2009,7 +2026,7 @@ export class ReferenceExtractor {
                     catalogQuoted: this.isQuotedIdentifier(rawCatalog),
                     referenceType,
                     filePath,
-                    lineNumber: loc.lineNumber,
+                    lineNumber: getLineNumber(tableIndex),
                     context,
                     statementIndex,
                 });

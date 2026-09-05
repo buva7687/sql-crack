@@ -2,10 +2,49 @@ import type { SqlDialect } from '../../types';
 import { getDollarQuoteDelimiterAt } from '../../../shared';
 import { preprocessJinjaTemplates } from './jinjaPreprocessor';
 
+interface TextRewrite {
+    start: number;
+    end: number;
+}
+
+/** Apply position-based rewrites in one pass instead of copying the full SQL per match. */
+function applyTextRewrites<T extends TextRewrite>(
+    text: string,
+    rewrites: readonly T[],
+    replacement: string | ((rewrite: T) => string) = ''
+): string {
+    if (rewrites.length === 0) {
+        return text;
+    }
+
+    const ordered = [...rewrites].sort((left, right) => left.start - right.start);
+    const parts: string[] = [];
+    let cursor = 0;
+    for (const rewrite of ordered) {
+        // Collected rewrite ranges are expected not to overlap. Preserve the old
+        // end-to-start behavior as a defensive fallback for malformed input.
+        if (rewrite.start < cursor) {
+            let result = text;
+            for (let index = ordered.length - 1; index >= 0; index--) {
+                const current = ordered[index];
+                const value = typeof replacement === 'function'
+                    ? replacement(current)
+                    : replacement;
+                result = result.slice(0, current.start) + value + result.slice(current.end);
+            }
+            return result;
+        }
+        parts.push(text.slice(cursor, rewrite.start));
+        parts.push(typeof replacement === 'function' ? replacement(rewrite) : replacement);
+        cursor = rewrite.end;
+    }
+    parts.push(text.slice(cursor));
+    return parts.join('');
+}
+
 function stripAtTimeZoneClauses(sql: string): string | null {
     const masked = maskStringsAndComments(sql);
-    let result = sql;
-
+    const result = sql;
     const atTimeZoneRegex = /\bAT\s+TIME\s+ZONE\b/gi;
     let match: RegExpExecArray | null;
     const attzMatches: Array<{ start: number; end: number }> = [];
@@ -60,12 +99,7 @@ function stripAtTimeZoneClauses(sql: string): string | null {
         return null;
     }
 
-    for (let i = attzMatches.length - 1; i >= 0; i--) {
-        const m = attzMatches[i];
-        result = result.substring(0, m.start) + result.substring(m.end);
-    }
-
-    return result;
+    return applyTextRewrites(sql, attzMatches);
 }
 
 /**
@@ -106,9 +140,8 @@ export function preprocessPostgresSyntax(sql: string, dialect: SqlDialect): stri
             }
         }
     }
-    for (let i = typePrefixMatches.length - 1; i >= 0; i--) {
-        const m = typePrefixMatches[i];
-        result = result.substring(0, m.start) + result.substring(m.end);
+    if (typePrefixMatches.length > 0) {
+        result = applyTextRewrites(result, typePrefixMatches);
         changed = true;
     }
 
@@ -165,12 +198,7 @@ function stripOpenJsonWithClauses(sql: string): string | null {
         return null;
     }
 
-    let result = sql;
-    for (let i = removals.length - 1; i >= 0; i--) {
-        const r = removals[i];
-        result = result.substring(0, r.start) + result.substring(r.end);
-    }
-    return result;
+    return applyTextRewrites(sql, removals);
 }
 
 /**
@@ -211,9 +239,8 @@ export function preprocessTransactSqlSyntax(sql: string, dialect: SqlDialect): s
         const start = match.index + match[1].length;
         tryCastRewrites.push({ start, end: start + 'TRY_CAST'.length });
     }
-    for (let i = tryCastRewrites.length - 1; i >= 0; i--) {
-        const m = tryCastRewrites[i];
-        result = result.substring(0, m.start) + 'CAST' + result.substring(m.end);
+    if (tryCastRewrites.length > 0) {
+        result = applyTextRewrites(result, tryCastRewrites, 'CAST');
         changed = true;
     }
 
@@ -305,11 +332,7 @@ export function rewriteUnsupportedPostgresWindowFunctionsForCompatibility(
         return null;
     }
 
-    let result = sql;
-    for (let i = textRewrites.length - 1; i >= 0; i--) {
-        const rewrite = textRewrites[i];
-        result = result.substring(0, rewrite.start) + rewrite.replacement + result.substring(rewrite.end);
-    }
+    const result = applyTextRewrites(sql, textRewrites, rewrite => rewrite.replacement);
 
     return { sql: result, rewrites };
 }
@@ -404,15 +427,7 @@ function stripRedshiftLateBindingViewClause(sql: string): string | null {
         return null;
     }
 
-    let result = sql;
-    for (let i = matches.length - 1; i >= 0; i--) {
-        const current = matches[i];
-        result = result.substring(0, current.start)
-            + ' '.repeat(current.end - current.start)
-            + result.substring(current.end);
-    }
-
-    return result;
+    return applyTextRewrites(sql, matches, current => ' '.repeat(current.end - current.start));
 }
 
 function stripRedshiftCtasPhysicalOptions(sql: string): string | null {
@@ -539,15 +554,7 @@ export function preprocessHashTempTableIdentifiers(sql: string, dialect: SqlDial
         return null;
     }
 
-    let result = sql;
-    for (let i = matches.length - 1; i >= 0; i--) {
-        const current = matches[i];
-        result = result.substring(0, current.start)
-            + `"${current.value}"`
-            + result.substring(current.end);
-    }
-
-    return result;
+    return applyTextRewrites(sql, matches, current => `"${current.value}"`);
 }
 
 /**
@@ -586,12 +593,9 @@ export function preprocessRedshiftTypes(sql: string, dialect: SqlDialect): strin
         while ((match = replacement.pattern.exec(currentMasked)) !== null) {
             rewrites.push({ start: match.index, end: match.index + match[0].length });
         }
-        for (let i = rewrites.length - 1; i >= 0; i--) {
-            const m = rewrites[i];
-            result = result.substring(0, m.start) + replacement.replacement + result.substring(m.end);
-            changed = true;
-        }
         if (rewrites.length > 0) {
+            result = applyTextRewrites(result, rewrites, replacement.replacement);
+            changed = true;
             currentMasked = maskStringsAndComments(result);
         }
     }
@@ -634,12 +638,7 @@ export function stripFilterClauses(sql: string): string | null {
         return null;
     }
 
-    let result = sql;
-    for (let i = matches.length - 1; i >= 0; i--) {
-        const m = matches[i];
-        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
-    }
-    return result;
+    return applyTextRewrites(sql, matches, current => ' '.repeat(current.end - current.start));
 }
 
 /**
@@ -680,9 +679,8 @@ export function preprocessOracleSyntax(sql: string, dialect: SqlDialect): string
     while ((match = minusRegex.exec(masked)) !== null) {
         minusRewrites.push({ start: match.index, end: match.index + match[0].length });
     }
-    for (let i = minusRewrites.length - 1; i >= 0; i--) {
-        const m = minusRewrites[i];
-        result = result.substring(0, m.start) + 'EXCEPT' + result.substring(m.end);
+    if (minusRewrites.length > 0) {
+        result = applyTextRewrites(result, minusRewrites, 'EXCEPT');
         changed = true;
     }
 
@@ -705,9 +703,8 @@ export function preprocessOracleSyntax(sql: string, dialect: SqlDialect): string
         }
         hierarchicalRewrites.push({ start, end });
     }
-    for (let i = hierarchicalRewrites.length - 1; i >= 0; i--) {
-        const m = hierarchicalRewrites[i];
-        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+    if (hierarchicalRewrites.length > 0) {
+        result = applyTextRewrites(result, hierarchicalRewrites, current => ' '.repeat(current.end - current.start));
         changed = true;
     }
 
@@ -724,9 +721,8 @@ export function preprocessOracleSyntax(sql: string, dialect: SqlDialect): string
         if (closePos === -1) { continue; }
         pivotRewrites.push({ start, end: closePos + 1 });
     }
-    for (let i = pivotRewrites.length - 1; i >= 0; i--) {
-        const m = pivotRewrites[i];
-        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+    if (pivotRewrites.length > 0) {
+        result = applyTextRewrites(result, pivotRewrites, current => ' '.repeat(current.end - current.start));
         changed = true;
     }
 
@@ -739,9 +735,8 @@ export function preprocessOracleSyntax(sql: string, dialect: SqlDialect): string
         const end = findClauseBoundary(masked3, start + match[0].length);
         flashbackRewrites.push({ start, end });
     }
-    for (let i = flashbackRewrites.length - 1; i >= 0; i--) {
-        const m = flashbackRewrites[i];
-        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+    if (flashbackRewrites.length > 0) {
+        result = applyTextRewrites(result, flashbackRewrites, current => ' '.repeat(current.end - current.start));
         changed = true;
     }
 
@@ -768,6 +763,7 @@ export function preprocessOracleSyntax(sql: string, dialect: SqlDialect): string
     //    Use [^;]+ to avoid crossing statement boundaries.
     masked3 = changed ? maskStringsAndComments(result) : masked3;
     const returningIntoRegex = /\bRETURNING\b[^;]+?\bINTO\b/gi;
+    const returningIntoRewrites: Array<{ start: number; end: number }> = [];
     while ((match = returningIntoRegex.exec(masked3)) !== null) {
         // Find the INTO keyword position within the match
         const intoSearch = /\bINTO\b/gi;
@@ -782,7 +778,10 @@ export function preprocessOracleSyntax(sql: string, dialect: SqlDialect): string
         // Strip from INTO to end of statement (semicolon or end)
         let endPos = masked3.indexOf(';', intoPos);
         if (endPos === -1) { endPos = masked3.length; }
-        result = result.substring(0, intoPos) + ' '.repeat(endPos - intoPos) + result.substring(endPos);
+        returningIntoRewrites.push({ start: intoPos, end: endPos });
+    }
+    if (returningIntoRewrites.length > 0) {
+        result = applyTextRewrites(result, returningIntoRewrites, rewrite => ' '.repeat(rewrite.end - rewrite.start));
         changed = true;
     }
 
@@ -802,6 +801,7 @@ export function preprocessOracleSyntax(sql: string, dialect: SqlDialect): string
     //    only strip the prefix options before AS.
     masked3 = changed ? maskStringsAndComments(result) : masked3;
     const createTableRegex = /\bCREATE\s+(?:GLOBAL\s+TEMPORARY\s+)?TABLE\s+\S+/gi;
+    const physicalOptionRewrites: Array<{ start: number; end: number }> = [];
     while ((match = createTableRegex.exec(masked3)) !== null) {
         const afterName = match.index + match[0].length;
         let openParen = afterName;
@@ -837,19 +837,20 @@ export function preprocessOracleSyntax(sql: string, dialect: SqlDialect): string
         }
 
         if (asPos === -1) {
-            result = result.substring(0, tailStart) + ' '.repeat(tailEnd - tailStart) + result.substring(tailEnd);
-            changed = true;
-            masked3 = maskStringsAndComments(result);
+            physicalOptionRewrites.push({ start: tailStart, end: tailEnd });
             continue;
         }
 
         // Strip only the physical options before AS, preserve CTAS payload.
         if (tailMasked.substring(0, asPos).trim().length > 0) {
             const optionEnd = tailStart + asPos;
-            result = result.substring(0, tailStart) + ' '.repeat(optionEnd - tailStart) + result.substring(optionEnd);
-            changed = true;
-            masked3 = maskStringsAndComments(result);
+            physicalOptionRewrites.push({ start: tailStart, end: optionEnd });
         }
+    }
+    if (physicalOptionRewrites.length > 0) {
+        result = applyTextRewrites(result, physicalOptionRewrites, rewrite => ' '.repeat(rewrite.end - rewrite.start));
+        changed = true;
+        masked3 = maskStringsAndComments(result);
     }
 
     // 10. Rewrite Oracle-specific DDL data types to PostgreSQL-compatible ones
@@ -862,12 +863,9 @@ export function preprocessOracleSyntax(sql: string, dialect: SqlDialect): string
         while ((match = sizedRawRegex.exec(masked3)) !== null) {
             sizedRawRewrites.push({ start: match.index, end: match.index + match[0].length });
         }
-        for (let i = sizedRawRewrites.length - 1; i >= 0; i--) {
-            const m = sizedRawRewrites[i];
-            result = result.substring(0, m.start) + 'BYTEA' + result.substring(m.end);
-            changed = true;
-        }
         if (sizedRawRewrites.length > 0) {
+            result = applyTextRewrites(result, sizedRawRewrites, 'BYTEA');
+            changed = true;
             masked3 = maskStringsAndComments(result);
         }
 
@@ -886,12 +884,9 @@ export function preprocessOracleSyntax(sql: string, dialect: SqlDialect): string
             while ((match = replacement.pattern.exec(masked3)) !== null) {
                 rewrites.push({ start: match.index, end: match.index + match[0].length });
             }
-            for (let i = rewrites.length - 1; i >= 0; i--) {
-                const m = rewrites[i];
-                result = result.substring(0, m.start) + replacement.replacement + result.substring(m.end);
-                changed = true;
-            }
             if (rewrites.length > 0) {
+                result = applyTextRewrites(result, rewrites, replacement.replacement);
+                changed = true;
                 masked3 = maskStringsAndComments(result);
             }
         }
@@ -944,13 +939,7 @@ function stripOracleCastFormatArguments(sql: string): string | null {
         return null;
     }
 
-    let result = sql;
-    for (let i = castRewrites.length - 1; i >= 0; i--) {
-        const m = castRewrites[i];
-        result = result.substring(0, m.start) + result.substring(m.end);
-    }
-
-    return result;
+    return applyTextRewrites(sql, castRewrites);
 }
 
 /**
@@ -1127,12 +1116,7 @@ export function rewriteGroupingSets(sql: string): string | null {
         return null;
     }
 
-    let result = sql;
-    for (let i = rewrites.length - 1; i >= 0; i--) {
-        const rewrite = rewrites[i];
-        result = result.substring(0, rewrite.start) + rewrite.replacement + result.substring(rewrite.end);
-    }
-    return result;
+    return applyTextRewrites(sql, rewrites, rewrite => rewrite.replacement);
 }
 
 /**
@@ -1175,12 +1159,7 @@ export function collapseSnowflakePaths(sql: string, dialect: SqlDialect): string
         return null;
     }
 
-    let result = sql;
-    for (let i = rewrites.length - 1; i >= 0; i--) {
-        const rewrite = rewrites[i];
-        result = result.substring(0, rewrite.start) + rewrite.replacement + result.substring(rewrite.end);
-    }
-    return result;
+    return applyTextRewrites(sql, rewrites, rewrite => rewrite.replacement);
 }
 
 /**
@@ -1872,11 +1851,7 @@ function stripQualifyClauses(sql: string): string | null {
         return null;
     }
 
-    let result = sql;
-    for (let i = ranges.length - 1; i >= 0; i--) {
-        result = result.substring(0, ranges[i].start) + result.substring(ranges[i].end);
-    }
-    return result;
+    return applyTextRewrites(sql, ranges);
 }
 
 /**
@@ -2008,11 +1983,7 @@ function removeTrailingCommas(sql: string): string | null {
         return null;
     }
 
-    let result = sql;
-    for (let i = ranges.length - 1; i >= 0; i--) {
-        result = result.substring(0, ranges[i].start) + result.substring(ranges[i].end);
-    }
-    return result;
+    return applyTextRewrites(sql, ranges);
 }
 
 function stripDoubleColonCasts(sql: string): string | null {
@@ -2030,11 +2001,7 @@ function stripDoubleColonCasts(sql: string): string | null {
         return null;
     }
 
-    let result = sql;
-    for (let i = ranges.length - 1; i >= 0; i--) {
-        result = result.substring(0, ranges[i].start) + result.substring(ranges[i].end);
-    }
-    return result;
+    return applyTextRewrites(sql, ranges);
 }
 
 /**
@@ -2101,9 +2068,8 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
             replacement: 'CREATE OR REPLACE'
         });
     }
-    for (let i = replaceViewRewrites.length - 1; i >= 0; i--) {
-        const m = replaceViewRewrites[i];
-        result = result.substring(0, m.start) + m.replacement + result.substring(m.end);
+    if (replaceViewRewrites.length > 0) {
+        result = applyTextRewrites(result, replaceViewRewrites, rewrite => rewrite.replacement);
         changed = true;
     }
 
@@ -2115,9 +2081,8 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
     while ((match = lockingRegex.exec(masked)) !== null) {
         lockingRewrites.push({ start: match.index, end: match.index + match[0].length });
     }
-    for (let i = lockingRewrites.length - 1; i >= 0; i--) {
-        const m = lockingRewrites[i];
-        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+    if (lockingRewrites.length > 0) {
+        result = applyTextRewrites(result, lockingRewrites, rewrite => ' '.repeat(rewrite.end - rewrite.start));
         changed = true;
     }
 
@@ -2145,9 +2110,8 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
             && !(atLineStart && createObjectAsContext)) { continue; }
         selRewrites.push({ start: match.index, end: match.index + 3 });
     }
-    for (let i = selRewrites.length - 1; i >= 0; i--) {
-        const m = selRewrites[i];
-        result = result.substring(0, m.start) + 'SELECT' + result.substring(m.end);
+    if (selRewrites.length > 0) {
+        result = applyTextRewrites(result, selRewrites, 'SELECT');
         changed = true;
     }
 
@@ -2166,9 +2130,8 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
             createRewrites.push({ start: modStart, end: modEnd, replacement: ' ' });
         }
     }
-    for (let i = createRewrites.length - 1; i >= 0; i--) {
-        const m = createRewrites[i];
-        result = result.substring(0, m.start) + m.replacement + result.substring(m.end);
+    if (createRewrites.length > 0) {
+        result = applyTextRewrites(result, createRewrites, rewrite => rewrite.replacement);
         changed = true;
     }
 
@@ -2195,10 +2158,8 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
         if (closePos === -1) { continue; }
         indexRewrites.push({ start: match.index, end: closePos + 1 });
     }
-    // Sort by start descending to replace from end to start
-    indexRewrites.sort((a, b) => b.start - a.start);
-    for (const m of indexRewrites) {
-        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+    if (indexRewrites.length > 0) {
+        result = applyTextRewrites(result, indexRewrites, rewrite => ' '.repeat(rewrite.end - rewrite.start));
         changed = true;
     }
 
@@ -2209,9 +2170,8 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
     while ((match = onCommitRegex.exec(masked)) !== null) {
         onCommitRewrites.push({ start: match.index, end: match.index + match[0].length });
     }
-    for (let i = onCommitRewrites.length - 1; i >= 0; i--) {
-        const m = onCommitRewrites[i];
-        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+    if (onCommitRewrites.length > 0) {
+        result = applyTextRewrites(result, onCommitRewrites, rewrite => ' '.repeat(rewrite.end - rewrite.start));
         changed = true;
     }
 
@@ -2222,9 +2182,8 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
     while ((match = sampleRegex.exec(masked)) !== null) {
         sampleRewrites.push({ start: match.index, end: match.index + match[0].length });
     }
-    for (let i = sampleRewrites.length - 1; i >= 0; i--) {
-        const m = sampleRewrites[i];
-        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+    if (sampleRewrites.length > 0) {
+        result = applyTextRewrites(result, sampleRewrites, rewrite => ' '.repeat(rewrite.end - rewrite.start));
         changed = true;
     }
 
@@ -2237,9 +2196,8 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
         const topEnd = match.index + match[0].length;
         topRewrites.push({ start: topStart, end: topEnd });
     }
-    for (let i = topRewrites.length - 1; i >= 0; i--) {
-        const m = topRewrites[i];
-        result = result.substring(0, m.start) + result.substring(m.end);
+    if (topRewrites.length > 0) {
+        result = applyTextRewrites(result, topRewrites);
         changed = true;
     }
 
@@ -2253,9 +2211,8 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
         const normEnd = match.index + match[0].length;
         normalizeRewrites.push({ start: normStart, end: normEnd, replacement: '' });
     }
-    for (let i = normalizeRewrites.length - 1; i >= 0; i--) {
-        const m = normalizeRewrites[i];
-        result = result.substring(0, m.start) + result.substring(m.end);
+    if (normalizeRewrites.length > 0) {
+        result = applyTextRewrites(result, normalizeRewrites);
         changed = true;
     }
 
@@ -2271,9 +2228,8 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
             withDataRewrites.push({ start: match.index, end: match.index + match[0].length });
         }
     }
-    for (let i = withDataRewrites.length - 1; i >= 0; i--) {
-        const m = withDataRewrites[i];
-        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+    if (withDataRewrites.length > 0) {
+        result = applyTextRewrites(result, withDataRewrites, rewrite => ' '.repeat(rewrite.end - rewrite.start));
         changed = true;
     }
 
@@ -2317,9 +2273,8 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
         if (closePos === -1) { continue; }
         withinGroupRewrites.push({ start: match.index, end: closePos + 1 });
     }
-    for (let i = withinGroupRewrites.length - 1; i >= 0; i--) {
-        const m = withinGroupRewrites[i];
-        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+    if (withinGroupRewrites.length > 0) {
+        result = applyTextRewrites(result, withinGroupRewrites, rewrite => ' '.repeat(rewrite.end - rewrite.start));
         changed = true;
     }
 
@@ -2362,9 +2317,8 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
             bareDateRewrites.push({ start: match.index, end: match.index + 4 });
         }
     }
-    for (let i = bareDateRewrites.length - 1; i >= 0; i--) {
-        const m = bareDateRewrites[i];
-        result = result.substring(0, m.start) + 'CURRENT_DATE' + result.substring(m.end);
+    if (bareDateRewrites.length > 0) {
+        result = applyTextRewrites(result, bareDateRewrites, 'CURRENT_DATE');
         changed = true;
     }
 
@@ -2382,9 +2336,8 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
             end: thenPos + 4 // include THEN
         });
     }
-    for (let i = whenMatchedRewrites.length - 1; i >= 0; i--) {
-        const m = whenMatchedRewrites[i];
-        result = result.substring(0, m.start) + 'WHEN MATCHED THEN' + result.substring(m.end);
+    if (whenMatchedRewrites.length > 0) {
+        result = applyTextRewrites(result, whenMatchedRewrites, 'WHEN MATCHED THEN');
         changed = true;
     }
 
@@ -2398,9 +2351,8 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
         const aliasEnd = match.index + match[0].length;
         aliasRewrites.push({ start: aliasStart, end: aliasEnd, alias: match[1] });
     }
-    for (let i = aliasRewrites.length - 1; i >= 0; i--) {
-        const m = aliasRewrites[i];
-        result = result.substring(0, m.start) + '`' + m.alias + '`' + result.substring(m.end);
+    if (aliasRewrites.length > 0) {
+        result = applyTextRewrites(result, aliasRewrites, rewrite => `\`${rewrite.alias}\``);
         changed = true;
     }
 
@@ -2427,9 +2379,8 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
             end: innerEnd
         });
     }
-    for (let i = xmlAggOrderByRewrites.length - 1; i >= 0; i--) {
-        const m = xmlAggOrderByRewrites[i];
-        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+    if (xmlAggOrderByRewrites.length > 0) {
+        result = applyTextRewrites(result, xmlAggOrderByRewrites, rewrite => ' '.repeat(rewrite.end - rewrite.start));
         changed = true;
     }
 
@@ -2445,9 +2396,8 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
         if (closeParen === -1) { continue; }
         retrieveChainRewrites.push({ start: match.index, end: closeParen + 1 });
     }
-    for (let i = retrieveChainRewrites.length - 1; i >= 0; i--) {
-        const m = retrieveChainRewrites[i];
-        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+    if (retrieveChainRewrites.length > 0) {
+        result = applyTextRewrites(result, retrieveChainRewrites, rewrite => ' '.repeat(rewrite.end - rewrite.start));
         changed = true;
     }
 
@@ -2457,6 +2407,7 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
     //     Strip everything between the table name and the opening paren of column defs.
     masked = changed ? maskStringsAndComments(result) : masked;
     const createTableStart = /\bCREATE\s+TABLE\s+\S+/gi;
+    const tableAttributeRewrites: Array<{ start: number; end: number; replacement: string }> = [];
     while ((match = createTableStart.exec(masked)) !== null) {
         const afterName = match.index + match[0].length;
         // Find the opening paren for column definitions
@@ -2466,10 +2417,13 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
         // If there's content between table name and '(', it's DDL attributes — strip it
         const betweenText = masked.substring(afterName, pos).trim();
         if (betweenText.length > 0) {
-            result = result.substring(0, afterName) + ' ' + result.substring(pos);
-            masked = maskStringsAndComments(result);
-            changed = true;
+            tableAttributeRewrites.push({ start: afterName, end: pos, replacement: ' ' });
         }
+    }
+    if (tableAttributeRewrites.length > 0) {
+        result = applyTextRewrites(result, tableAttributeRewrites, rewrite => rewrite.replacement);
+        masked = maskStringsAndComments(result);
+        changed = true;
     }
 
     // 20. Strip CHARACTER SET ... NOT CASESPECIFIC / CASESPECIFIC from column definitions
@@ -2489,9 +2443,8 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
             charSetRewrites.push({ start: match.index, end: match.index + match[0].length });
         }
     }
-    charSetRewrites.sort((a, b) => b.start - a.start);
-    for (const m of charSetRewrites) {
-        result = result.substring(0, m.start) + ' '.repeat(m.end - m.start) + result.substring(m.end);
+    if (charSetRewrites.length > 0) {
+        result = applyTextRewrites(result, charSetRewrites, rewrite => ' '.repeat(rewrite.end - rewrite.start));
         changed = true;
     }
 
@@ -2501,6 +2454,7 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
     //     SELECT window clauses (e.g., PARTITION BY in OVER()).
     masked = changed ? maskStringsAndComments(result) : masked;
     const createTableDdlStart = /\bCREATE\s+TABLE\s+\S+/gi;
+    const trailingTableOptionRewrites: Array<{ start: number; end: number }> = [];
     while ((match = createTableDdlStart.exec(masked)) !== null) {
         const afterName = match.index + match[0].length;
         let openParen = afterName;
@@ -2517,9 +2471,7 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
         const tailMasked = masked.substring(tailStart, tailEnd);
         const hasAsAtDepth0 = findKeywordAtDepth0(tailMasked, 'AS', 0) !== -1;
         if (!hasAsAtDepth0 && tailMasked.trim().length > 0) {
-            result = result.substring(0, tailStart) + ' '.repeat(tailEnd - tailStart) + result.substring(tailEnd);
-            changed = true;
-            masked = maskStringsAndComments(result);
+            trailingTableOptionRewrites.push({ start: tailStart, end: tailEnd });
             continue;
         }
 
@@ -2546,15 +2498,13 @@ export function preprocessTeradataSyntax(sql: string, dialect: SqlDialect): stri
             }
         }
 
-        tailRewrites.sort((a, b) => b.start - a.start);
-        for (const rewrite of tailRewrites) {
-            result = result.substring(0, rewrite.start) + ' '.repeat(rewrite.end - rewrite.start) + result.substring(rewrite.end);
-            changed = true;
-        }
-
         if (tailRewrites.length > 0) {
-            masked = maskStringsAndComments(result);
+            trailingTableOptionRewrites.push(...tailRewrites);
         }
+    }
+    if (trailingTableOptionRewrites.length > 0) {
+        result = applyTextRewrites(result, trailingTableOptionRewrites, rewrite => ' '.repeat(rewrite.end - rewrite.start));
+        changed = true;
     }
 
     return changed ? result : null;

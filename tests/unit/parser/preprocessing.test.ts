@@ -494,6 +494,25 @@ SELECT * FROM OPENJSON((SELECT val FROM cte FOR JSON PATH)) AS j`;
             expect(rewritten).not.toMatch(/\bRAW\s*\(/i);
         });
 
+        it('batches large Oracle datatype rewrites into bounded full-string copies', () => {
+            const columns = Array.from({ length: 5000 }, (_, index) =>
+                `column_${index} NUMBER`
+            ).join(',\n');
+            const sql = `CREATE TABLE bulk_types (\n${columns}\n)`;
+            const substringSpy = jest.spyOn(String.prototype, 'substring');
+
+            try {
+                const rewritten = preprocessOracleSyntax(sql, 'Oracle');
+
+                expect(rewritten).not.toBeNull();
+                expect(rewritten).not.toMatch(/\bNUMBER\b/);
+                expect(rewritten!.match(/\bNUMERIC\b/g)).toHaveLength(5000);
+                expect(substringSpy.mock.calls.length).toBeLessThan(100);
+            } finally {
+                substringSpy.mockRestore();
+            }
+        });
+
         it('preserves CTAS payload while stripping options before AS', () => {
             const sql = `CREATE TABLE new_sales (
                 id, amount

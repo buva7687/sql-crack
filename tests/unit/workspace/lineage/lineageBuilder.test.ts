@@ -985,6 +985,19 @@ describe('LineageBuilder', () => {
     });
 
     describe('getColumnLineage', () => {
+        it('resolves columns without scanning unrelated graph nodes', () => {
+            const defs = Array.from({ length: 100 }, (_, index) =>
+                makeDef(`table_${index}`, 'table', [makeColumn('id'), makeColumn('value')])
+            );
+            const builder = new LineageBuilder();
+            builder.buildFromIndex(makeIndex(defs));
+            const valuesSpy = jest.spyOn(builder.nodes, 'values');
+
+            expect((builder as any).resolveColumnNodeId('table:table_99', 'value'))
+                .toBe('column:table_99.value');
+            expect(valuesSpy).not.toHaveBeenCalled();
+        });
+
         it('returns empty for nonexistent column', () => {
             const def = makeDef('users', 'table', [makeColumn('id')]);
             const index = makeIndex([def]);

@@ -248,6 +248,7 @@ export class LineageBuilder implements LineageGraph {
     private columnEdgeIds = new Set<string>();
     private incomingEdgesByNodeId: Map<string, LineageEdge[]> = new Map();
     private outgoingEdgesByNodeId: Map<string, LineageEdge[]> = new Map();
+    private columnNodesByParentId: Map<string, LineageNode[]> = new Map();
     private options: { includeExternal: boolean; includeColumns: boolean };
 
     constructor(options = { includeExternal: true, includeColumns: true }) {
@@ -274,6 +275,7 @@ export class LineageBuilder implements LineageGraph {
         this.columnEdgeIds.clear();
         this.incomingEdgesByNodeId.clear();
         this.outgoingEdgesByNodeId.clear();
+        this.columnNodesByParentId.clear();
 
         // Add all table/view definitions as nodes
         const seenNodes = new Set<string>();
@@ -525,6 +527,9 @@ export class LineageBuilder implements LineageGraph {
             };
 
             this.nodes.set(columnId, columnNode);
+            const siblingColumns = this.columnNodesByParentId.get(tableNode.id) || [];
+            siblingColumns.push(columnNode);
+            this.columnNodesByParentId.set(tableNode.id, siblingColumns);
 
             // Add edge from table to column
             this.addEdge({
@@ -1196,15 +1201,14 @@ export class LineageBuilder implements LineageGraph {
                 ? [tableId]
                 : ['table', 'view', 'external', 'cte'].map(type => `${type}:${relationKey}`)
         );
-        const exact = [...this.nodes.values()].find(node =>
-            node.type === 'column' && parentIds.has(node.parentId || '') && node.name === columnName
+        const candidateColumns = [...parentIds].flatMap(parentId =>
+            this.columnNodesByParentId.get(parentId) || []
         );
+        const exact = candidateColumns.find(node => node.name === columnName);
         if (exact) {return exact.id;}
 
-        const folded = [...this.nodes.values()].filter(node =>
-            node.type === 'column'
-            && parentIds.has(node.parentId || '')
-            && node.name.toLowerCase() === columnName.toLowerCase()
+        const folded = candidateColumns.filter(node =>
+            node.name.toLowerCase() === columnName.toLowerCase()
         );
         return folded.length === 1 ? folded[0].id : undefined;
     }
