@@ -2,6 +2,7 @@
 
 import { BatchParseResult } from '../sqlParser';
 import { ICONS } from '../../shared/icons';
+import { stripSqlComments } from '../../shared/stringUtils';
 import { Z_INDEX } from '../../shared/zIndex';
 
 function escapeHtml(text: string): string {
@@ -436,9 +437,7 @@ function truncateSql(sql: string, maxLen: number): string {
  */
 export function extractQueryLabel(sql: string, fallbackIndex?: number): string {
     // Strip comments before matching so leading comments don't prevent keyword detection
-    const stripped = sql
-        .replace(/\/\*[\s\S]*?\*\//g, '')   // block comments
-        .replace(/--[^\n]*/g, '');            // line comments
+    const stripped = stripSqlComments(sql);
     const normalized = stripped.replace(/\s+/g, ' ').trim();
 
     const patterns: Array<{ regex: RegExp; format: (m: RegExpMatchArray) => string }> = [

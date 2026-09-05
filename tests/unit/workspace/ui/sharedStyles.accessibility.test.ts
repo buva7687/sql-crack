@@ -83,6 +83,14 @@ describe('workspace sharedStyles accessibility rules', () => {
         expect(lightVars).toContain('--text-on-accent: #ffffff');
     });
 
+    it('defines a high-contrast foreground for warning surfaces in both themes', () => {
+        const darkVars = getCssVariables(true);
+        const lightVars = getCssVariables(false);
+
+        expect(darkVars).toContain('--text-on-warning: #111827');
+        expect(lightVars).toContain('--text-on-warning: #111827');
+    });
+
     it('uses CSS variables for column edge strokes and arrowhead fills', () => {
         const css = getWebviewStyles(true);
 
@@ -164,11 +172,11 @@ describe('workspace sharedStyles accessibility rules', () => {
         expect(css).not.toContain('.lineage-legend .legend-numeric { background: #60a5fa; }');
     });
 
-    it('uses text-on-accent token for lineage badges and connection pills', () => {
+    it('uses surface-appropriate foreground tokens for lineage badges and connection pills', () => {
         const css = getWebviewStyles(true);
 
         expect(css).toContain('.badge-primary {\n            background: var(--accent); color: var(--text-on-accent);');
-        expect(css).toContain('.badge-not-null {\n            background: var(--warning); color: var(--text-on-accent);');
+        expect(css).toContain('.badge-not-null {\n            background: var(--warning); color: var(--text-on-warning);');
         expect(css).toContain('.connection-count.has-connections { background: var(--accent); color: var(--text-on-accent); }');
         expect(css).not.toContain('.badge-primary {\n            background: var(--accent); color: white;');
         expect(css).not.toContain('.badge-not-null {\n            background: var(--warning); color: white;');

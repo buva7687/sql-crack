@@ -92,6 +92,15 @@ describe('extractQueryLabel', () => {
         expect(extractQueryLabel(sql)).toBe('INSERT logs');
     });
 
+    it('preserves comment markers inside SQL literals and handles hash comments', () => {
+        expect(extractQueryLabel("# heading\nSELECT '--' FROM orders"))
+            .toBe('SELECT orders');
+        expect(extractQueryLabel("SELECT '/* literal */' FROM orders"))
+            .toBe('SELECT orders');
+        expect(extractQueryLabel("SELECT '-- literal' FROM orders"))
+            .toBe('SELECT orders');
+    });
+
     it('falls back when SQL is only comments', () => {
         expect(extractQueryLabel('-- just a comment', 0)).toBe('Q1');
     });

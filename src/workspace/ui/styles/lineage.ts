@@ -295,7 +295,7 @@ export function getLineageVisualStyles(): string {
             background: var(--accent); color: var(--text-on-accent);
         }
         .badge-not-null {
-            background: var(--warning); color: var(--text-on-accent);
+            background: var(--warning); color: var(--text-on-warning);
         }
 
         /* ========== Lineage Overview ========== */

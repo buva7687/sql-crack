@@ -43,6 +43,7 @@ function getDarkThemeVariables(): string {
             --text-muted: #71717a;
             --text-dim: #64748b;
             --text-on-accent: #ffffff;
+            --text-on-warning: #111827;
             --accent: #6366f1;
             --accent-hover: #818cf8;
             --success: #10b981;
@@ -125,6 +126,7 @@ function getLightThemeVariables(): string {
             --text-muted: #64748b;
             --text-dim: #94a3b8;
             --text-on-accent: #ffffff;
+            --text-on-warning: #111827;
             --accent: #4f46e5;
             --accent-hover: #6366f1;
             --success: #059669;
