@@ -1572,10 +1572,10 @@ export function getGraphStyles(): string {
             text-transform: uppercase; letter-spacing: 0.5px;
         }
         .section-badge {
-            background: var(--error); color: white; padding: 2px 6px;
+            background: var(--error-surface); color: var(--text-on-accent); padding: 2px 6px;
             border-radius: 10px; font-size: 10px; font-weight: 600;
         }
-        .section-badge.warning { background: var(--warning); }
+        .section-badge.warning { background: var(--warning); color: var(--text-on-warning); }
         .section-toggle {
             color: var(--text-dim); font-size: 10px; transition: transform 0.2s;
         }
@@ -1776,7 +1776,7 @@ export function getGraphStyles(): string {
         }
         .issue-type.table { background: var(--node-table); color: white; }
         .issue-type.view { background: var(--node-view); color: white; }
-        .issue-type.missing { background: var(--error); color: white; }
+        .issue-type.missing { background: var(--error-surface); color: var(--text-on-accent); }
         .issue-info { flex: 1; min-width: 0; }
         .issue-name { font-size: 12px; font-weight: 500; color: var(--text-primary); }
         .issue-path { font-size: 10px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

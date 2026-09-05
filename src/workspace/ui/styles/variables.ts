@@ -44,8 +44,12 @@ function getDarkThemeVariables(): string {
             --text-dim: #64748b;
             --text-on-accent: #ffffff;
             --text-on-warning: #111827;
+            --text-on-success: #111827;
+            --text-on-muted-surface: #ffffff;
             --accent: #6366f1;
             --accent-hover: #818cf8;
+            --accent-surface: #4f46e5;
+            --accent-surface-hover: #4338ca;
             --success: #10b981;
             --success-light: #34d399;
             --warning: #f59e0b;
@@ -53,6 +57,7 @@ function getDarkThemeVariables(): string {
             --warning-muted: rgba(251, 191, 36, 0.15);
             --error: #ef4444;
             --error-light: #f87171;
+            --error-surface: #b91c1c;
             --node-file: #60a5fa;
             --node-file-border: #3b82f6;
             --node-table: #34d399;
@@ -127,8 +132,12 @@ function getLightThemeVariables(): string {
             --text-dim: #94a3b8;
             --text-on-accent: #ffffff;
             --text-on-warning: #111827;
+            --text-on-success: #111827;
+            --text-on-muted-surface: #111827;
             --accent: #4f46e5;
             --accent-hover: #6366f1;
+            --accent-surface: #4f46e5;
+            --accent-surface-hover: #4338ca;
             --success: #059669;
             --success-light: #10b981;
             --warning: #d97706;
@@ -136,6 +145,7 @@ function getLightThemeVariables(): string {
             --warning-muted: rgba(217, 119, 6, 0.1);
             --error: #dc2626;
             --error-light: #ef4444;
+            --error-surface: #b91c1c;
             --node-file: #3b82f6;
             --node-file-border: #2563eb;
             --node-table: #10b981;

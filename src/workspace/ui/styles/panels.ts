@@ -990,7 +990,8 @@ export function getStateStyles(dark: boolean = true): string {
         textMuted: '#71717a',
         border: '#334155',
         accent: '#6366f1',
-        accentHover: '#818cf8',
+        accentSurface: '#4f46e5',
+        accentSurfaceHover: '#4338ca',
         accentBg: 'rgba(99, 102, 241, 0.1)',
         mutedBg: 'rgba(100, 116, 139, 0.1)',
         muted: '#64748b',
@@ -1005,7 +1006,8 @@ export function getStateStyles(dark: boolean = true): string {
         textMuted: '#64748b',
         border: '#e2e8f0',
         accent: '#4f46e5',
-        accentHover: '#6366f1',
+        accentSurface: '#4f46e5',
+        accentSurfaceHover: '#4338ca',
         accentBg: 'rgba(79, 70, 229, 0.1)',
         mutedBg: 'rgba(100, 116, 139, 0.08)',
         muted: '#94a3b8',
@@ -1053,11 +1055,11 @@ export function getStateStyles(dark: boolean = true): string {
         .message { color: ${colors.textMuted}; font-size: 14px; margin-bottom: 24px; }
         .file-count { font-size: 32px; font-weight: 700; color: ${colors.accent}; margin-bottom: 8px; }
         .btn {
-            padding: 12px 28px; background: ${colors.accent}; border: none;
+            padding: 12px 28px; background: ${colors.accentSurface}; border: none;
             border-radius: 8px; color: white; font-size: 14px; font-weight: 500;
             cursor: pointer; transition: all 0.15s;
         }
-        .btn:hover { background: ${colors.accentHover}; transform: translateY(-1px); }
+        .btn:hover { background: ${colors.accentSurfaceHover}; transform: translateY(-1px); }
         .btn.secondary {
             background: ${colors.secondary};
             color: ${dark ? 'white' : colors.text};

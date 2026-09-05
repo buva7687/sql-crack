@@ -1,5 +1,6 @@
 export interface FullscreenTheme {
     accent: string;
+    accentSurface: string;
     border: string;
     text: string;
 }
@@ -230,7 +231,7 @@ function createFullscreenExitButton(
 
     button.addEventListener('click', onExitRequested);
     button.addEventListener('mouseenter', () => {
-        button.style.background = theme.accent;
+        button.style.background = theme.accentSurface;
         button.style.color = '#fff';
     });
     button.addEventListener('mouseleave', () => {

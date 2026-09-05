@@ -91,6 +91,17 @@ describe('workspace sharedStyles accessibility rules', () => {
         expect(lightVars).toContain('--text-on-warning: #111827');
     });
 
+    it('defines accessible filled-surface tokens in both themes', () => {
+        const darkVars = getCssVariables(true);
+        const lightVars = getCssVariables(false);
+
+        for (const variables of [darkVars, lightVars]) {
+            expect(variables).toContain('--accent-surface: #4f46e5');
+            expect(variables).toContain('--accent-surface-hover: #4338ca');
+            expect(variables).toContain('--error-surface: #b91c1c');
+        }
+    });
+
     it('uses CSS variables for column edge strokes and arrowhead fills', () => {
         const css = getWebviewStyles(true);
 
@@ -180,6 +191,8 @@ describe('workspace sharedStyles accessibility rules', () => {
         expect(css).toContain('.connection-count.has-connections { background: var(--accent); color: var(--text-on-accent); }');
         expect(css).not.toContain('.badge-primary {\n            background: var(--accent); color: white;');
         expect(css).not.toContain('.badge-not-null {\n            background: var(--warning); color: white;');
+        expect(css).toContain('.section-badge.warning { background: var(--warning); color: var(--text-on-warning); }');
+        expect(css).toContain('.issue-type.missing { background: var(--error-surface); color: var(--text-on-accent); }');
     });
 
     it('keeps the workspace command overlay above the lineage panel', () => {

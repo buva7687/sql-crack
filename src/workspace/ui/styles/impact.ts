@@ -216,13 +216,13 @@ export function getImpactFormStyles(): string {
         }
         .btn-primary {
             display: flex; align-items: center; justify-content: center; gap: 10px;
-            padding: 14px 28px; background: var(--accent); color: white;
+            padding: 14px 28px; background: var(--accent-surface); color: var(--text-on-accent);
             border: none; border-radius: var(--radius-md); font-size: 14px;
             font-weight: 600; cursor: pointer; transition: all 0.2s;
             width: 100%; box-shadow: 0 2px 8px rgba(99, 102, 241, 0.3);
         }
         .btn-primary:hover:not(:disabled) {
-            background: var(--accent-hover);
+            background: var(--accent-surface-hover);
             transform: translateY(-1px);
             box-shadow: 0 4px 12px rgba(99, 102, 241, 0.4);
         }
@@ -276,16 +276,19 @@ export function getImpactFormStyles(): string {
             text-transform: uppercase;
         }
         .severity-badge.severity-critical {
-            background: var(--error);
+            background: var(--error-surface);
         }
         .severity-badge.severity-high {
             background: var(--warning);
+            color: var(--text-on-warning);
         }
         .severity-badge.severity-medium {
             background: var(--success);
+            color: var(--text-on-success);
         }
         .severity-badge.severity-low {
             background: var(--text-dim);
+            color: var(--text-on-muted-surface);
         }
         .report-target {
             margin-bottom: 16px;

@@ -16,12 +16,15 @@ describe('ImpactView severity badge styling', () => {
         const css = getWebviewStyles(true);
 
         expect(css).toContain('.severity-badge.severity-critical');
-        expect(css).toContain('background: var(--error);');
+        expect(css).toContain('background: var(--error-surface);');
         expect(css).toContain('.severity-badge.severity-high');
         expect(css).toContain('background: var(--warning);');
+        expect(css).toContain('color: var(--text-on-warning);');
         expect(css).toContain('.severity-badge.severity-medium');
         expect(css).toContain('background: var(--success);');
+        expect(css).toContain('color: var(--text-on-success);');
         expect(css).toContain('.severity-badge.severity-low');
         expect(css).toContain('background: var(--text-dim);');
+        expect(css).toContain('color: var(--text-on-muted-surface);');
     });
 });

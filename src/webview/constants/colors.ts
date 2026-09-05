@@ -230,6 +230,7 @@ export const COMPONENT_UI_COLORS = {
         hover: 'rgba(148, 163, 184, 0.1)',
         hoverStrong: 'rgba(148, 163, 184, 0.2)',
         accent: '#818cf8',
+        accentSurface: '#4f46e5',
         accentSoft: '#a5b4fc',
         accentBg: 'rgba(99, 102, 241, 0.15)',
         accentBgSoft: 'rgba(99, 102, 241, 0.12)',
@@ -258,6 +259,7 @@ export const COMPONENT_UI_COLORS = {
         hover: 'rgba(0, 0, 0, 0.04)',
         hoverStrong: 'rgba(15, 23, 42, 0.06)',
         accent: '#6366f1',
+        accentSurface: '#4f46e5',
         accentSoft: '#6366f1',
         accentBg: 'rgba(99, 102, 241, 0.1)',
         accentBgSoft: 'rgba(99, 102, 241, 0.08)',
@@ -494,6 +496,7 @@ export function getComponentUiColors(
     hover: string;
     hoverStrong: string;
     accent: string;
+    accentSurface: string;
     accentSoft: string;
     accentBg: string;
     accentBgSoft: string;
