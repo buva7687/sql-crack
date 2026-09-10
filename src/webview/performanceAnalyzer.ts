@@ -139,30 +139,53 @@ function findNodesByType(nodes: FlowNode[], type: FlowNode['type']): FlowNode[] 
     return nodes.filter(n => n.type === type);
 }
 
+// Index helpers so repeated lineage walks do not rescan the node/edge arrays
+// once per filter node.
+function indexNodesById(nodes: FlowNode[]): Map<string, FlowNode> {
+    return new Map(nodes.map(node => [node.id, node]));
+}
+
+function indexEdgesByTarget(edges: FlowEdge[]): Map<string, FlowEdge[]> {
+    const byTarget = new Map<string, FlowEdge[]>();
+    for (const edge of edges) {
+        const bucket = byTarget.get(edge.target);
+        if (bucket) {
+            bucket.push(edge);
+        } else {
+            byTarget.set(edge.target, [edge]);
+        }
+    }
+    return byTarget;
+}
+
 // Helper function to trace lineage from a filter node to source tables
-function traceFilterLineage(filterNode: FlowNode, nodes: FlowNode[], edges: FlowEdge[]): string[] {
+function traceFilterLineage(
+    filterNode: FlowNode,
+    nodesById: Map<string, FlowNode>,
+    edgesByTarget: Map<string, FlowEdge[]>
+): string[] {
     const sourceTables: string[] = [];
     const visited = new Set<string>();
-    
+
     function traverse(nodeId: string) {
         if (visited.has(nodeId)) {return;}
         visited.add(nodeId);
-        
-        const node = nodes.find(n => n.id === nodeId);
+
+        const node = nodesById.get(nodeId);
         if (!node) {return;}
-        
+
         if (node.type === 'table') {
             sourceTables.push(node.label);
             return;
         }
-        
+
         // Find incoming edges
-        const incomingEdges = edges.filter(e => e.target === nodeId);
+        const incomingEdges = edgesByTarget.get(nodeId) || [];
         incomingEdges.forEach(edge => {
             traverse(edge.source);
         });
     }
-    
+
     traverse(filterNode.id);
     return sourceTables;
 }
@@ -175,17 +198,19 @@ function detectFilterPushdownOpportunities(
     hints: OptimizationHint[]
 ): void {
     const filterNodes = findNodesByType(nodes, 'filter');
-    
+    const nodesById = indexNodesById(nodes);
+    const edgesByTarget = indexEdgesByTarget(edges);
+
     filterNodes.forEach(filterNode => {
         // Check if filter is after a JOIN
-        const incomingEdges = edges.filter(e => e.target === filterNode.id);
+        const incomingEdges = edgesByTarget.get(filterNode.id) || [];
         const hasJoinBefore = incomingEdges.some(edge => {
-            const sourceNode = nodes.find(n => n.id === edge.source);
+            const sourceNode = nodesById.get(edge.source);
             return sourceNode?.type === 'join';
         });
-        
+
         if (hasJoinBefore && filterNode.details) {
-            const sourceTables = traceFilterLineage(filterNode, nodes, edges);
+            const sourceTables = traceFilterLineage(filterNode, nodesById, edgesByTarget);
             
             // If filter only references one table but comes after JOIN, suggest pushdown
             if (sourceTables.length === 1) {

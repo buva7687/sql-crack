@@ -89,10 +89,18 @@ export function getViewportBounds(
     // Screen point (0, 0) -> Graph point (-offsetX/scale, -offsetY/scale)
     // Screen point (width, height) -> Graph point ((width-offsetX)/scale, (height-offsetY)/scale)
 
-    const minX = -offsetX / scale;
-    const minY = -offsetY / scale;
-    const maxX = (containerWidth - offsetX) / scale;
-    const maxY = (containerHeight - offsetY) / scale;
+    // Restore paths (persisted tab state, layout-history and preserved-render
+    // snapshots) assign state.scale straight through, so a corrupt stored value
+    // can reach this divisor. Guard here rather than at each assignment: a zero
+    // or NaN scale yields NaN/Infinity bounds that mark every node visible
+    // (defeating virtualization), and a negative scale inverts the bounds so
+    // every node is culled (blank canvas).
+    const safeScale = Number.isFinite(scale) && scale > 0 ? scale : 1;
+
+    const minX = -offsetX / safeScale;
+    const minY = -offsetY / safeScale;
+    const maxX = (containerWidth - offsetX) / safeScale;
+    const maxY = (containerHeight - offsetY) / safeScale;
 
     return { minX, maxX, minY, maxY };
 }

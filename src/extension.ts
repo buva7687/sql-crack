@@ -112,8 +112,13 @@ function updateSqlLikeFileContext(editor: vscode.TextEditor | undefined): void {
         }
     }
 
-    // Set context for use in when clauses
-    vscode.commands.executeCommand('setContext', 'sqlCrack.isAdditionalSqlFile', isSqlLike);
+    // Set context for use in when clauses. Fire-and-forget, but swallow the
+    // rejection explicitly so a failed context update cannot surface as an
+    // unhandled promise rejection.
+    void vscode.commands.executeCommand('setContext', 'sqlCrack.isAdditionalSqlFile', isSqlLike)
+        .then(undefined, (error: unknown) => {
+            logger.warn(`Failed to set sqlCrack.isAdditionalSqlFile context: ${String(error)}`);
+        });
 }
 
 function hasExecutableSql(sql: string): boolean {

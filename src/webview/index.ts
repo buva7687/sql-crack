@@ -59,6 +59,16 @@ import {
     LayoutHistoryStateSnapshot,
     setColorblindMode as setRendererColorblindMode,
 } from './renderer';
+import {
+    emptyLayoutHistory,
+    isValidDialect,
+    isValidFocusMode,
+    isValidLayoutType,
+    isValidQueryIndex,
+    isValidTabViewState,
+    sanitizeLayoutHistory,
+    toBoolean,
+} from './state/persistedViewState';
 import type { ColorblindMode } from '../shared/theme';
 import type { SqlFlowRuntimeConfig, ViewLocation } from '../shared/messages/sqlFlowRuntimeConfig';
 import { stripSqlComments } from '../shared/stringUtils';
@@ -650,7 +660,40 @@ function parseInitialUiState(raw: unknown): PersistedWebviewState | null {
     if (candidate.version !== 1 || !candidate.renderer || !Array.isArray(candidate.queryViewStates)) {
         return null;
     }
-    return candidate as PersistedWebviewState;
+    if (!isValidTabViewState(candidate.renderer.viewState)) {
+        // The blob's own viewport is corrupt; treat the whole record as
+        // untrustworthy rather than restoring it piecemeal.
+        return null;
+    }
+    // A non-integer index clamps to NaN downstream and slips past the range
+    // guard in performSwitchToQueryIndex.
+    if (!isValidQueryIndex(candidate.currentQueryIndex)) {
+        return null;
+    }
+    // currentDialect reaches the parser via visualize(); renderer.layout is
+    // handed to switchLayout() and drives edge geometry; renderer.focusMode is
+    // handed to setFocusMode(). All three are restored outside the
+    // layout-history snapshot and so need the same checks applied there.
+    if (!isValidDialect(candidate.currentDialect)
+        || !isValidLayoutType(candidate.renderer.layout)
+        || !isValidFocusMode(candidate.renderer.focusMode)) {
+        return null;
+    }
+    const sanitized = candidate as PersistedWebviewState;
+    // Cosmetic toggles are read in boolean position only, so coerce them
+    // instead of discarding an otherwise-valid record.
+    sanitized.userExplicitlySetDialect = toBoolean(sanitized.userExplicitlySetDialect);
+    sanitized.compareModeActive = toBoolean(sanitized.compareModeActive);
+    sanitized.renderer.legendVisible = toBoolean(sanitized.renderer.legendVisible);
+    sanitized.renderer.hintsVisible = toBoolean(sanitized.renderer.hintsVisible);
+    sanitized.renderer.sqlPreviewVisible = toBoolean(sanitized.renderer.sqlPreviewVisible);
+    sanitized.renderer.columnFlowsVisible = toBoolean(sanitized.renderer.columnFlowsVisible);
+    sanitized.renderer.focusModeEnabled = toBoolean(sanitized.renderer.focusModeEnabled);
+    sanitized.queryViewStates = sanitized.queryViewStates.filter(entry => isValidTabViewState(entry?.viewState));
+    sanitized.renderer.layoutHistory =
+        (sanitizeLayoutHistory(sanitized.renderer.layoutHistory) as LayoutHistoryStateSnapshot | null)
+        ?? (emptyLayoutHistory() as LayoutHistoryStateSnapshot);
+    return sanitized;
 }
 
 async function applyInitialUiStateIfAvailable(): Promise<void> {
@@ -1665,7 +1708,10 @@ async function switchToQueryIndex(newIndex: number): Promise<void> {
 }
 
 async function performSwitchToQueryIndex(newIndex: number): Promise<void> {
-    if (!batchResult || newIndex < 0 || newIndex >= batchResult.queries.length) {
+    // Number.isInteger also rejects NaN, which would otherwise slip past both
+    // range comparisons (every NaN comparison is false) and leave
+    // currentQueryIndex as NaN, crashing the next renderCurrentQuery().
+    if (!batchResult || !Number.isInteger(newIndex) || newIndex < 0 || newIndex >= batchResult.queries.length) {
         return;
     }
 

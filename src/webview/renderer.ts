@@ -1344,7 +1344,27 @@ export function cleanupRenderer(): void {
     activeEdgeSelectionId = null;
 }
 
+/**
+ * Repair viewport geometry before it reaches the SVG. Restored layout-history
+ * snapshots assign scale/offsets straight through, and a NaN or non-positive
+ * value here emits an invalid transform (`scale(NaN)`) or mirrors the graph
+ * (`scale(-1)`), which the viewport-bounds clamp cannot prevent because it
+ * runs on a different path.
+ */
+function sanitizeViewportGeometry(): void {
+    if (!Number.isFinite(state.scale) || state.scale <= 0) {
+        state.scale = 1;
+    }
+    if (!Number.isFinite(state.offsetX)) {
+        state.offsetX = 0;
+    }
+    if (!Number.isFinite(state.offsetY)) {
+        state.offsetY = 0;
+    }
+}
+
 function updateTransform(): void {
+    sanitizeViewportGeometry();
     if (mainGroup) {
         mainGroup.setAttribute('transform', `translate(${state.offsetX}, ${state.offsetY}) scale(${state.scale})`);
         // Update minimap viewport when panning/zooming.
