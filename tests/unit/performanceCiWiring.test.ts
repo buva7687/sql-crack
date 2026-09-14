@@ -8,6 +8,9 @@ describe('performance CI wiring', () => {
     };
     const testWorkflowSource = readFileSync(join(__dirname, '../../.github/workflows/test.yml'), 'utf8');
     const releaseWorkflowSource = readFileSync(join(__dirname, '../../.github/workflows/release.yml'), 'utf8');
+    const releaseConfig = JSON.parse(
+        readFileSync(join(__dirname, '../../release.config.json'), 'utf8')
+    ) as { channel?: string; candidateFor?: string };
 
     it('keeps the perf gate out of default Jest runs and exposes a dedicated script', () => {
         const perfIgnorePatterns = [
@@ -23,7 +26,7 @@ describe('performance CI wiring', () => {
         }
 
         expect(packageJson.scripts?.['test:perf']).toBe(
-            'node scripts/runJest.js --runInBand --runTestsByPath tests/benchmark/ciParsePerformance.test.ts tests/webview/perfBaseline.test.ts'
+            'node scripts/runJest.js --sql-crack-expose-gc --runInBand --runTestsByPath tests/benchmark/ciParsePerformance.test.ts tests/webview/perfBaseline.test.ts'
         );
     });
 
@@ -34,6 +37,13 @@ describe('performance CI wiring', () => {
         expect(releaseWorkflowSource).toContain('npm run test:perf');
     });
 
+    it('measures retained parser memory with garbage collection enabled', () => {
+        const runnerSource = readFileSync(join(__dirname, '../../scripts/runJest.js'), 'utf8');
+
+        expect(runnerSource).toContain("const exposeGcFlag = '--sql-crack-expose-gc';");
+        expect(runnerSource).toContain("exposeGc ? ['--expose-gc'] : []");
+    });
+
     it('gates release packaging on a production dependency audit', () => {
         expect(packageJson.scripts?.['audit:prod']).toBe(
             'npm audit --omit=dev --audit-level=moderate'
@@ -41,7 +51,7 @@ describe('performance CI wiring', () => {
 
         const auditIndex = releaseWorkflowSource.indexOf('npm run audit:prod');
         const packageIndex = releaseWorkflowSource.indexOf('npm run package');
-        const publishIndex = releaseWorkflowSource.indexOf('npx @vscode/vsce publish');
+        const publishIndex = releaseWorkflowSource.indexOf('@vscode/vsce@3.9.2 publish');
 
         expect(auditIndex).toBeGreaterThan(-1);
         expect(packageIndex).toBeGreaterThan(auditIndex);
@@ -52,10 +62,10 @@ describe('performance CI wiring', () => {
         const concurrencyIndex = releaseWorkflowSource.indexOf('concurrency:');
         const releaseGroupIndex = releaseWorkflowSource.indexOf('group: release-${{ github.workflow }}');
         const cancelInProgressIndex = releaseWorkflowSource.indexOf('cancel-in-progress: false');
-        const packageVsixIndex = releaseWorkflowSource.indexOf('npx @vscode/vsce package');
+        const packageVsixIndex = releaseWorkflowSource.indexOf('@vscode/vsce@3.9.2 package');
         const githubReleaseIndex = releaseWorkflowSource.indexOf('uses: softprops/action-gh-release@v2');
-        const marketplacePublishIndex = releaseWorkflowSource.indexOf('npx @vscode/vsce publish');
-        const openVsxPublishIndex = releaseWorkflowSource.indexOf('npx ovsx publish');
+        const marketplacePublishIndex = releaseWorkflowSource.indexOf('@vscode/vsce@3.9.2 publish');
+        const openVsxPublishIndex = releaseWorkflowSource.indexOf('ovsx@1.2.0 publish');
 
         expect(concurrencyIndex).toBeGreaterThan(-1);
         expect(releaseGroupIndex).toBeGreaterThan(concurrencyIndex);
@@ -81,5 +91,19 @@ describe('performance CI wiring', () => {
         expect(releaseWorkflowSource).toContain("env.RELEASE_MODE == 'github-release'");
         expect(releaseWorkflowSource).toContain("env.RELEASE_MODE == 'vscode-marketplace'");
         expect(releaseWorkflowSource).toContain("env.RELEASE_MODE == 'open-vsx'");
+    });
+
+    it('publishes 0.9.4 as a reproducible 1.0 pre-release candidate', () => {
+        expect(releaseConfig).toEqual({ channel: 'pre-release', candidateFor: '1.0.0' });
+        expect(releaseWorkflowSource).toContain('release_channel: ${{ steps.check.outputs.release_channel }}');
+        expect(releaseWorkflowSource).toContain('RELEASE_CHANNEL: ${{ needs.check.outputs.release_channel }}');
+        expect(releaseWorkflowSource).toContain('PRERELEASE_ARGS+=(--pre-release)');
+        expect(releaseWorkflowSource).toContain("prerelease: ${{ env.RELEASE_CHANNEL == 'pre-release' }}");
+        expect(releaseWorkflowSource).toContain('@vscode/vsce@3.9.2 package');
+        expect(releaseWorkflowSource).toContain('@vscode/vsce@3.9.2 publish');
+        expect(releaseWorkflowSource).toContain('ovsx@1.2.0 publish');
+        expect(releaseWorkflowSource).toContain('node-version: 22.x');
+        expect(testWorkflowSource).toContain('node-version: [20.x, 22.x]');
+        expect(testWorkflowSource).not.toContain('18.x');
     });
 });

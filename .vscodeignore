@@ -2,6 +2,7 @@
 .vscode-test/**
 .git/**
 .gitignore
+.vsixignore
 .github/**
 .claude/**
 .factory/**
@@ -14,10 +15,12 @@ out-cjs/**
 **/*.ts
 **/*.map
 **/tsconfig.json
+tsconfig*.json
 **/.eslintrc.json
 
 # Build config
 webpack.config.js
+release.config.json
 jest.config.js
 .yarnrc
 .eslintrc.json

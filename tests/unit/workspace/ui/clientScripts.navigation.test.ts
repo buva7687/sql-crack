@@ -288,6 +288,10 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain("case 'view-lineage':");
         expect(script).toContain("case 'analyze-impact':");
         expect(script).toContain("case 'show-file-tables':");
+        expect(script).toContain("vscode.postMessage({ command: 'showFileTables', filePath });");
+        expect(script).toContain('function activatePrimaryGraphNode(node)');
+        expect(script).toContain('activatePrimaryGraphNode(sel);');
+        expect(script).toContain('activatePrimaryGraphNode(node);');
         expect(script).toContain("case 'open-file':");
         expect(script).toContain("case 'trace-upstream':");
         expect(script).toContain("case 'trace-downstream':");

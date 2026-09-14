@@ -166,13 +166,13 @@ export function getWorkspaceShellScriptFragment(): string {
                 return;
             }
 
-            // Enter: Open file for selected node
+            // Enter: Run the selected node's primary action.
             if (e.key === 'Enter') {
                 if (!selectedNodeId) return;
                 const sel = document.querySelector('.node[data-id="' + CSS.escape(selectedNodeId) + '"]');
                 if (sel) {
-                    const fp = sel.getAttribute('data-filepath');
-                    if (fp) openFile(fp);
+                    e.preventDefault();
+                    activatePrimaryGraphNode(sel);
                 }
                 return;
             }
@@ -287,6 +287,44 @@ export function getWorkspaceShellScriptFragment(): string {
         function switchGraphModeFromAction(mode) {
             if (!mode) return;
             vscode.postMessage({ command: 'switchGraphMode', mode });
+        }
+
+        function showTablesForFile(filePath) {
+            if (!filePath) return;
+            vscode.postMessage({ command: 'showFileTables', filePath });
+        }
+
+        function activatePrimaryGraphNode(node) {
+            if (!node) return;
+            const nodeId = node.getAttribute('data-id') || '';
+            const nodeLabel = node.getAttribute('data-label') || nodeId;
+            const nodeType = node.getAttribute('data-type') || '';
+            const filePath = node.getAttribute('data-filepath') || '';
+
+            if (nodeType === 'file') {
+                showTablesForFile(filePath);
+                return;
+            }
+            if (!nodeId) return;
+
+            switchToView('lineage', false, nodeLabel, nodeType);
+            if (lineageTitle) {
+                lineageTitle.textContent = 'Data Lineage';
+            }
+            if (lineageContent) {
+                lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading lineage...</div></div>';
+            }
+            postWorkspaceMessage({
+                command: 'getLineageGraph',
+                nodeId,
+                nodeLabel,
+                nodeType,
+                direction: 'both',
+                depth: lineageDepth
+            });
+            if (typeof trackUxEvent === 'function') {
+                trackUxEvent('graph_primary_action', { nodeType: nodeType || 'unknown' });
+            }
         }
 
         function getSelectedGraphNodeContext() {
@@ -545,21 +583,7 @@ export function getWorkspaceShellScriptFragment(): string {
                     if (!filePath) {
                         break;
                     }
-                    if (typeof trackUxEvent === 'function') {
-                        trackUxEvent('graph_show_file_tables', { fromMode: currentGraphMode });
-                    }
-                    const queryValue = basenameFromPath(filePath) || filePath;
-                    switchGraphModeFromAction('tables');
-                    setTimeout(() => {
-                        if (searchInput) {
-                            searchInput.value = queryValue;
-                            if (typeof performSearch === 'function') {
-                                performSearch();
-                            } else {
-                                searchInput.dispatchEvent(new Event('input', { bubbles: true }));
-                            }
-                        }
-                    }, 140);
+                    showTablesForFile(filePath);
                     break;
                 }
                 case 'open-file': {

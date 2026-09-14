@@ -21,9 +21,27 @@ export function buildIndexStatus(index: WorkspaceIndex | null, changesSinceIndex
         };
     }
 
-    const ageMs = Date.now() - index.lastUpdated;
-    const relative = formatRelativeTime(index.lastUpdated);
+    const now = Date.now();
+    const hasValidTimestamp = Number.isFinite(index.lastUpdated) && index.lastUpdated > 0;
+    const timestampIsAhead = hasValidTimestamp && index.lastUpdated > now + (5 * 60 * 1000);
     const fileCount = index.fileCount || 0;
+    const dirtyNote = changesSinceIndex > 0
+        ? ` • ${changesSinceIndex} file change${changesSinceIndex === 1 ? '' : 's'} since last index`
+        : '';
+
+    if (!hasValidTimestamp || timestampIsAhead) {
+        const reason = timestampIsAhead ? 'ahead of the current clock' : 'unavailable';
+        return {
+            text: changesSinceIndex > 0
+                ? `Index age unknown (${changesSinceIndex} changed)`
+                : 'Index age unknown',
+            title: `Index timestamp is ${reason} • ${fileCount} file${fileCount === 1 ? '' : 's'}${dirtyNote} • Refresh to verify current results`,
+            level: 'stale',
+        };
+    }
+
+    const ageMs = Math.max(0, now - index.lastUpdated);
+    const relative = formatRelativeTime(index.lastUpdated);
 
     let level: 'fresh' | 'stale' | 'old' = 'fresh';
     if (ageMs > 60 * 60 * 1000) {
@@ -36,10 +54,6 @@ export function buildIndexStatus(index: WorkspaceIndex | null, changesSinceIndex
     if (changesSinceIndex > 0 && level === 'fresh') {
         level = 'stale';
     }
-
-    const dirtyNote = changesSinceIndex > 0
-        ? ` • ${changesSinceIndex} file change${changesSinceIndex === 1 ? '' : 's'} since last index`
-        : '';
 
     return {
         text: changesSinceIndex > 0 ? `Indexed ${relative} (${changesSinceIndex} changed)` : `Indexed ${relative}`,

@@ -16,6 +16,11 @@ const webpackConfigFactory = require(join(__dirname, '../../webpack.config.js'))
     devtool?: unknown;
     mode?: string;
     output?: { clean?: boolean | { keep?: RegExp } };
+    performance?: {
+        hints?: 'warning' | 'error' | false;
+        maxAssetSize?: number;
+        maxEntrypointSize?: number;
+    };
 }>;
 
 describe('webpack config production detection', () => {
@@ -58,6 +63,15 @@ describe('webpack config production detection', () => {
         expect(keep?.test('extension.js.map')).toBe(false);
         // A second cleaner would delete async chunks emitted by the extension compiler.
         expect(configs[1].output?.clean).toBeUndefined();
+    });
+
+    it('keeps the production webview within an explicit 4 MiB warning budget', () => {
+        const configs = webpackConfigFactory({}, { mode: 'production' });
+        const webviewPerformance = configs[1].performance;
+
+        expect(webviewPerformance?.hints).toBe('warning');
+        expect(webviewPerformance?.maxAssetSize).toBe(4 * 1024 * 1024);
+        expect(webviewPerformance?.maxEntrypointSize).toBe(4 * 1024 * 1024);
     });
 
     it('detects production from NODE_ENV when argv.mode is absent', () => {

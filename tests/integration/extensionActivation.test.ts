@@ -194,6 +194,7 @@ describe('Extension Activation Wiring', () => {
             expect(source).toContain("command: 'analyzeImpact'");
             expect(source).toContain("command: 'export'");
             expect(source).toContain("command: 'openFile'");
+            expect(source).toContain("command: 'showFileTables'");
             expect(source).toContain("command: 'exploreTable'");
         });
     });

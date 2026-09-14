@@ -298,6 +298,10 @@ export class MessageHandler {
                     this.handleShowInGraph(message.query, message.nodeType);
                     break;
 
+                case 'showFileTables':
+                    await this.handleShowFileTables(message.filePath);
+                    break;
+
                 case 'visualizeFile':
                     await this.handleVisualizeFile(message.filePath);
                     break;
@@ -467,6 +471,27 @@ export class MessageHandler {
             return;
         }
         this._context.renderCurrentView();
+    }
+
+    private async handleShowFileTables(filePath: string): Promise<void> {
+        // Webview paths can originate from a remote/Windows extension host even
+        // when tests or the UI process run on POSIX, so normalize both separators.
+        const query = path.posix.basename((filePath || '').replace(/\\/g, '/')).trim();
+        if (!query) {
+            return;
+        }
+
+        const fromMode = this._context.getCurrentGraphMode();
+        this._context.setCurrentGraphMode('tables');
+        this._context.setCurrentSearchFilter({
+            query,
+            nodeTypes: undefined,
+            useRegex: false,
+            caseSensitive: false
+        });
+        this._context.setCurrentView('graph');
+        this._context.trackUxEvent('graph_show_file_tables', { fromMode });
+        await this._context.rebuildAndRenderGraph();
     }
 
     private async handleRefresh(): Promise<void> {

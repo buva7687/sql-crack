@@ -234,4 +234,23 @@ describe('buildIndexStatus edge cases', () => {
         const status = buildIndexStatus(index, 0);
         expect(status.title).toContain('0 files');
     });
+
+    it.each([Number.NaN, Number.POSITIVE_INFINITY, 0])('marks invalid index timestamp %p as stale and unknown', (lastUpdated) => {
+        const status = buildIndexStatus({ lastUpdated, fileCount: 4 } as any, 0);
+
+        expect(status.level).toBe('stale');
+        expect(status.text).toBe('Index age unknown');
+        expect(status.title).toContain('Refresh to verify current results');
+    });
+
+    it('marks an index timestamp far ahead of the current clock as stale', () => {
+        const status = buildIndexStatus({
+            lastUpdated: Date.now() + (10 * 60 * 1000),
+            fileCount: 2,
+        } as any, 1);
+
+        expect(status.level).toBe('stale');
+        expect(status.text).toBe('Index age unknown (1 changed)');
+        expect(status.title).toContain('ahead of the current clock');
+    });
 });

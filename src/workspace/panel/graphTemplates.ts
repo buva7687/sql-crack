@@ -290,7 +290,7 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/>
                 </svg>
-                Analyze Impact
+                Analyze in Impact
             </div>
             <div class="context-menu-divider"></div>
             <div class="context-menu-item" data-action="copyName" role="menuitem" tabindex="-1">
@@ -320,14 +320,14 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                     <polyline points="14 2 14 8 20 8"/>
                 </svg>
-                Open File
+                Open file
             </div>
             <div class="context-menu-item" data-action="visualize" role="menuitem" tabindex="-1">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="3"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/>
                     <path d="M14.5 9.5L17 7M9.5 14.5L7 17"/>
                 </svg>
-                Visualize Dependencies
+                Open SQL Flow
             </div>
             <div class="context-menu-item" data-action="exportLineage" role="menuitem" tabindex="-1">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -571,7 +571,7 @@ export function createGraphAreaHtml(options: GraphAreaHtmlOptions): string {
                         <span class="hint-item"><kbd>↑↓←→</kbd><span>Navigate</span></span>
                         <span class="hint-item"><kbd>Ctrl+F</kbd><span>Search</span></span>
                         <span class="hint-item"><kbd>Esc</kbd><span>Clear</span></span>
-                        <span class="hint-item"><kbd>Enter</kbd><span>Open file</span></span>
+                        <span class="hint-item"><kbd>Enter</kbd><span>Show tables / trace lineage</span></span>
                     </div>
                 </div>
             </div>

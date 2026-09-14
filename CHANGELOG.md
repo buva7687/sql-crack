@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.4] - 2026-09-14
+
+### Added
+
+- **1.0 candidate release channel**: Added explicit stable/pre-release metadata so the same validated VSIX is marked as a pre-release on GitHub, the VS Code Marketplace, and Open VSX. Targeted retries recover the channel from the requested tag, while older tags remain stable by default.
+- **Support policy**: Documented the supported stable/candidate releases, VS Code baseline, best-effort parser contract, and the information needed for actionable issue reports.
+
+### Changed
+
+- **Workspace Graph primary actions**: Enter and double-click now follow the node's advertised primary action: file nodes switch to Tables mode and show objects from that file, while table/view/CTE/external nodes open their lineage. Context-menu wording now matches the selection panel.
+- **Release toolchain**: Release CI now runs on Node 22, validation covers Node 20 and Node 22, Marketplace/Open VSX commands pin current publisher versions without adding them to the extension dependency tree, and the parser memory gate explicitly runs garbage collection so it measures retained memory rather than arbitrary heap timing.
+- **Webview bundle budget**: The production performance budget now uses an exact 4 MiB threshold. This keeps warnings meaningful while reflecting the intended binary-size limit for the CSP-constrained parser bundle.
+- **VSIX contents**: Removed legacy ignore metadata and test TypeScript configuration from the packaged extension while retaining the new support policy.
+
+### Fixed
+
+- **File-to-table navigation race**: Replaced the webview timer-based mode switch/search sequence with one host-side command that applies mode, search, and view state atomically before rebuilding the graph.
+- **Index trust status**: Invalid, missing, or implausibly future index timestamps are shown as an unknown/stale age with refresh guidance instead of being labeled fresh.
+
+### Tests
+
+- Added regression coverage for cross-platform file-to-table routing, primary Graph actions, index timestamp validation, the 4 MiB bundle budget, pinned release tools, Node support, and pre-release channel propagation.
+
 ## [0.9.3] - 2026-09-09
 
 ### Fixed
