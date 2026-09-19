@@ -1,4 +1,5 @@
 import { getDollarQuoteDelimiterAt, isHashTempTableIdentifierAt } from '../../../shared/stringUtils';
+import { maskStringsAndComments } from '../dialects/preprocessing';
 
 export function stripLeadingComments(sql: string): string {
     let result = sql.trim();
@@ -220,7 +221,9 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
 
         if (!inString && !inDollarQuotes && blockCommentDepth === 0 && !inLineComment) {
             if (char === '(') { depth++; }
-            if (char === ')') { depth--; }
+            // Recover from a stray closing parenthesis instead of carrying a
+            // negative depth that disables every later semicolon split.
+            if (char === ')') { depth = Math.max(0, depth - 1); }
 
             if (matchKeyword(i, 'CASE')) {
                 caseDepth++;
@@ -291,4 +294,27 @@ export function countSqlStatements(sql: string): number {
         count++;
     });
     return count;
+}
+
+/** Split SQL Server batches on a line containing only GO (optionally with a repeat count). */
+export function splitTransactSqlBatches(sql: string): string[] {
+    const masked = maskStringsAndComments(sql);
+    const separator = /^[ \t]*GO(?:[ \t]+\d+)?[ \t]*(?:\r?\n|$)/gim;
+    const batches: string[] = [];
+    let batchStart = 0;
+    let match: RegExpExecArray | null;
+
+    while ((match = separator.exec(masked)) !== null) {
+        const batch = sql.slice(batchStart, match.index).trim();
+        if (batch && stripLeadingComments(batch).trim()) {
+            batches.push(batch);
+        }
+        batchStart = match.index + match[0].length;
+    }
+
+    const tail = sql.slice(batchStart).trim();
+    if (tail && stripLeadingComments(tail).trim()) {
+        batches.push(tail);
+    }
+    return batches;
 }

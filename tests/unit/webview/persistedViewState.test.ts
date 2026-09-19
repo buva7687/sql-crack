@@ -274,6 +274,18 @@ describe('persisted view state validation', () => {
             expect(source).toContain('!Number.isInteger(newIndex)');
         });
 
+        it('keeps initial state pending while re-parsing with the restored dialect', () => {
+            const source = readSource('src/webview/index.ts');
+            const functionBody = source.match(
+                /async function applyInitialUiStateIfAvailable\(\): Promise<void> \{[\s\S]*?\n}\n/
+            )?.[0];
+            expect(functionBody).toBeDefined();
+            expect(functionBody!.indexOf('applyInitialStatePending = false;'))
+                .toBeGreaterThan(functionBody!.indexOf("if (state.currentDialect !== lastParsedDialect"));
+            expect(functionBody!.indexOf('applyInitialStatePending = false;'))
+                .toBeGreaterThan(functionBody!.indexOf('void visualize(sql);'));
+        });
+
         it('updateTransform sanitizes geometry before writing the SVG transform', () => {
             const source = readSource('src/webview/renderer.ts');
             expect(source).toContain('function sanitizeViewportGeometry(): void');

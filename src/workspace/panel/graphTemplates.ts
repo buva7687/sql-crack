@@ -106,9 +106,9 @@ export function createGraphBodyHtml(options: GraphBodyHtmlOptions): string {
             </div>
 
             <div class="header-right">
-                <button class="workspace-command-btn" id="btn-workspace-command" type="button" title="Open workspace commands (Ctrl/Cmd+K)" aria-label="Open workspace command search">
+                <button class="workspace-command-btn" id="btn-workspace-command" type="button" title="Open workspace commands (Alt+K)" aria-label="Open workspace command search">
                     <span>Quick Find</span>
-                    <kbd>${process.platform === 'darwin' ? 'Cmd+K' : 'Ctrl+K'}</kbd>
+                    <kbd>Alt+K</kbd>
                 </button>
                 <div class="search-box">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--text-dim)" stroke-width="2">

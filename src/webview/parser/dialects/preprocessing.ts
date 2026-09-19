@@ -129,6 +129,7 @@ export function preprocessPostgresSyntax(sql: string, dialect: SqlDialect): stri
     let match: RegExpExecArray | null;
     const typePrefixRegex = /\b(timestamptz|timestamp|date|time|interval)\b/gi;
     const typePrefixMatches: { start: number; end: number }[] = [];
+    const intervalQualifierMatches: { start: number; end: number }[] = [];
     while ((match = typePrefixRegex.exec(masked)) !== null) {
         let pos = match.index + match[0].length;
         if (pos < result.length && /\s/.test(result[pos])) {
@@ -137,11 +138,37 @@ export function preprocessPostgresSyntax(sql: string, dialect: SqlDialect): stri
             }
             if (pos < result.length && result[pos] === '\'') {
                 typePrefixMatches.push({ start: match.index, end: pos });
+                if (match[1].toLowerCase() === 'interval') {
+                    let literalEnd = pos + 1;
+                    while (literalEnd < result.length) {
+                        if (result[literalEnd] === '\'' && result[literalEnd + 1] === '\'') {
+                            literalEnd += 2;
+                            continue;
+                        }
+                        if (result[literalEnd] === '\'') {
+                            literalEnd++;
+                            break;
+                        }
+                        literalEnd++;
+                    }
+                    let qualifierStart = literalEnd;
+                    while (qualifierStart < masked.length && /\s/.test(masked[qualifierStart])) {
+                        qualifierStart++;
+                    }
+                    const qualifier = /^(?:YEAR|MONTH|DAY|HOUR|MINUTE|SECOND)(?:\s+TO\s+(?:YEAR|MONTH|DAY|HOUR|MINUTE|SECOND))?\b/i
+                        .exec(masked.slice(qualifierStart));
+                    if (qualifier) {
+                        intervalQualifierMatches.push({
+                            start: qualifierStart,
+                            end: qualifierStart + qualifier[0].length,
+                        });
+                    }
+                }
             }
         }
     }
-    if (typePrefixMatches.length > 0) {
-        result = applyTextRewrites(result, typePrefixMatches);
+    if (typePrefixMatches.length > 0 || intervalQualifierMatches.length > 0) {
+        result = applyTextRewrites(result, [...typePrefixMatches, ...intervalQualifierMatches]);
         changed = true;
     }
 
@@ -664,10 +691,20 @@ export function preprocessOracleSyntax(sql: string, dialect: SqlDialect): string
     let result = sql;
     let changed = false;
 
-    // 1. Remove (+) outer join operator
-    const outerJoinResult = result.replace(/\(\+\)/g, '');
-    if (outerJoinResult !== result) {
-        result = outerJoinResult;
+    // 1. Remove (+) outer join operators found in SQL structure, preserving
+    // identical text inside string literals and comments.
+    const outerJoinMasked = maskStringsAndComments(result);
+    const outerJoinRegex = /\(\+\)/g;
+    const outerJoinRewrites: Array<{ start: number; end: number }> = [];
+    let outerJoinMatch: RegExpExecArray | null;
+    while ((outerJoinMatch = outerJoinRegex.exec(outerJoinMasked)) !== null) {
+        outerJoinRewrites.push({
+            start: outerJoinMatch.index,
+            end: outerJoinMatch.index + outerJoinMatch[0].length,
+        });
+    }
+    if (outerJoinRewrites.length > 0) {
+        result = applyTextRewrites(result, outerJoinRewrites);
         changed = true;
     }
 
@@ -805,7 +842,10 @@ export function preprocessOracleSyntax(sql: string, dialect: SqlDialect): string
     while ((match = createTableRegex.exec(masked3)) !== null) {
         const afterName = match.index + match[0].length;
         let openParen = afterName;
-        while (openParen < masked3.length && masked3[openParen] !== '(' && masked3[openParen] !== ';') { openParen++; }
+        while (openParen < masked3.length && /\s/.test(masked3[openParen])) { openParen++; }
+        // Only a parenthesis immediately following the table name can be the
+        // CREATE TABLE column list. Searching ahead mistakes function calls in
+        // a CTAS SELECT (for example COUNT(*)) for that list.
         if (openParen >= masked3.length || masked3[openParen] !== '(') { continue; }
 
         const closeParen = findMatchingParen(result, openParen);

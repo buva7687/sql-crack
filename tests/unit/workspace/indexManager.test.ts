@@ -204,6 +204,19 @@ describe('IndexManager', () => {
     // =========================================================================
 
     describe('buildIndex', () => {
+        it('builds a missing index from a queued watcher update without waiting on itself', async () => {
+            mockScanner.analyzeWorkspace.mockResolvedValue([
+                createMockAnalysis('/queued.sql', [{ name: 'queued_table' }])
+            ]);
+            (indexManager as any).updateQueue.add('/queued.sql');
+
+            await expect((indexManager as any).processUpdateQueue()).resolves.toBeUndefined();
+
+            expect(mockScanner.analyzeWorkspace).toHaveBeenCalledTimes(1);
+            expect(indexManager.getIndex()?.definitionMap.has('queued_table')).toBe(true);
+            expect((indexManager as any).updateQueue.size).toBe(0);
+        });
+
         it('should build index from workspace analysis', async () => {
             const analyses = [
                 createMockAnalysis('/tables.sql', [

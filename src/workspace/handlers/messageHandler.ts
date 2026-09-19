@@ -441,8 +441,15 @@ export class MessageHandler {
     // ========== Basic View Commands ==========
 
     private handleSwitchView(view: ViewMode | 'graph' | 'issues'): void {
+        const previousView = this._context.getCurrentView();
         this._context.setCurrentView(view);
-        this._context.renderCurrentView();
+        // Graph, lineage, and impact share one live webview document. Replacing
+        // that document when the client returns to Graph discards its saved
+        // zoom/pan state before restoreViewState can apply it. The standalone
+        // Issues document still requires a host render in either direction.
+        if (view !== 'graph' || previousView === 'issues') {
+            this._context.renderCurrentView();
+        }
     }
 
     private handleShowInGraph(query: string, nodeType?: 'table' | 'view' | 'external' | 'file'): void {

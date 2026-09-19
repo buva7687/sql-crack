@@ -48,4 +48,13 @@ describe('package command palette entries', () => {
             expect(step?.media?.markdown).not.toBe('');
         });
     });
+
+    it('provides media for every walkthrough step', () => {
+        const walkthroughSteps = packageJson?.contributes?.walkthroughs?.[0]?.steps ?? [];
+        expect(walkthroughSteps.length).toBeGreaterThan(0);
+        walkthroughSteps.forEach((step: { media?: { image?: string; altText?: string } }) => {
+            expect(step.media?.image).toBeTruthy();
+            expect(step.media?.altText).toBeTruthy();
+        });
+    });
 });

@@ -55,7 +55,10 @@ export function selectNodeFeature(options: SelectNodeFeatureOptions): void {
         }
 
         if (id === nodeId) {
-            rect.setAttribute('stroke', UI_COLORS.white);
+            const selectedStroke = state.isDarkTheme
+                ? UI_COLORS.white
+                : getComponentUiColors(false).accent;
+            rect.setAttribute('stroke', selectedStroke);
             rect.setAttribute('stroke-width', '3');
             rect.setAttribute('filter', 'url(#glow)');
             highlightConnectedEdges(id, true);

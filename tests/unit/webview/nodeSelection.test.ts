@@ -1,6 +1,6 @@
 import type { FlowNode, ViewState } from '../../../src/webview/types';
 import { selectNodeFeature } from '../../../src/webview/interaction/nodeSelection';
-import { EDGE_COLORS, UI_COLORS } from '../../../src/webview/constants';
+import { EDGE_COLORS, UI_COLORS, getComponentUiColors } from '../../../src/webview/constants';
 
 type FakeRect = {
     setAttribute: jest.Mock<void, [string, string]>;
@@ -180,6 +180,30 @@ describe('nodeSelection', () => {
         expect(edgeA.setAttribute).toHaveBeenCalledWith('stroke-width', '2');
         expect(edgeA.setAttribute).toHaveBeenCalledWith('marker-end', 'url(#arrowhead)');
         expect(edgeB.setAttribute).toHaveBeenCalledWith('stroke', EDGE_COLORS.default);
+    });
+
+    it('uses a visible accent selection border in the light theme', () => {
+        const selectedRect = createRect();
+        const mainGroup = {
+            querySelectorAll: jest.fn((selector: string) =>
+                selector === '.node' ? [createNodeGroup('n1', selectedRect)] : []),
+        };
+
+        selectNodeFeature({
+            nodeId: 'n1',
+            state: createState({ isDarkTheme: false }),
+            mainGroup: mainGroup as any,
+            currentNodes: [],
+            currentSql: '',
+            highlightConnectedEdges: jest.fn(),
+            onUpdateDetailsPanel: jest.fn(),
+            onUpdateBreadcrumb: jest.fn(),
+        });
+
+        expect(selectedRect.setAttribute).toHaveBeenCalledWith(
+            'stroke',
+            getComponentUiColors(false).accent
+        );
     });
 
     it('preserves every search-match border when navigating between results', () => {

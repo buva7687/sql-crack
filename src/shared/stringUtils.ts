@@ -41,6 +41,21 @@ export function escapeHtml(value: string): string {
 }
 
 /**
+ * Truncate by Unicode code points so a surrogate pair is never split.
+ * `maxLength` includes the suffix.
+ */
+export function truncateCodePoints(value: string, maxLength: number, suffix = '…'): string {
+    const characters = Array.from(value);
+    if (characters.length <= maxLength) {
+        return value;
+    }
+
+    const suffixCharacters = Array.from(suffix).slice(0, Math.max(0, maxLength));
+    const contentLength = Math.max(0, maxLength - suffixCharacters.length);
+    return characters.slice(0, contentLength).join('') + suffixCharacters.join('');
+}
+
+/**
  * Serialize a value with JSON.stringify and escape the HTML-significant sequences
  * that could break out of an inline `<script>` context (closing the script tag,
  * HTML comments, or a CDATA end). Canonical home for what the panel and workspace

@@ -295,11 +295,11 @@ describe('keyboardListeners', () => {
         expect(searchBox.focus).toHaveBeenCalled();
 
         keydown!({
-            key: 'P',
-            ctrlKey: true,
+            key: 'p',
+            ctrlKey: false,
             metaKey: false,
-            altKey: false,
-            shiftKey: true,
+            altKey: true,
+            shiftKey: false,
             preventDefault: jest.fn(),
         });
         expect(callbacks.toggleCommandBar).toHaveBeenCalled();
@@ -374,5 +374,23 @@ describe('keyboardListeners', () => {
         });
 
         expect(callbacks.navigateSearch).not.toHaveBeenCalled();
+    });
+
+    it('does not fire graph shortcuts while a select control is focused', () => {
+        const svg = createKeyboardTarget();
+        const callbacks = createCallbacks();
+        const listeners = new Map<string, Listener>();
+        global.document = {
+            activeElement: { tagName: 'SELECT' },
+            addEventListener: jest.fn((type: string, handler: Listener) => listeners.set(type, handler)),
+        } as unknown as Document;
+
+        registerDocumentKeyboardListeners(createContext(createState(), svg, null), callbacks);
+        listeners.get('keydown')?.({
+            key: '1', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false,
+            preventDefault: jest.fn(),
+        });
+
+        expect(callbacks.switchLayout).not.toHaveBeenCalled();
     });
 });

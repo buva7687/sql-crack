@@ -700,8 +700,6 @@ async function applyInitialUiStateIfAvailable(): Promise<void> {
     if (!applyInitialStatePending || !batchResult) {
         return;
     }
-    applyInitialStatePending = false;
-
     const state = parseInitialUiState(window.initialUiState);
     if (!state || batchResult.queries.length === 0) {
         return;
@@ -723,6 +721,8 @@ async function applyInitialUiStateIfAvailable(): Promise<void> {
         }
         return;
     }
+
+    applyInitialStatePending = false;
 
     currentDialect = state.currentDialect;
     const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement | null;
@@ -1322,7 +1322,7 @@ async function toggleCompareMode(): Promise<void> {
     const compareQueryIndex = currentQueryIndex;
     const baselineResult = await parseAsync(baseline.sql, baseline.dialect, {
         allowDialectFallback: isDialectAutoDetectionEnabled(),
-    });
+    }, 'independent');
     if (!batchResult || compareToken !== parseRequestId || currentQueryIndex !== compareQueryIndex) {
         return;
     }

@@ -109,6 +109,7 @@ import {
 import { getScrollbarColors, getComponentUiColors, COLUMN_LINEAGE_BANNER_THEME } from './constants/colors';
 import type { ColorblindMode } from '../shared/theme';
 import { escapeHtml } from '../shared/stringUtils';
+import { truncateCodePoints } from '../shared/stringUtils';
 import type { GridStyle } from '../shared/themeTokens';
 import { MONO_FONT_STACK } from '../shared/themeTokens';
 import { EDGE_THEME } from '../shared/themeTokens';
@@ -1094,7 +1095,7 @@ export function initRenderer(container: HTMLElement): void {
         requestAnimationFrame(() => adjustPanelBottoms(getLegendBarHeight()));
     }
 
-    // Create command bar (Ctrl+Shift+P palette)
+    // Create command bar (Alt+P avoids intercepting VS Code's Command Palette)
     createCommandBar(container, () => state.isDarkTheme);
     registerCommandBarActions([
         { id: 'zoom-in', label: 'Zoom In', shortcut: '+', action: () => zoomIn() },
@@ -1787,9 +1788,15 @@ export function render(result: ParseResult, options?: RenderOptions): void {
         fitView();
     }
 
-    // Apply non-default layout if configured (parser positions are always vertical)
-    if (state.layoutType && state.layoutType !== 'vertical') {
-        switchLayout(state.layoutType);
+    // Apply non-default layout if configured (parser positions are always vertical).
+    // Its layout work is deferred, so history must also wait for that frame or
+    // the first undo entry captures the parser's vertical coordinates under the
+    // configured layout name.
+    const deferredInitialLayout = state.layoutType && state.layoutType !== 'vertical'
+        ? state.layoutType
+        : null;
+    if (deferredInitialLayout) {
+        switchLayout(deferredInitialLayout);
     }
 
     // Update minimap for complex queries
@@ -1807,7 +1814,7 @@ export function render(result: ParseResult, options?: RenderOptions): void {
         }
     }
 
-    if (!layoutHistory.getCurrent()) {
+    if (!layoutHistory.getCurrent() && !deferredInitialLayout) {
         layoutHistory.initialize(captureLayoutHistorySnapshot());
         syncUndoRedoUiState();
     }
@@ -2867,8 +2874,7 @@ function getWarningColor(severity: string): string {
 }
 
 function truncate(str: string, maxLen: number): string {
-    if (str.length <= maxLen) { return str; }
-    return str.substring(0, maxLen - 1) + '…';
+    return truncateCodePoints(str, maxLen);
 }
 
 function lightenColor(hex: string, percent: number): string {

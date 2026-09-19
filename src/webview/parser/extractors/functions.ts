@@ -8,7 +8,7 @@ import type {
 } from '../../types';
 import { getAggregateFunctions, getWindowFunctions } from '../../../dialects';
 import { unwrapIdentifierValue } from '../../../shared/astUtils';
-import { formatExpressionFromAst } from './columns';
+import { formatCastTarget, formatExpressionFromAst } from './columns';
 
 export type TrackFunctionUsageFn = (
     functionName: unknown,
@@ -225,8 +225,7 @@ export function extractAggregateFunctionDetails(
         }
         if (argType === 'cast') {
             const castExpr = formatAggregateArg(arg.expr);
-            const dataType = arg.target?.dataType || arg.target || '?';
-            return `CAST(${castExpr} AS ${String(dataType)})`;
+            return `CAST(${castExpr} AS ${formatCastTarget(arg.target)})`;
         }
         if (argType === 'aggr_func' || argType === 'function') {
             const funcName = getExpressionFunctionName(arg) || 'FUNC';

@@ -102,6 +102,37 @@ describe('LineageGraphRenderer UX markup', () => {
         expect(svg).not.toMatch(/[📊👁️🔄🌐📦]/u);
     });
 
+    it('caps a high-fanout lineage before sending nodes to dagre', () => {
+        const nodes = new Map<string, any>();
+        const edges: any[] = [];
+        nodes.set('table:center', {
+            id: 'table:center', type: 'table', name: 'center', metadata: {},
+        });
+        for (let i = 0; i < 500; i++) {
+            const id = `table:child_${i}`;
+            nodes.set(id, { id, type: 'table', name: `child_${i}`, metadata: {} });
+            edges.push({ id: `edge_${i}`, sourceId: 'table:center', targetId: id, type: 'direct', metadata: {} });
+        }
+        const graph: LineageGraph = {
+            nodes,
+            edges,
+            columnEdges: [],
+            getUpstream: () => [],
+            getDownstream: () => [],
+            getColumnLineage: () => [],
+        };
+
+        const renderGraph = new LineageGraphRenderer(graph).buildGraph({
+            centerNodeId: 'table:center',
+            depth: 2,
+            direction: 'downstream',
+        });
+
+        expect(renderGraph.nodes).toHaveLength(300);
+        expect(renderGraph.stats.truncated).toBe(true);
+        expect(renderGraph.stats.totalAvailableNodes).toBe(501);
+    });
+
     it('caps expanded columns to avoid layout blowout and renders overflow hint', () => {
         const renderer = new LineageGraphRenderer(createWideColumnGraph(25));
         const graph = renderer.buildGraph({

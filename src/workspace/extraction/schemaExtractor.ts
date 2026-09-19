@@ -74,44 +74,56 @@ export class SchemaExtractor {
         const warnings: string[] = [];
         const { sql: normalizedSql } = preprocessSqlForWorkspaceParsing(sql, dialect);
         const sourceViews = this.createSqlSearchViews(sql);
+        const normalizedViews = normalizedSql === sql
+            ? sourceViews
+            : this.createSqlSearchViews(normalizedSql);
 
         try {
             const dbDialect = this.mapDialect(dialect);
-            const ast = this.parser.astify(normalizedSql, { database: dbDialect });
-            const statements = Array.isArray(ast) ? ast : [ast];
+            const statementStarts = [0];
+            for (let index = 0; index < normalizedViews.structuralSql.length; index++) {
+                if (normalizedViews.structuralSql[index] === ';') {
+                    statementStarts.push(index + 1);
+                }
+            }
 
-            for (let statementIndex = 0; statementIndex < statements.length; statementIndex++) {
-                const stmt = statements[statementIndex];
-                if (!stmt) {continue;}
+            for (let statementIndex = 0; statementIndex < statementStarts.length; statementIndex++) {
+                const start = statementStarts[statementIndex];
+                const end = statementStarts[statementIndex + 1] ?? normalizedSql.length;
+                const structuralStatement = normalizedViews.structuralSql.slice(start, end).replace(/;\s*$/, '');
+                if (!structuralStatement.trim()) {continue;}
 
-                if (this.isCreateTable(stmt)) {
-                    const def = this.parseCreateTable(
-                        stmt,
-                        filePath,
-                        sql,
-                        statementIndex,
-                        sourceViews
-                    );
-                    if (def) {definitions.push(def);}
-                } else if (this.isCreateView(stmt)) {
-                    const def = this.parseCreateView(
-                        stmt,
-                        filePath,
-                        sql,
-                        statementIndex,
-                        sourceViews
-                    );
-                    if (def) {definitions.push(def);}
+                const ast = this.parser.astify(normalizedSql.slice(start, end), { database: dbDialect });
+                const statements = Array.isArray(ast) ? ast : [ast];
+                for (const stmt of statements) {
+                    if (!stmt) {continue;}
+
+                    if (this.isCreateTable(stmt)) {
+                        const def = this.parseCreateTable(
+                            stmt,
+                            filePath,
+                            sql,
+                            statementIndex,
+                            sourceViews
+                        );
+                        if (def) {definitions.push(def);}
+                    } else if (this.isCreateView(stmt)) {
+                        const def = this.parseCreateView(
+                            stmt,
+                            filePath,
+                            sql,
+                            statementIndex,
+                            sourceViews
+                        );
+                        if (def) {definitions.push(def);}
+                    }
                 }
             }
         } catch (error) {
             // Fallback to regex-based extraction for unsupported dialects or parse errors
             warnings.push(this.formatParserWarning('Schema', error));
             definitions.length = 0;
-            const fallbackViews = normalizedSql === sql
-                ? sourceViews
-                : this.createSqlSearchViews(normalizedSql);
-            definitions.push(...this.extractWithRegex(normalizedSql, filePath, fallbackViews));
+            definitions.push(...this.extractWithRegex(normalizedSql, filePath, normalizedViews));
         }
 
         // SELECT ... INTO is a table-producing statement in SQL Server,
@@ -387,16 +399,60 @@ export class SchemaExtractor {
      */
     private extractColumns(stmt: any): ColumnInfo[] {
         const columns: ColumnInfo[] = [];
+        const tableForeignKeys = new Map<string, ForeignKeyRef>();
         const createDefinitions = stmt.create_definitions || stmt.columns || [];
 
         for (const colDef of createDefinitions) {
             if (colDef.resource === 'column' || colDef.column) {
                 const column = this.parseColumnDefinition(colDef);
                 if (column) {columns.push(column);}
+            } else if (colDef.resource === 'constraint'
+                && String(colDef.constraint_type || '').toUpperCase() === 'FOREIGN KEY') {
+                const localColumns = Array.isArray(colDef.definition)
+                    ? colDef.definition
+                    : [colDef.definition];
+                localColumns.forEach((localColumn: any, index: number) => {
+                    const localName = unwrapIdentifierValue(localColumn?.column)
+                        || unwrapIdentifierValue(localColumn);
+                    const foreignKey = this.parseAstForeignKey(colDef.reference_definition, index);
+                    if (localName && foreignKey) {
+                        tableForeignKeys.set(localName.toLowerCase(), foreignKey);
+                    }
+                });
+            }
+        }
+
+        for (const column of columns) {
+            if (!column.foreignKey) {
+                column.foreignKey = tableForeignKeys.get(column.name.toLowerCase());
             }
         }
 
         return columns;
+    }
+
+    private parseAstForeignKey(reference: any, columnIndex: number = 0): ForeignKeyRef | undefined {
+        if (!reference) {return undefined;}
+        const tableEntry = Array.isArray(reference.table) ? reference.table[0] : reference.table;
+        const tableName = unwrapIdentifierValue(tableEntry?.table)
+            || unwrapIdentifierValue(tableEntry?.name)
+            || unwrapIdentifierValue(tableEntry);
+        if (!tableName) {return undefined;}
+
+        const schema = unwrapIdentifierValue(tableEntry?.db)
+            || unwrapIdentifierValue(tableEntry?.schema);
+        const referencedTable = schema ? `${schema}.${tableName}` : tableName;
+        const definitions = Array.isArray(reference.definition)
+            ? reference.definition
+            : Array.isArray(reference.columns)
+                ? reference.columns
+                : [reference.definition ?? reference.column];
+        const referencedDefinition = definitions[columnIndex] ?? definitions[0];
+        const referencedColumn = unwrapIdentifierValue(referencedDefinition?.column)
+            || unwrapIdentifierValue(referencedDefinition);
+        if (!referencedColumn) {return undefined;}
+
+        return { referencedTable, referencedColumn };
     }
 
     /**
@@ -465,13 +521,8 @@ export class SchemaExtractor {
 
             // Extract foreign key if present
             let foreignKey: ForeignKeyRef | undefined;
-            if (colDef.reference || colDef.references) {
-                const ref = colDef.reference || colDef.references;
-                foreignKey = {
-                    referencedTable: ref.table || 'unknown',
-                    referencedColumn: ref.column || ref.columns?.[0] || 'unknown'
-                };
-            }
+            const ref = colDef.reference_definition || colDef.reference || colDef.references;
+            foreignKey = this.parseAstForeignKey(ref);
 
             return {
                 name,

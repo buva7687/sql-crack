@@ -94,72 +94,42 @@ export class FlowAnalyzer {
             excludeExternal = false
         } = options;
 
-        type TraversalFrame = {
-            currentId: string;
-            currentDepth: number;
-            edges: LineageEdge[];
-            nextEdgeIndex: number;
-            entered: boolean;
-        };
-
-        const visited = new Set<string>();
+        const visited = new Set<string>([nodeId]);
         const resultNodes: LineageNode[] = [];
         const resultEdges: LineageEdge[] = [];
         let reachedDepth = 0;
-        const frames: TraversalFrame[] = [{
+        const queue: Array<{ currentId: string; currentDepth: number }> = [{
             currentId: nodeId,
             currentDepth: 0,
-            edges: [],
-            nextEdgeIndex: 0,
-            entered: false
         }];
 
-        while (frames.length > 0) {
-            const frame = frames[frames.length - 1];
-
-            if (!frame.entered) {
-                if (maxDepth !== -1 && frame.currentDepth >= maxDepth) {
-                    frames.pop();
-                    continue;
-                }
-                if (visited.has(frame.currentId)) {
-                    frames.pop();
-                    continue;
-                }
-
-                visited.add(frame.currentId);
-                frame.edges = direction === 'upstream'
-                    ? this.getIncomingEdges(frame.currentId)
-                    : this.getOutgoingEdges(frame.currentId);
-                frame.entered = true;
-            }
-
-            if (frame.nextEdgeIndex >= frame.edges.length) {
-                frames.pop();
+        for (let queueIndex = 0; queueIndex < queue.length; queueIndex++) {
+            const current = queue[queueIndex];
+            if (maxDepth !== -1 && current.currentDepth >= maxDepth) {
                 continue;
             }
+            const edges = direction === 'upstream'
+                ? this.getIncomingEdges(current.currentId)
+                : this.getOutgoingEdges(current.currentId);
 
-            const edge = frame.edges[frame.nextEdgeIndex];
-            frame.nextEdgeIndex++;
+            for (const edge of edges) {
 
-            const nextId = direction === 'upstream' ? edge.sourceId : edge.targetId;
-            const nextNode = this.graph.nodes.get(nextId);
+                const nextId = direction === 'upstream' ? edge.sourceId : edge.targetId;
+                const nextNode = this.graph.nodes.get(nextId);
 
-            if (!nextNode) {continue;}
-            if (excludeExternal && nextNode.type === 'external') {continue;}
-            if (filterTypes && !filterTypes.includes(nextNode.type)) {continue;}
+                if (!nextNode) {continue;}
+                if (excludeExternal && nextNode.type === 'external') {continue;}
+                if (filterTypes && !filterTypes.includes(nextNode.type)) {continue;}
+                if (visited.has(nextNode.id)) {continue;}
 
-            if (!visited.has(nextNode.id)) {
-                const nextDepth = frame.currentDepth + 1;
+                visited.add(nextNode.id);
+                const nextDepth = current.currentDepth + 1;
                 resultNodes.push(nextNode);
                 resultEdges.push(edge);
                 reachedDepth = Math.max(reachedDepth, nextDepth);
-                frames.push({
+                queue.push({
                     currentId: nextNode.id,
                     currentDepth: nextDepth,
-                    edges: [],
-                    nextEdgeIndex: 0,
-                    entered: false
                 });
             }
         }

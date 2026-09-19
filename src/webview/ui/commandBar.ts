@@ -1,5 +1,5 @@
 // Command Bar — Floating command palette for quick actions
-// Triggered by Ctrl+Shift+P (inside webview) or / key
+// Triggered by Alt+P inside the webview
 import { prefersReducedMotion } from './motion';
 import { MONO_FONT_STACK } from '../../shared/themeTokens';
 

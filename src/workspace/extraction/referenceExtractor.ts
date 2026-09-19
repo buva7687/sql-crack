@@ -45,6 +45,11 @@ interface TableReferenceLocation {
     catalogQuoted: boolean;
 }
 
+interface ParsedStatement {
+    statement: AstStatement;
+    statementIndex: number;
+}
+
 const REFERENCE_SQL_IDENTIFIER_PATTERN =
     '(?:"(?:[^"]|"")*"|`(?:[^`]|``)*`|\\[(?:[^\\]]|\\]\\])*\\]|[#A-Za-z_@$][#A-Za-z0-9_$@]*)';
 
@@ -149,7 +154,7 @@ export class ReferenceExtractor {
         this.tableLineLookup = null;
         const references: TableReference[] = [];
         const warnings: string[] = [];
-        let parsedStatements: AstStatement[] = [];
+        let parsedStatements: ParsedStatement[] = [];
         const { sql: normalizedSql } = preprocessSqlForWorkspaceParsing(sql, dialect);
 
         // Pre-collect CTE names via regex BEFORE attempting AST parse.
@@ -229,18 +234,23 @@ export class ReferenceExtractor {
 
         try {
             const dbDialect = this.mapDialect(dialect);
-            const ast = this.parser.astify(normalizedSql, { database: dbDialect });
-            const statements = Array.isArray(ast) ? ast : [ast];
-            parsedStatements = statements.filter(Boolean) as AstStatement[];
+            // node-sql-parser's multi-statement path scales quadratically. Split
+            // on the already masked statement boundaries and parse each statement
+            // independently while retaining the original SQL for locations.
+            for (let stmtIndex = 0; stmtIndex < statementBoundaries.length; stmtIndex++) {
+                const start = statementBoundaries[stmtIndex];
+                const end = statementBoundaries[stmtIndex + 1] ?? normalizedSql.length;
+                const structuralStatement = sqlNoComments.slice(start, end).replace(/;\s*$/, '');
+                if (!structuralStatement.trim()) {continue;}
 
-            // Extract each statement with only its own CTE scope. A CTE name is
-            // query-local and must not hide a physical table in a later statement.
-            for (let stmtIndex = 0; stmtIndex < statements.length; stmtIndex++) {
-                const stmt = statements[stmtIndex];
-                if (!stmt) {continue;}
-                const aliasMap = this.createAliasMap();
-                this.collectCTENames(stmt as AstStatement, aliasMap.cteNames);
-                this.extractFromStatement(stmt as AstStatement, filePath, normalizedSql, references, aliasMap, 0, stmtIndex);
+                const ast = this.parser.astify(normalizedSql.slice(start, end), { database: dbDialect });
+                const statements = (Array.isArray(ast) ? ast : [ast]).filter(Boolean) as AstStatement[];
+                for (const stmt of statements) {
+                    parsedStatements.push({ statement: stmt, statementIndex: stmtIndex });
+                    const aliasMap = this.createAliasMap();
+                    this.collectCTENames(stmt, aliasMap.cteNames);
+                    this.extractFromStatement(stmt, filePath, normalizedSql, references, aliasMap, 0, stmtIndex);
+                }
             }
         } catch (error) {
             // Fallback to regex extraction with statement-local CTE/alias names.
@@ -289,7 +299,7 @@ export class ReferenceExtractor {
      * third time in WorkspaceScanner.
      */
     private buildQueryAnalyses(
-        statements: AstStatement[],
+        statements: ParsedStatement[],
         references: TableReference[],
         warnings: string[]
     ): QueryAnalysis[] {
@@ -300,7 +310,7 @@ export class ReferenceExtractor {
             bucket.push(reference);
             referencesByStatement.set(statementIndex, bucket);
         }
-        return statements.map((statement, statementIndex) => {
+        return statements.map(({ statement, statementIndex }) => {
             const statementReferences = referencesByStatement.get(statementIndex) || [];
             try {
                 return this.buildQueryAnalysis(statement, statementIndex, statementReferences);
@@ -1446,9 +1456,11 @@ export class ReferenceExtractor {
             }
         }
 
-        // Nested expression in parentheses
+        // Nested expression in parentheses and aggregate argument wrappers
         if (expr.expr?.type === 'select') {
             this.extractFromStatement(expr.expr, filePath, sql, references, aliasMap, depth + 1, statementIndex);
+        } else if (expr.expr && typeof expr.expr === 'object') {
+            this.extractFromExpression(expr.expr, filePath, sql, references, aliasMap, depth, statementIndex);
         }
 
         // Recursive for AND/OR/binary expressions
@@ -1459,9 +1471,25 @@ export class ReferenceExtractor {
             this.extractFromExpression(expr.right, filePath, sql, references, aliasMap, depth, statementIndex);
         }
 
-        // CASE expression args
+        // CASE branches use cond/result fields rather than binary left/right.
+        if (expr.cond && typeof expr.cond === 'object') {
+            this.extractFromExpression(expr.cond, filePath, sql, references, aliasMap, depth, statementIndex);
+        }
+        if (expr.result && typeof expr.result === 'object') {
+            this.extractFromExpression(expr.result, filePath, sql, references, aliasMap, depth, statementIndex);
+        }
+
+        // node-sql-parser represents CASE args as an array, aggregate args as
+        // { expr }, and scalar-function args as { type: 'expr_list', value: [] }.
         if (expr.args) {
-            for (const arg of expr.args) {
+            const args = Array.isArray(expr.args)
+                ? expr.args
+                : Array.isArray(expr.args.value)
+                    ? expr.args.value
+                    : expr.args.expr !== undefined
+                        ? (Array.isArray(expr.args.expr) ? expr.args.expr : [expr.args.expr])
+                        : [expr.args];
+            for (const arg of args) {
                 if (arg && typeof arg === 'object') {
                     this.extractFromExpression(arg, filePath, sql, references, aliasMap, depth, statementIndex);
                 }

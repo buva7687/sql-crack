@@ -155,7 +155,10 @@ export function detectDialectSyntaxPatterns(sql: string): {
 } {
     const maskedSql = maskStringsAndComments(sql);
     return {
-        hasSnowflakePathOperator: /\b[A-Za-z_][\w$]*\s*:\s*[A-Za-z_][\w$]*(?!:)/.test(maskedSql),
+        // Snowflake path syntax attaches ':' to the left-hand expression.
+        // Allowing whitespace before ':' makes `SELECT :bind_name` look like
+        // a path whose left side is the SELECT keyword.
+        hasSnowflakePathOperator: /\b[A-Za-z_][\w$]*:\s*[A-Za-z_][\w$]*(?!:)/.test(maskedSql),
         hasSnowflakeNamedArgs: /\w+\s*=>\s*/.test(maskedSql),
         hasFlatten: /\bFLATTEN\s*\(/i.test(maskedSql),
         hasThreePartNames: /\b[\w$]+\.[\w$]+\.[\w$]+\b/.test(maskedSql),

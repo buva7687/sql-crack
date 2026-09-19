@@ -19,6 +19,7 @@ export {
     escapeRegex,
     safeString,
     escapeHtml,
+    truncateCodePoints,
     stripSqlComments,
     maskSqlCommentsPreservingPositions,
     isHashTempTableIdentifierAt,

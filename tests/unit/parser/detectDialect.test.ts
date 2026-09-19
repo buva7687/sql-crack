@@ -133,6 +133,15 @@ describe('detectDialect', () => {
         expect(result.confidence).toBe('high');
     });
 
+    it('does not treat named bind parameters as Snowflake paths', () => {
+        const result = detectDialect(
+            'SELECT * FROM orders WHERE created_at BETWEEN :start_date AND :end_date'
+        );
+
+        expect(result.scores.Snowflake || 0).toBe(0);
+        expect(result.dialect).not.toBe('Snowflake');
+    });
+
     it('detects PostgreSQL via AT TIME ZONE plus :: type cast', () => {
         const result = detectDialect(`
             SELECT

@@ -127,8 +127,11 @@ export function registerDocumentKeyboardListeners(
             return;
         }
 
-        const isInputFocused = document.activeElement?.tagName === 'INPUT' ||
-            document.activeElement?.tagName === 'TEXTAREA';
+        const activeElement = document.activeElement as HTMLElement | null;
+        const isInputFocused = activeElement?.tagName === 'INPUT'
+            || activeElement?.tagName === 'TEXTAREA'
+            || activeElement?.tagName === 'SELECT'
+            || activeElement?.isContentEditable === true;
 
         if (!isInputFocused && (e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'z' || e.key === 'Z')) {
             e.preventDefault();
@@ -140,7 +143,7 @@ export function registerDocumentKeyboardListeners(
             return;
         }
 
-        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'P') {
+        if (e.altKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'p') {
             e.preventDefault();
             callbacks.toggleCommandBar();
             return;

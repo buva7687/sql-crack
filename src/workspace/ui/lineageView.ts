@@ -44,7 +44,7 @@ export class LineageView {
                 </div>
                 <div class="workspace-alert-card">
                     <h3>Find lineage faster</h3>
-                    <p class="workspace-alert-message">Search by table or view name to open a full lineage graph. Use Quick Find with Cmd/Ctrl+K to jump between views and search targets.</p>
+                    <p class="workspace-alert-message">Search by table or view name to open a full lineage graph. Use Quick Find with Alt+K to jump between views and search targets.</p>
                 </div>
                 <div class="view-search-box">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -162,7 +162,15 @@ export class LineageView {
         const svg = renderer.generateSVG(renderableGraph, { focusedNodeId });
 
         // Build external count parentheticals
-        const { upstreamCount, downstreamCount, externalUpstreamCount, externalDownstreamCount } = renderableGraph.stats;
+        const {
+            upstreamCount,
+            downstreamCount,
+            externalUpstreamCount,
+            externalDownstreamCount,
+            totalNodes,
+            totalAvailableNodes = totalNodes,
+            truncated = false,
+        } = renderableGraph.stats;
         const upstreamLabel = externalUpstreamCount > 0
             ? `${upstreamCount} upstream (${externalUpstreamCount} external)`
             : `${upstreamCount} upstream`;
@@ -180,6 +188,7 @@ export class LineageView {
                         <span class="node-type-badge">${centerNode?.type || 'table'}</span>
                     </div>
                     <div class="graph-stats">
+                        ${truncated ? `<span class="stat" title="The graph is capped to keep layout responsive. Reduce the depth or choose one direction to see a smaller branch.">Showing ${totalNodes} of ${totalAvailableNodes} nodes</span><span class="stat-divider">|</span>` : ''}
                         <span class="stat upstream" title="Upstream dependencies">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
                                 <path d="M12 19V5M5 12l7-7 7 7"/>

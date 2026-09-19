@@ -75,6 +75,29 @@ describe('parserClient', () => {
             }
         });
 
+        it('does not let an independent compare parse cancel the active visualization parse', async () => {
+            jest.useFakeTimers();
+            try {
+                const visualization = parseAsync('SELECT * FROM current_query', 'MySQL');
+                const comparison = parseAsync(
+                    'SELECT * FROM baseline_query',
+                    'MySQL',
+                    {},
+                    'independent'
+                );
+
+                jest.runOnlyPendingTimers();
+                const [visualizationResult, comparisonResult] = await Promise.all([visualization, comparison]);
+
+                expect(visualizationResult.error).toBeUndefined();
+                expect(comparisonResult.error).toBeUndefined();
+                expect(visualizationResult.tableUsage.has('current_query')).toBe(true);
+                expect(comparisonResult.tableUsage.has('baseline_query')).toBe(true);
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+
         it('should parse SQL asynchronously', async () => {
             const result = await parseAsync(testSql, 'MySQL');
 
@@ -515,6 +538,53 @@ describe('parserClient', () => {
                 expect(result.nodes).toHaveLength(0);
                 expect(result.error).toContain('timed out');
                 expect(workerInstances[0].terminate).toHaveBeenCalled();
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+
+        it('settles every request owned by a timed-out worker without harming its replacement', async () => {
+            jest.useFakeTimers();
+            try {
+                const { workerInstances } = installWorkerEnvironment();
+                const first = parseBatchAsync('SELECT 1', 'MySQL', undefined, {}, 'independent');
+                const second = parseBatchAsync('SELECT 2', 'MySQL', undefined, {}, 'independent');
+
+                jest.advanceTimersByTime(0);
+                await Promise.resolve();
+                expect(workerInstances).toHaveLength(1);
+                expect(workerInstances[0].postMessage).toHaveBeenCalledTimes(2);
+
+                jest.advanceTimersByTime(5000);
+                const [firstResult, secondResult] = await Promise.all([first, second]);
+                expect(firstResult.parseErrors?.[0]?.message).toContain('timed out');
+                expect(secondResult.parseErrors?.[0]?.message).toContain('timed out');
+                expect(workerInstances[0].terminate).toHaveBeenCalledTimes(1);
+
+                const replacementRequest = parseAsync('SELECT 3', 'MySQL');
+                jest.advanceTimersByTime(0);
+                await Promise.resolve();
+                expect(workerInstances).toHaveLength(2);
+                const replacementWorker = workerInstances[1];
+                const request = replacementWorker.postMessage.mock.calls[0][0];
+                replacementWorker.emitMessage({
+                    type: 'parse',
+                    requestId: request.requestId,
+                    result: {
+                        nodes: [{ id: 'n3' }],
+                        edges: [],
+                        stats: { tables: 0, joins: 0, subqueries: 0, ctes: 0, aggregations: 0, windowFunctions: 0, unions: 0, conditions: 0, complexity: 'Simple', complexityScore: 0 },
+                        hints: [],
+                        sql: 'SELECT 3',
+                        columnLineage: [],
+                        tableUsage: new Map(),
+                    },
+                });
+
+                await expect(replacementRequest).resolves.toEqual(expect.objectContaining({
+                    nodes: [{ id: 'n3' }],
+                }));
+                expect(replacementWorker.terminate).not.toHaveBeenCalled();
             } finally {
                 jest.useRealTimers();
             }

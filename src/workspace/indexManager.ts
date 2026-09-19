@@ -142,6 +142,17 @@ export class IndexManager {
             return this._buildPromise;
         }
         await this.waitForQueueToDrain();
+        return this.startBuild(progressCallback, cancellationToken);
+    }
+
+    /**
+     * Start or join a serialized full build. Callers outside the watcher queue
+     * must use buildIndex() so pending incremental updates drain first.
+     */
+    private async startBuild(
+        progressCallback?: ProgressCallback,
+        cancellationToken?: CancellationToken
+    ): Promise<WorkspaceIndex> {
         if (this._buildPromise) {
             return this._buildPromise;
         }
@@ -154,6 +165,20 @@ export class IndexManager {
             // build failed, the next scan must observe the filesystem afresh.
             this._deletedDuringBuild.clear();
         }
+    }
+
+    /**
+     * A queued watcher update cannot call buildIndex() while the index is
+     * missing because buildIndex() waits for that same queue to drain.
+     * Starting the serialized build directly is safe here: the full scan
+     * subsumes the queued change, and later queue entries are still processed.
+     */
+    private async updateQueuedFile(uri: vscode.Uri): Promise<void> {
+        if (!this.index) {
+            await this.startBuild();
+            return;
+        }
+        await this.updateFile(uri);
     }
 
     private async _doBuildIndex(
@@ -933,11 +958,11 @@ export class IndexManager {
                                     // if it remains unreadable, updateFile preserves
                                     // and marks the last-known-good analysis.
                                     logger.debug(`[IndexManager] File stat failed, preserving until analysis retry: ${uri.fsPath} ${String(e)}`);
-                                    await this.updateFile(uri);
+                                    await this.updateQueuedFile(uri);
                                 }
                                 continue;
                             }
-                            await this.updateFile(uri);
+                            await this.updateQueuedFile(uri);
                         } catch (err) {
                             logger.debug(`[IndexManager] Update failed for ${filePath}: ${err}`);
                         } finally {

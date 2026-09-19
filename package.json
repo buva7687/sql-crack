@@ -402,22 +402,26 @@
           {
             "id": "openSqlFile",
             "title": "Open a SQL file",
-            "description": "Open any `.sql` file in your workspace to get started.\n\n[Open a SQL file](command:workbench.action.quickOpen)"
+            "description": "Open any `.sql` file in your workspace to get started.\n\n[Open a SQL file](command:workbench.action.quickOpen)",
+            "media": { "image": "assets/video_demo.gif", "altText": "SQL Crack query visualization demo" }
           },
           {
             "id": "visualizeQuery",
             "title": "Visualize your query",
-            "description": "Press `Cmd+Shift+L` (Mac) or `Ctrl+Shift+L` (Windows/Linux) to open the interactive flow diagram.\n\n[Visualize SQL Query](command:sql-crack.visualize)"
+            "description": "Press `Cmd+Shift+L` (Mac) or `Ctrl+Shift+L` (Windows/Linux) to open the interactive flow diagram.\n\n[Visualize SQL Query](command:sql-crack.visualize)",
+            "media": { "image": "assets/video_demo.gif", "altText": "Interactive SQL flow diagram demo" }
           },
           {
             "id": "exploreWorkspace",
             "title": "Explore workspace dependencies",
-            "description": "See how your SQL files relate to each other. Right-click a folder in Explorer and choose **Analyze Workspace Dependencies**.\n\n[Analyze Workspace](command:sql-crack.analyzeWorkspace)"
+            "description": "See how your SQL files relate to each other. Right-click a folder in Explorer and choose **Analyze Workspace Dependencies**.\n\n[Analyze Workspace](command:sql-crack.analyzeWorkspace)",
+            "media": { "image": "assets/video_demo.gif", "altText": "SQL workspace dependency visualization demo" }
           },
           {
             "id": "columnLineage",
             "title": "Try column lineage",
-            "description": "Press `C` while viewing a query visualization to toggle column-level lineage. Click a column to trace its data flow through the query."
+            "description": "Press `C` while viewing a query visualization to toggle column-level lineage. Click a column to trace its data flow through the query.",
+            "media": { "image": "assets/video_demo.gif", "altText": "Column lineage visualization demo" }
           }
         ]
       }

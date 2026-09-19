@@ -13,24 +13,33 @@ export function calculateEnhancedMetrics(context: ParserContext, nodes: FlowNode
 
     // Calculate max fan-out (number of outgoing edges per node)
     const fanOutMap = new Map<string, number>();
+    const outgoingByNode = new Map<string, string[]>();
     edges.forEach(edge => {
         const count = fanOutMap.get(edge.source) || 0;
         fanOutMap.set(edge.source, count + 1);
+        const targets = outgoingByNode.get(edge.source) || [];
+        targets.push(edge.target);
+        outgoingByNode.set(edge.source, targets);
     });
     context.stats.maxFanOut = Math.max(0, ...Array.from(fanOutMap.values()));
 
     // Calculate critical path length (longest path from source to result)
-    const calculatePathLength = (nodeId: string, visited: Set<string>): number => {
-        if (visited.has(nodeId)) {return 0;}
-        visited.add(nodeId);
+    const pathLengthMemo = new Map<string, number>();
+    const visiting = new Set<string>();
+    const calculatePathLength = (nodeId: string): number => {
+        const memoized = pathLengthMemo.get(nodeId);
+        if (memoized !== undefined) {return memoized;}
+        if (visiting.has(nodeId)) {return 0;}
+        visiting.add(nodeId);
 
-        const outgoing = edges.filter(e => e.source === nodeId);
-        if (outgoing.length === 0) {return 1;}
+        const outgoing = outgoingByNode.get(nodeId) || [];
+        const pathLength = outgoing.length === 0
+            ? 1
+            : 1 + Math.max(...outgoing.map(calculatePathLength));
 
-        const maxChildPath = Math.max(
-            ...outgoing.map(edge => calculatePathLength(edge.target, new Set(visited)))
-        );
-        return 1 + maxChildPath;
+        visiting.delete(nodeId);
+        pathLengthMemo.set(nodeId, pathLength);
+        return pathLength;
     };
 
     // Find root nodes (nodes with no incoming edges)
@@ -39,7 +48,7 @@ export function calculateEnhancedMetrics(context: ParserContext, nodes: FlowNode
 
     context.stats.criticalPathLength = Math.max(
         0,
-        ...rootNodes.map(node => calculatePathLength(node.id, new Set()))
+        ...rootNodes.map(node => calculatePathLength(node.id))
     );
 
     // Complexity breakdown

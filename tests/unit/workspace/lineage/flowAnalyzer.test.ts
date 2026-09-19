@@ -59,6 +59,19 @@ describe('FlowAnalyzer', () => {
             expect(result.nodes.map(n => n.id)).toEqual(['B']);
         });
 
+        it('does not duplicate a shared node at the depth boundary', () => {
+            const nodes = [makeNode('A'), makeNode('B'), makeNode('C'), makeNode('D')];
+            const edges = [
+                makeEdge('A', 'B'), makeEdge('A', 'C'),
+                makeEdge('B', 'D'), makeEdge('C', 'D'),
+            ];
+            const graph = createMockGraph(nodes, edges);
+            const result = new FlowAnalyzer(graph).getDownstream('A', { maxDepth: 2 });
+
+            expect(result.nodes.map(node => node.id)).toEqual(['B', 'C', 'D']);
+            expect(result.edges).toHaveLength(3);
+        });
+
         it('handles diamond graph', () => {
             //   A
             //  / \

@@ -42,6 +42,10 @@ describe('Item #6: Fullscreen Element List Consolidation', () => {
             expect(FULLSCREEN_HIDE_IDS).toContain('sql-crack-toolbar-wrapper');
         });
 
+        it('should contain the current legend bar ID', () => {
+            expect(FULLSCREEN_HIDE_IDS).toContain('sql-crack-legend-bar');
+        });
+
         it('should only contain strings', () => {
             FULLSCREEN_HIDE_IDS.forEach(id => {
                 expect(typeof id).toBe('string');

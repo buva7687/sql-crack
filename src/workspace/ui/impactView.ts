@@ -42,7 +42,7 @@ export class ImpactView {
                 </div>
                 <div class="workspace-alert-card">
                     <h3>Plan schema changes with context</h3>
-                    <p class="workspace-alert-message">Pick a table or view, choose the change type, then run impact analysis. Quick Find with Cmd/Ctrl+K can jump directly to the target field.</p>
+                    <p class="workspace-alert-message">Pick a table or view, choose the change type, then run impact analysis. Quick Find with Alt+K can jump directly to the target field.</p>
                 </div>
 
                 <!-- Form -->

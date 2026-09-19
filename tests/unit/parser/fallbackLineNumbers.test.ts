@@ -77,4 +77,13 @@ WHERE :=: invalid_token`;
 
         expect(result.nodes.filter(node => node.type === 'table').map(node => node.label)).toEqual(['orders']);
     });
+
+    it('does not treat EXTRACT field sources as fallback tables', () => {
+        const result = regexFallbackParse(
+            'SELECT EXTRACT(YEAR FROM created_at) FROM orders WHERE :=: invalid_token',
+            'PostgreSQL'
+        );
+
+        expect(result.nodes.filter(node => node.type === 'table').map(node => node.label)).toEqual(['orders']);
+    });
 });

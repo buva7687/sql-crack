@@ -335,6 +335,29 @@ describe('ReferenceExtractor behavioral coverage', () => {
         ]));
     });
 
+    it('walks function argument containers without falling back or inventing references', () => {
+        const aggregate = extractor.extractReferencesWithStatus(
+            'SELECT COUNT(*) FROM target_table',
+            'query.sql',
+            'MySQL'
+        );
+        const nested = extractor.extractReferencesWithStatus(
+            "DELETE FROM target_table WHERE id IN (SELECT id FROM source_table WHERE LOWER(name) = 'a')",
+            'query.sql',
+            'MySQL'
+        );
+
+        expect(aggregate.warnings).toEqual([]);
+        expect(aggregate.references).toEqual([
+            expect.objectContaining({ tableName: 'target_table', referenceType: 'select' })
+        ]);
+        expect(nested.warnings).toEqual([]);
+        expect(nested.references.map(ref => `${ref.tableName}:${ref.referenceType}`)).toEqual([
+            'target_table:delete',
+            'source_table:select',
+        ]);
+    });
+
     it('handles dialect preprocessing cases without inventing table names from syntax', () => {
         const pgRefs = extractor.extractReferences(
             "SELECT * FROM orders WHERE created_at::date = CURRENT_DATE",

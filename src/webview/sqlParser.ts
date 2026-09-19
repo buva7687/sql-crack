@@ -32,7 +32,7 @@ import {
     formatBytes,
     validateSql
 } from './parser/validation/validate';
-import { splitSqlStatements, stripLeadingComments } from './parser/validation/splitting';
+import { splitSqlStatements, splitTransactSqlBatches, stripLeadingComments } from './parser/validation/splitting';
 import { createFreshContext, type ParserContext } from './parser/context';
 import { layoutGraph } from './parser/layout';
 import { assignLineNumbers } from './parser/lineNumbers';
@@ -311,12 +311,13 @@ function splitTransactSqlImplicitUpdateOutputStatements(statement: string): stri
 }
 
 function splitSqlStatementsForDialect(sql: string, dialect: SqlDialect): string[] {
-    const statements = splitSqlStatements(sql);
     if (dialect !== 'TransactSQL') {
-        return statements;
+        return splitSqlStatements(sql);
     }
 
-    return statements.flatMap(splitTransactSqlImplicitUpdateOutputStatements);
+    return splitTransactSqlBatches(sql)
+        .flatMap(splitSqlStatements)
+        .flatMap(splitTransactSqlImplicitUpdateOutputStatements);
 }
 
 // Parse multiple SQL statements

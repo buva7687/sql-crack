@@ -3,7 +3,7 @@
 import * as dagre from 'dagre';
 import { LineageGraph, LineageNode } from '../lineage/types';
 import { FlowAnalyzer } from '../lineage/flowAnalyzer';
-import { getWorkspaceNodeIcon } from '../../shared';
+import { getWorkspaceNodeIcon, truncateCodePoints } from '../../shared';
 
 /**
  * Graph node for rendering
@@ -72,6 +72,8 @@ export interface RenderableGraph {
         externalUpstreamCount: number;
         externalDownstreamCount: number;
         totalNodes: number;
+        totalAvailableNodes?: number;
+        truncated?: boolean;
     };
 }
 
@@ -101,6 +103,7 @@ export class LineageGraphRenderer {
     private readonly NODE_SEP = 44;
     private readonly RANK_SEP = 90;
     private readonly EDGE_SEP = 20;
+    private readonly MAX_RENDERED_NODES = 300;
 
     constructor(lineageGraph: LineageGraph) {
         this.lineageGraph = lineageGraph;
@@ -132,13 +135,16 @@ export class LineageGraphRenderer {
         // Add center node
         this.addNodeToMap(nodeMap, centerNode, 0, expandedNodes, includeExternal);
 
+        let upstreamNodes: LineageNode[] = [];
+        let downstreamNodes: LineageNode[] = [];
+
         // Get upstream nodes
         if (direction === 'both' || direction === 'upstream') {
             const upstream = this.flowAnalyzer.getUpstream(centerNodeId, {
                 maxDepth: depth,
                 excludeExternal: !includeExternal
             });
-            this.addFlowNodesToMap(nodeMap, upstream.nodes, -1, expandedNodes, includeExternal);
+            upstreamNodes = upstream.nodes;
         }
 
         // Get downstream nodes
@@ -147,7 +153,39 @@ export class LineageGraphRenderer {
                 maxDepth: depth,
                 excludeExternal: !includeExternal
             });
-            this.addFlowNodesToMap(nodeMap, downstream.nodes, 1, expandedNodes, includeExternal);
+            downstreamNodes = downstream.nodes;
+        }
+
+        // Alternate upstream and downstream candidates so a high-fanout side
+        // cannot consume the whole render budget. Dagre becomes very slow on
+        // several hundred nodes, while the full graph remains available by
+        // choosing a narrower direction or depth.
+        const candidates: Array<{ node: LineageNode; depth: number }> = [];
+        const candidateCount = Math.max(upstreamNodes.length, downstreamNodes.length);
+        for (let i = 0; i < candidateCount; i++) {
+            if (upstreamNodes[i]) {
+                candidates.push({ node: upstreamNodes[i], depth: -(i + 1) });
+            }
+            if (downstreamNodes[i]) {
+                candidates.push({ node: downstreamNodes[i], depth: i + 1 });
+            }
+        }
+
+        const availableNodeIds = new Set<string>([centerNodeId]);
+        for (const candidate of candidates) {
+            if (candidate.node.type === 'column' || (!includeExternal && candidate.node.type === 'external')) {
+                continue;
+            }
+            availableNodeIds.add(candidate.node.id);
+            if (nodeMap.size < this.MAX_RENDERED_NODES && !nodeMap.has(candidate.node.id)) {
+                this.addNodeToMap(
+                    nodeMap,
+                    candidate.node,
+                    candidate.depth,
+                    expandedNodes,
+                    includeExternal
+                );
+            }
         }
 
         // Build edges between visible nodes
@@ -194,7 +232,9 @@ export class LineageGraphRenderer {
                     Array.from(nodeMap.values()).filter(n => n.depth < 0 && n.type === 'external').length,
                 externalDownstreamCount: direction === 'upstream' ? 0 :
                     Array.from(nodeMap.values()).filter(n => n.depth > 0 && n.type === 'external').length,
-                totalNodes: nodeMap.size
+                totalNodes: nodeMap.size,
+                totalAvailableNodes: availableNodeIds.size,
+                truncated: availableNodeIds.size > nodeMap.size
             }
         };
     }
@@ -238,26 +278,6 @@ export class LineageGraphRenderer {
             depth,
             metadata: node.metadata || {}
         });
-    }
-
-    /**
-     * Add flow result nodes to the map
-     */
-    private addFlowNodesToMap(
-        nodeMap: Map<string, GraphNode>,
-        nodes: LineageNode[],
-        depthSign: number,
-        expandedNodes: Set<string>,
-        includeExternal: boolean
-    ): void {
-        for (let i = 0; i < nodes.length; i++) {
-            const node = nodes[i];
-            if (!nodeMap.has(node.id)) {
-                // Calculate depth based on position in BFS order (simplified)
-                const depth = depthSign * (i + 1);
-                this.addNodeToMap(nodeMap, node, depth, expandedNodes, includeExternal);
-            }
-        }
     }
 
     /**
@@ -361,7 +381,9 @@ export class LineageGraphRenderer {
                 downstreamCount: 0,
                 externalUpstreamCount: 0,
                 externalDownstreamCount: 0,
-                totalNodes: 0
+                totalNodes: 0,
+                totalAvailableNodes: 0,
+                truncated: false
             }
         };
     }
@@ -648,8 +670,7 @@ export class LineageGraphRenderer {
      * Truncate name to fit in node
      */
     private truncateName(name: string, maxLength: number): string {
-        if (name.length <= maxLength) {return name;}
-        return name.substring(0, maxLength - 3) + '...';
+        return truncateCodePoints(name, maxLength, '...');
     }
 
     /**

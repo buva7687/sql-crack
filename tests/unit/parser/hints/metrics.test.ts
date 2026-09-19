@@ -89,6 +89,33 @@ describe('calculateEnhancedMetrics', () => {
         expect(ctx.stats.criticalPathLength).toBe(0);
     });
 
+    it('calculates shared diamond paths without re-exploring every route', () => {
+        const ctx = createFreshContext('PostgreSQL');
+        const nodes: FlowNode[] = [makeNode({ id: 'root' })];
+        const edges: FlowEdge[] = [];
+        let previous = 'root';
+
+        for (let index = 0; index < 20; index++) {
+            const left = `left-${index}`;
+            const right = `right-${index}`;
+            const merge = `merge-${index}`;
+            nodes.push(makeNode({ id: left }), makeNode({ id: right }), makeNode({ id: merge }));
+            edges.push(
+                makeEdge(previous, left),
+                makeEdge(previous, right),
+                makeEdge(left, merge),
+                makeEdge(right, merge),
+            );
+            previous = merge;
+        }
+
+        const startedAt = Date.now();
+        calculateEnhancedMetrics(ctx, nodes, edges);
+
+        expect(ctx.stats.criticalPathLength).toBe(41);
+        expect(Date.now() - startedAt).toBeLessThan(500);
+    });
+
     it('computes complexity breakdown', () => {
         const ctx = createFreshContext('PostgreSQL');
         ctx.stats.joins = 4;

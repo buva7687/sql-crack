@@ -137,6 +137,16 @@ SELECT 3;
       expect(statements).toHaveLength(2);
     });
 
+    it('recovers statement splitting after a stray closing parenthesis', () => {
+      const statements = splitSqlStatements(
+        'SELECT ); SELECT * FROM first_table; SELECT * FROM second_table;'
+      );
+
+      expect(statements).toHaveLength(3);
+      expect(statements[1]).toContain('first_table');
+      expect(statements[2]).toContain('second_table');
+    });
+
     it('ignores parentheses inside -- line comments', () => {
       const sql = `-- list: 1) first 2) second
 SELECT * FROM users;
@@ -233,6 +243,20 @@ SELECT * FROM t3;`;
       expect(statements).toHaveLength(3);
     });
   });
+
+  describe('TransactSQL GO batches', () => {
+    it('parses each GO-delimited batch instead of swallowing queries after USE', () => {
+      const result = parseSqlBatch(
+        'USE reporting\nGO\nSELECT * FROM first_table\nGO\nSELECT * FROM second_table\nGO',
+        'TransactSQL'
+      );
+
+      expect(result.queries).toHaveLength(3);
+      expect(result.queries[1].tableUsage.has('first_table')).toBe(true);
+      expect(result.queries[2].tableUsage.has('second_table')).toBe(true);
+      expect(result.errorCount).toBe(0);
+    });
+  });
   describe('Basic SELECT', () => {
     it('parses simple SELECT with single table', () => {
       const result = parseSql('SELECT * FROM users', 'MySQL');
@@ -304,6 +328,21 @@ SELECT * FROM t3;`;
       const result = parseSql('SELECT id AS user_id, name AS user_name FROM users', 'MySQL');
 
       expect(result.error).toBeUndefined();
+    });
+
+    it('formats CAST target types without object coercion', () => {
+      const result = parseSql(
+        'SELECT CAST(id AS VARCHAR(10)) AS text_id, CAST(amount AS DECIMAL(10,2)) AS rounded FROM orders',
+        'PostgreSQL'
+      );
+      const selectNode = result.nodes.find(node => node.type === 'select');
+      const expressions = selectNode?.columns?.map(column => column.expression) || [];
+
+      expect(expressions).toEqual(expect.arrayContaining([
+        'CAST(id AS VARCHAR(10))',
+        'CAST(amount AS DECIMAL(10,2))',
+      ]));
+      expect(expressions.join(' ')).not.toContain('[object Object]');
     });
   });
 

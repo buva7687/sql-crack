@@ -1,6 +1,20 @@
 import { ReferenceExtractor } from '../../../../src/workspace/extraction/referenceExtractor';
 
 describe('ReferenceExtractor table line lookup performance', () => {
+    it('parses large files one statement at a time instead of using the quadratic batch path', () => {
+        const extractor = new ReferenceExtractor();
+        const astifySpy = jest.spyOn((extractor as any).parser, 'astify');
+        const sql = Array.from({ length: 200 }, (_, index) =>
+            `SELECT id FROM table_${index};`
+        ).join('\n');
+
+        const refs = extractor.extractReferences(sql, 'large.sql', 'MySQL');
+
+        expect(refs).toHaveLength(200);
+        expect(astifySpy).toHaveBeenCalledTimes(200);
+        expect(Math.max(...astifySpy.mock.calls.map(call => String(call[0]).length))).toBeLessThan(80);
+    });
+
     it('builds the per-file table line lookup once for multiple AST references', () => {
         const extractor = new ReferenceExtractor();
         const buildLookupSpy = jest.spyOn(extractor as any, 'buildTableLineLookup');

@@ -28,8 +28,15 @@ describe('default layout initialization', () => {
     it('applies non-vertical layout after fitView in render()', () => {
         // After fitView(), render() should call switchLayout for non-vertical defaults
         // This ensures parser positions (always vertical) get recomputed
-        expect(rendererSource).toContain("if (state.layoutType && state.layoutType !== 'vertical')");
-        expect(rendererSource).toContain('switchLayout(state.layoutType)');
+        expect(rendererSource).toContain("state.layoutType && state.layoutType !== 'vertical'");
+        expect(rendererSource).toContain('switchLayout(deferredInitialLayout)');
+    });
+
+    it('initializes layout history only after a deferred default layout is applied', () => {
+        expect(rendererSource).toContain('const deferredInitialLayout = state.layoutType');
+        expect(rendererSource).toContain('if (!layoutHistory.getCurrent() && !deferredInitialLayout)');
+        expect(rendererSource.indexOf('recordLayoutHistorySnapshot();', rendererSource.indexOf('export function switchLayout')))
+            .toBeGreaterThan(rendererSource.indexOf('requestAnimationFrame(() => {', rendererSource.indexOf('export function switchLayout')));
     });
 
     it('updateNodeEdges uses calculateEdgePath instead of hardcoded vertical math', () => {

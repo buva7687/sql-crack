@@ -196,7 +196,7 @@ export function getWorkspaceCommandBarScriptFragment(): string {
         });
 
         document.addEventListener('keydown', (event) => {
-            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+            if (event.altKey && !event.ctrlKey && !event.metaKey && event.key.toLowerCase() === 'k') {
                 event.preventDefault();
                 setWorkspaceCommandBarVisible(true);
             }

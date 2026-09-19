@@ -7,6 +7,19 @@ describe('SchemaExtractor.extractDefinitions', () => {
         extractor = new SchemaExtractor();
     });
 
+    it('parses large files one statement at a time instead of using the quadratic batch path', () => {
+        const astifySpy = jest.spyOn((extractor as any).parser, 'astify');
+        const sql = Array.from({ length: 200 }, (_, index) =>
+            `CREATE TABLE table_${index} (id INT);`
+        ).join('\n');
+
+        const definitions = extractor.extractDefinitions(sql, '/sql/large.sql', 'MySQL');
+
+        expect(definitions).toHaveLength(200);
+        expect(astifySpy).toHaveBeenCalledTimes(200);
+        expect(Math.max(...astifySpy.mock.calls.map(call => String(call[0]).length))).toBeLessThan(80);
+    });
+
     describe('CREATE TABLE via AST parser', () => {
         it('extracts a simple CREATE TABLE', () => {
             const sql = 'CREATE TABLE orders (id INT, customer_id INT, amount DECIMAL(10,2));';
@@ -113,6 +126,36 @@ describe('SchemaExtractor.extractDefinitions', () => {
 
             expect(defs).toHaveLength(1);
             expect(defs[0].columns.map(col => col.name)).toEqual(['id', 'name']);
+        });
+
+        it('extracts inline foreign-key metadata from the AST path', () => {
+            const defs = extractor.extractDefinitions(
+                'CREATE TABLE child (id INT, parent_id INT REFERENCES public.parent(id));',
+                '/sql/child.sql',
+                'PostgreSQL'
+            );
+
+            expect(defs[0].columns.find(column => column.name === 'parent_id')?.foreignKey).toEqual({
+                referencedTable: 'public.parent',
+                referencedColumn: 'id',
+            });
+        });
+
+        it('applies table-level composite foreign keys to their local columns', () => {
+            const defs = extractor.extractDefinitions(
+                'CREATE TABLE child (parent_id INT, parent_tenant INT, CONSTRAINT fk_parent FOREIGN KEY (parent_id, parent_tenant) REFERENCES parent(id, tenant_id));',
+                '/sql/child.sql',
+                'PostgreSQL'
+            );
+
+            expect(defs[0].columns.find(column => column.name === 'parent_id')?.foreignKey).toEqual({
+                referencedTable: 'parent',
+                referencedColumn: 'id',
+            });
+            expect(defs[0].columns.find(column => column.name === 'parent_tenant')?.foreignKey).toEqual({
+                referencedTable: 'parent',
+                referencedColumn: 'tenant_id',
+            });
         });
     });
 

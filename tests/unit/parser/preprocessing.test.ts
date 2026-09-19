@@ -134,6 +134,10 @@ describe('parser preprocessing transforms', () => {
             expect(rewritten).toContain('a.type = b.type');
         });
 
+        it('does not remove (+) text inside string literals', () => {
+            expect(preprocessOracleSyntax("SELECT '(+)' AS marker FROM dual", 'Oracle')).toBeNull();
+        });
+
         it('rewrites MINUS to EXCEPT', () => {
             const sql = 'SELECT id FROM employees MINUS SELECT id FROM contractors';
             const rewritten = preprocessOracleSyntax(sql, 'Oracle');
@@ -524,6 +528,18 @@ SELECT * FROM OPENJSON((SELECT val FROM cte FOR JSON PATH)) AS j`;
             expect(rewritten).not.toMatch(/\bPCTFREE\b/i);
             expect(rewritten).toMatch(/\bAS\s+SELECT\b/i);
             expect(rewritten).toContain('FROM sales_source');
+        });
+
+        it('does not treat an aggregate call in CTAS as a column-definition list', () => {
+            const sql = 'CREATE TABLE totals AS SELECT COUNT(*) AS count FROM sales_source';
+
+            expect(preprocessOracleSyntax(sql, 'Oracle')).toBeNull();
+
+            const { parseSql } = require('../../../src/webview/sqlParser');
+            const result = parseSql(sql, 'Oracle');
+            expect(result.nodes).toEqual(expect.arrayContaining([
+                expect.objectContaining({ type: 'table', label: 'sales_source' }),
+            ]));
         });
 
         it('parses Oracle CREATE TABLE with physical options without partial fallback', () => {

@@ -42,6 +42,7 @@ type ParserWorkerResponse =
 interface PendingWorkerRequest {
     kind: 'parse' | 'parseBatch';
     sql: string;
+    worker: Worker;
     resolve: (value: WorkerBackedResponse) => void;
     reject: (error: Error) => void;
     timeoutId: ReturnType<typeof setTimeout>;
@@ -204,8 +205,11 @@ function destroyWorker(): void {
     parserWorker = null;
 }
 
-function rejectPendingWorkerRequests(error: Error): void {
+function rejectPendingWorkerRequests(error: Error, worker?: Worker): void {
     for (const [requestId, pendingRequest] of pendingWorkerRequests) {
+        if (worker && pendingRequest.worker !== worker) {
+            continue;
+        }
         clearWorkerRequestTimeout(pendingRequest.timeoutId);
         pendingWorkerRequests.delete(requestId);
         pendingRequest.reject(error);
@@ -269,14 +273,21 @@ function queueWorkerRequest<T extends WorkerBackedResponse>(
                 return;
             }
 
-            pendingWorkerRequests.delete(requestId);
-            destroyWorker();
-            reject(new ParserWorkerTimeoutError());
+            const timedOutWorker = pendingRequest.worker;
+            if (parserWorker === timedOutWorker) {
+                destroyWorker();
+            }
+            // A worker processes requests serially. Once it times out, every
+            // request posted to that worker is stranded and must be settled in
+            // the same cleanup pass. Clearing their timers also prevents an old
+            // request from later terminating a replacement worker.
+            rejectPendingWorkerRequests(new ParserWorkerTimeoutError(), timedOutWorker);
         }, PARSER_WORKER_TIMEOUT_MS);
 
         pendingWorkerRequests.set(requestId, {
             kind,
             sql,
+            worker,
             resolve: (value) => resolve(value as T),
             reject,
             timeoutId,
@@ -326,12 +337,13 @@ export function isCancelledBatchParseResult(result: BatchParseResult): boolean {
 export async function parseAsync(
     sql: string,
     dialect: SqlDialect = 'MySQL',
-    options: ParseOptions = {}
+    options: ParseOptions = {},
+    requestMode: ParseRequestMode = 'latest'
 ): Promise<ParseResult> {
-    const requestId = beginParseRequest();
+    const requestId = beginParseRequest(requestMode);
     try {
         await yieldToMainLoop();
-        if (isParseRequestStale(requestId)) {
+        if (isParseRequestStale(requestId, requestMode)) {
             return createCancelledParseResult(sql);
         }
 
@@ -344,7 +356,7 @@ export async function parseAsync(
                 });
             } catch (error) {
                 destroyWorker();
-                if (isParseRequestStale(requestId)) {
+                if (isParseRequestStale(requestId, requestMode)) {
                     return createCancelledParseResult(sql);
                 }
                 // A worker timeout means the parse is genuinely heavy — running it

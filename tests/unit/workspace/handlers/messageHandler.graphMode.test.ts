@@ -64,6 +64,29 @@ function createContext(overrides: Record<string, unknown> = {}) {
 }
 
 describe('MessageHandler - graph mode switching', () => {
+    it('keeps the live graph document when returning from lineage', async () => {
+        const { context } = createContext({
+            getCurrentView: jest.fn(() => 'lineage'),
+        });
+        const handler = new MessageHandler(context);
+
+        await handler.handleMessage({ command: 'switchView', view: 'graph' });
+
+        expect(context.setCurrentView).toHaveBeenCalledWith('graph');
+        expect(context.renderCurrentView).not.toHaveBeenCalled();
+    });
+
+    it('re-renders when leaving the standalone issues document', async () => {
+        const { context } = createContext({
+            getCurrentView: jest.fn(() => 'issues'),
+        });
+        const handler = new MessageHandler(context);
+
+        await handler.handleMessage({ command: 'switchView', view: 'graph' });
+
+        expect(context.renderCurrentView).toHaveBeenCalledTimes(1);
+    });
+
     it('atomically switches a file selection to tables mode with a file-name search', async () => {
         const { context } = createContext({
             getCurrentGraphMode: jest.fn(() => 'files'),
