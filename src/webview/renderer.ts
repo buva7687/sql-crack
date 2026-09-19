@@ -1812,7 +1812,7 @@ export function render(result: ParseResult, options?: RenderOptions): void {
     }
 
     // Fit view
-    if (!canVirtualizeOnFirstPaint && (!state.layoutType || state.layoutType === 'vertical')) {
+    if (!canVirtualizeOnFirstPaint) {
         fitView();
     }
 

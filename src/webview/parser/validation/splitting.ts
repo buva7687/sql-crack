@@ -216,7 +216,7 @@ function scanSqlStatements(
                 continue;
             }
 
-            if (!inString && char === '[') {
+            if (!inString && dialect === 'TransactSQL' && char === '[') {
                 inBracketIdentifier = true;
                 current += char;
                 continue;
@@ -231,7 +231,11 @@ function scanSqlStatements(
                     stringChar = char;
                     stringAllowsBackslashEscapes = dialect === 'MySQL'
                         || dialect === 'MariaDB'
-                        || (char === '\'' && (dialect === 'PostgreSQL' || dialect === 'Redshift') && /[Ee]/.test(prevChar));
+                        || dialect === 'BigQuery'
+                        || dialect === 'Snowflake'
+                        || dialect === 'Hive'
+                        || dialect === 'Redshift'
+                        || (char === '\'' && dialect === 'PostgreSQL' && /[Ee]/.test(prevChar));
                 } else if (char === stringChar) {
                     // SQL-standard doubled quote escape: '' or "" (and `` for backticks)
                     const nextChar = i + 1 < sql.length ? sql[i + 1] : '';

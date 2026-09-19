@@ -22,7 +22,7 @@ describe('renderer polish safeguards', () => {
 
     it('preserves same-query interaction state and avoids redundant initial fitting', () => {
         expect(source).toContain('|| (!shouldResetCloudState && currentNodes.length > 0)');
-        expect(source).toContain("if (!canVirtualizeOnFirstPaint && (!state.layoutType || state.layoutType === 'vertical'))");
+        expect(source).toContain('if (!canVirtualizeOnFirstPaint)');
     });
 
     it('coalesces minimap viewport work into one animation frame', () => {

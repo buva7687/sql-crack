@@ -395,5 +395,22 @@ describe('Item #4: Procedural SQL Splitting (BEGIN...END Blocks)', () => {
             const sql = String.raw`SELECT E'can\'t; stop' FROM t; SELECT id FROM u`;
             expect(splitSqlStatements(sql, 'PostgreSQL')).toHaveLength(2);
         });
+
+        it.each(['BigQuery', 'Snowflake', 'Hive', 'Redshift'] as const)(
+            'preserves backslash-escaped quotes for %s strings',
+            (dialect) => {
+                const sql = String.raw`SELECT 'can\'t; stop' FROM t; SELECT id FROM u`;
+                expect(splitSqlStatements(sql, dialect)).toHaveLength(2);
+            }
+        );
+
+        it('only treats square brackets as quoted identifiers in TransactSQL', () => {
+            expect(splitSqlStatements(
+                "SELECT ARRAY['a]b', 'c'] AS x FROM t; SELECT 2;",
+                'PostgreSQL'
+            )).toHaveLength(2);
+            expect(splitSqlStatements('SELECT m[a[1]] FROM t; SELECT 2;', 'PostgreSQL')).toHaveLength(2);
+            expect(splitSqlStatements('SELECT [a;b] FROM t; SELECT 2;', 'TransactSQL')).toHaveLength(2);
+        });
     });
 });

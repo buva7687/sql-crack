@@ -543,7 +543,7 @@ describe('parserClient', () => {
             }
         });
 
-        it('settles every request owned by a timed-out worker without harming its replacement', async () => {
+        it('retries queued requests after the active worker request times out', async () => {
             jest.useFakeTimers();
             try {
                 const { workerInstances } = installWorkerEnvironment();
@@ -555,34 +555,33 @@ describe('parserClient', () => {
                 expect(workerInstances).toHaveLength(1);
                 expect(workerInstances[0].postMessage).toHaveBeenCalledTimes(2);
 
+                const firstRequest = workerInstances[0].postMessage.mock.calls[0][0];
+                workerInstances[0].emitMessage({ type: 'started', requestId: firstRequest.requestId });
+
                 jest.advanceTimersByTime(5000);
-                const [firstResult, secondResult] = await Promise.all([first, second]);
+                const firstResult = await first;
                 expect(firstResult.parseErrors?.[0]?.message).toContain('timed out');
-                expect(secondResult.parseErrors?.[0]?.message).toContain('timed out');
                 expect(workerInstances[0].terminate).toHaveBeenCalledTimes(1);
 
-                const replacementRequest = parseAsync('SELECT 3', 'MySQL');
-                jest.advanceTimersByTime(0);
-                await Promise.resolve();
                 expect(workerInstances).toHaveLength(2);
                 const replacementWorker = workerInstances[1];
                 const request = replacementWorker.postMessage.mock.calls[0][0];
+                expect(request.payload.sql).toBe('SELECT 2');
+                replacementWorker.emitMessage({ type: 'started', requestId: request.requestId });
                 replacementWorker.emitMessage({
-                    type: 'parse',
+                    type: 'parseBatch',
                     requestId: request.requestId,
                     result: {
-                        nodes: [{ id: 'n3' }],
-                        edges: [],
-                        stats: { tables: 0, joins: 0, subqueries: 0, ctes: 0, aggregations: 0, windowFunctions: 0, unions: 0, conditions: 0, complexity: 'Simple', complexityScore: 0 },
-                        hints: [],
-                        sql: 'SELECT 3',
-                        columnLineage: [],
-                        tableUsage: new Map(),
+                        queries: [],
+                        totalStats: { tables: 0, joins: 0, subqueries: 0, ctes: 0, aggregations: 0, windowFunctions: 0, unions: 0, conditions: 0, complexity: 'Simple', complexityScore: 0 },
+                        successCount: 1,
+                        errorCount: 0,
                     },
                 });
 
-                await expect(replacementRequest).resolves.toEqual(expect.objectContaining({
-                    nodes: [{ id: 'n3' }],
+                await expect(second).resolves.toEqual(expect.objectContaining({
+                    successCount: 1,
+                    errorCount: 0,
                 }));
                 expect(replacementWorker.terminate).not.toHaveBeenCalled();
             } finally {

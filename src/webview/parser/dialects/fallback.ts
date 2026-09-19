@@ -106,8 +106,27 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
         const parts = raw.split('.').map((part) => part.replace(identifierWrapperPattern, '')).filter(Boolean);
         return parts[parts.length - 1] || raw.replace(identifierWrapperPattern, '');
     };
-    const isExtractFromDelimiter = (text: string, fromIndex: number): boolean =>
-        /\bEXTRACT\s*\(\s*[A-Za-z_][\w$]*\s*$/i.test(text.slice(0, fromIndex));
+    const functionFromKeywords = new Set(['EXTRACT', 'SUBSTRING', 'TRIM', 'POSITION', 'OVERLAY']);
+    const isFunctionFromDelimiter = (text: string, fromIndex: number): boolean => {
+        let nestedDepth = 0;
+        for (let index = fromIndex - 1; index >= 0; index--) {
+            if (text[index] === ')') {
+                nestedDepth++;
+                continue;
+            }
+            if (text[index] !== '(') {
+                continue;
+            }
+            if (nestedDepth > 0) {
+                nestedDepth--;
+                continue;
+            }
+
+            const functionMatch = text.slice(0, index).match(/([A-Z_][\w$]*)\s*$/i);
+            return functionFromKeywords.has((functionMatch?.[1] || '').toUpperCase());
+        }
+        return false;
+    };
 
     const firstCtePattern = new RegExp(`\\bWITH\\s+(${identifier})\\s+AS\\s*\\(`, 'giu');
     const cteMatch = firstCtePattern.exec(commentStripped);
@@ -165,7 +184,7 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
     for (const pattern of tablePatterns) {
         let match;
         while ((match = pattern.exec(commentStripped)) !== null) {
-            if (/^FROM\b/i.test(match[0]) && isExtractFromDelimiter(commentStripped, match.index)) {
+            if (/^FROM\b/i.test(match[0]) && isFunctionFromDelimiter(commentStripped, match.index)) {
                 continue;
             }
             const tableName = normalizeObjectName(match[1]);
@@ -198,7 +217,7 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
 
     while ((refMatch = tableRefPattern.exec(commentStripped)) !== null) {
         const keyword = refMatch[1].toUpperCase();
-        if (keyword === 'FROM' && isExtractFromDelimiter(commentStripped, refMatch.index)) {
+        if (keyword === 'FROM' && isFunctionFromDelimiter(commentStripped, refMatch.index)) {
             continue;
         }
         const table = normalizeObjectName(refMatch[2]);
@@ -231,7 +250,7 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
         const bodyRefPattern = new RegExp(`\\b(?:FROM|JOIN)\\s+(${qualifiedIdentifier})`, 'giu');
         let bodyRef;
         while ((bodyRef = bodyRefPattern.exec(body)) !== null) {
-            if (/^FROM\b/i.test(bodyRef[0]) && isExtractFromDelimiter(body, bodyRef.index)) {
+            if (/^FROM\b/i.test(bodyRef[0]) && isFunctionFromDelimiter(body, bodyRef.index)) {
                 continue;
             }
             const srcTable = normalizeObjectName(bodyRef[1]);

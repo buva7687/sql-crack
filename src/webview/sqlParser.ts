@@ -338,7 +338,7 @@ function parseSqlBatchInternal(
     statementLimit?: number
 ): BatchParseResult {
     // Validate SQL before parsing
-    const validationError = validateSql(sql, limits);
+    const validationError = validateSql(sql, limits, dialect);
     if (validationError) {
         // Empty input: return empty result
         if (validationError.type === 'empty_input') {

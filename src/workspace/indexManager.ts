@@ -25,6 +25,7 @@ const DEFAULT_AUTO_INDEX_THRESHOLD = 50;
 const DEFAULT_CACHE_TTL_HOURS = 24;
 const DEFAULT_MAX_CACHE_BYTES = 4 * 1024 * 1024; // 4MB safety limit for workspaceState
 const MAX_CACHE_VALIDATION_CONCURRENCY = 4;
+let workspaceIndexPersistQueue: Promise<void> = Promise.resolve();
 
 function isFileNotFoundCode(code: string | undefined): boolean {
     return code === 'FileNotFound' || code === 'ENOENT';
@@ -119,8 +120,11 @@ export class IndexManager {
             await this.buildIndex();
         }
 
-        // Setup file watcher for incremental updates
-        this.setupFileWatcher();
+        // A declined/manual index must remain idle. Install incremental
+        // watching only after a usable index exists.
+        if (this.index) {
+            this.setupFileWatcher();
+        }
 
         return {
             autoIndexed: shouldAutoIndex && this.index !== null,
@@ -171,15 +175,9 @@ export class IndexManager {
         }
     }
 
-    /**
-     * A queued watcher update cannot call buildIndex() while the index is
-     * missing because buildIndex() waits for that same queue to drain.
-     * Starting the serialized build directly is safe here: the full scan
-     * subsumes the queued change, and later queue entries are still processed.
-     */
+    /** Keep incremental events idle until the user has allowed a full index. */
     private async updateQueuedFile(uri: vscode.Uri): Promise<void> {
         if (!this.index) {
-            await this.startBuild();
             return;
         }
         await this.updateFile(uri);
@@ -253,6 +251,10 @@ export class IndexManager {
 
         this.index = newIndex;
         this._changesSinceIndex = 0;
+
+        if (!this.fileWatcher) {
+            this.setupFileWatcher();
+        }
 
         // Persist to workspace state
         await this.persistIndex();
@@ -678,7 +680,7 @@ export class IndexManager {
             this._persistTimer = null;
         }
         if (this.index) {
-            await this.persistIndex();
+            await this.persistIndex(true);
         }
     }
 
@@ -871,6 +873,9 @@ export class IndexManager {
      * Setup file watcher for incremental updates
      */
     private setupFileWatcher(): void {
+        if (this.fileWatcher || this._disposed) {
+            return;
+        }
         this.fileWatcher = vscode.workspace.createFileSystemWatcher(this.getWatcherGlob());
 
         // Debounced update function
@@ -1264,8 +1269,8 @@ export class IndexManager {
         return total;
     }
 
-    private async persistIndex(): Promise<void> {
-        if (this._disposed || !this.index) {return;}
+    private async persistIndex(allowDisposed = false): Promise<void> {
+        if ((!allowDisposed && this._disposed) || !this.index) {return;}
 
         // Convert Maps to arrays for JSON serialization
         const serializable: SerializedWorkspaceIndex = {
@@ -1301,7 +1306,7 @@ export class IndexManager {
                 referenceArray: []
             };
             try {
-                await this.context.workspaceState.update('sqlWorkspaceIndex', marker);
+                await this.enqueuePersist(marker);
             } catch (error) {
                 logger.warn(`[IndexManager] Failed to persist oversized marker: ${error instanceof Error ? error.message : String(error)}`);
             }
@@ -1309,10 +1314,18 @@ export class IndexManager {
         }
 
         try {
-            await this.context.workspaceState.update('sqlWorkspaceIndex', serializable);
+            await this.enqueuePersist(serializable);
         } catch (error) {
             logger.warn(`[IndexManager] Failed to persist index cache: ${error instanceof Error ? error.message : String(error)}`);
         }
+    }
+
+    private enqueuePersist(value: SerializedWorkspaceIndex | undefined): Promise<void> {
+        const write = async (): Promise<void> => {
+            await this.context.workspaceState.update('sqlWorkspaceIndex', value);
+        };
+        workspaceIndexPersistQueue = workspaceIndexPersistQueue.then(write, write);
+        return workspaceIndexPersistQueue;
     }
 
     /**
@@ -1336,7 +1349,7 @@ export class IndexManager {
      */
     async clearCache(): Promise<void> {
         this.index = null;
-        await this.context.workspaceState.update('sqlWorkspaceIndex', undefined);
+        await this.enqueuePersist(undefined);
         logger.debug('[IndexManager] Cache cleared');
     }
 }

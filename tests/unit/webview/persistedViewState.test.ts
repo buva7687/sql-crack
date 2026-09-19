@@ -281,7 +281,7 @@ describe('persisted view state validation', () => {
             )?.[0];
             expect(functionBody).toBeDefined();
             expect(functionBody!.indexOf('applyInitialStatePending = false;'))
-                .toBeGreaterThan(functionBody!.indexOf("if (state.currentDialect !== lastParsedDialect"));
+                .toBeGreaterThan(functionBody!.indexOf('state.currentDialect !== lastParsedDialect'));
             expect(functionBody!.indexOf('applyInitialStatePending = false;'))
                 .toBeGreaterThan(functionBody!.indexOf('void visualize(sql);'));
         });

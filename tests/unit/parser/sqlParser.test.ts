@@ -67,6 +67,17 @@ describe('SQL Parser', () => {
       expect(result?.details?.actual).toBe(2);
     });
 
+    it('uses the selected dialect when counting quoted statement boundaries', () => {
+      const sql = "SELECT ARRAY['a]b', 'c'] AS x FROM t; SELECT 2;";
+      const result = validateSql(sql, {
+        maxSqlSizeBytes: 1024 * 1024,
+        maxQueryCount: 1,
+      }, 'PostgreSQL');
+
+      expect(result?.type).toBe('query_count_limit');
+      expect(result?.details?.actual).toBe(2);
+    });
+
     it('uses splitter-consistent counting for custom delimiters and procedural bodies', () => {
       const sql = `
 DELIMITER $$

@@ -168,6 +168,7 @@ describe('IndexManager', () => {
             expect(result.autoIndexed).toBe(false);
             expect(result.fileCount).toBe(100);
             expect(mockScanner.analyzeWorkspace).not.toHaveBeenCalled();
+            expect(vscode.workspace.createFileSystemWatcher).not.toHaveBeenCalled();
         });
 
         it('should NOT auto-index empty workspaces', async () => {
@@ -204,7 +205,7 @@ describe('IndexManager', () => {
     // =========================================================================
 
     describe('buildIndex', () => {
-        it('builds a missing index from a queued watcher update without waiting on itself', async () => {
+        it('does not build a declined index from a queued watcher update', async () => {
             mockScanner.analyzeWorkspace.mockResolvedValue([
                 createMockAnalysis('/queued.sql', [{ name: 'queued_table' }])
             ]);
@@ -212,8 +213,8 @@ describe('IndexManager', () => {
 
             await expect((indexManager as any).processUpdateQueue()).resolves.toBeUndefined();
 
-            expect(mockScanner.analyzeWorkspace).toHaveBeenCalledTimes(1);
-            expect(indexManager.getIndex()?.definitionMap.has('queued_table')).toBe(true);
+            expect(mockScanner.analyzeWorkspace).not.toHaveBeenCalled();
+            expect(indexManager.getIndex()).toBeNull();
             expect((indexManager as any).updateQueue.size).toBe(0);
         });
 
@@ -1965,7 +1966,11 @@ describe('IndexManager', () => {
             await indexManager.initialize();
 
             expect(mockScanner.analyzeWorkspace).not.toHaveBeenCalled();
+            expect(watchers).toHaveLength(0);
+
+            await indexManager.buildIndex();
             expect(watchers).toHaveLength(1);
+            mockScanner.analyzeWorkspace.mockClear();
 
             __setMockConfig('sqlCrack', { additionalFileExtensions: ['hql'] });
             if (!configChangeHandler) {
@@ -1984,14 +1989,8 @@ describe('IndexManager', () => {
             expect(watchers[0].createDisposable.dispose).toHaveBeenCalled();
             expect(watchers[0].deleteDisposable.dispose).toHaveBeenCalled();
 
-            watchers[0].triggerChange(vscode.Uri.file('/stale.sql'));
-            watchers[1].triggerChange(vscode.Uri.file('/fresh.sql'));
-            await flushWatcherDebounce();
-
             expect(vscode.workspace.createFileSystemWatcher).toHaveBeenLastCalledWith('**/*.{sql,hql}');
             expect(mockScanner.analyzeWorkspace).toHaveBeenCalledTimes(1);
-            expect(mockScanner.analyzeFile).toHaveBeenCalledTimes(1);
-            expect(mockScanner.analyzeFile).toHaveBeenCalledWith(expect.objectContaining({ fsPath: '/fresh.sql' }));
         });
     });
 

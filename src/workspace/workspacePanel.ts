@@ -1114,9 +1114,14 @@ ${bodyContent}
 
         this._messageHandler?.markDisposed();
         this._indexManager.setOnIndexUpdated(null);
-        // Cancel scanning immediately so a disposed panel cannot later publish
-        // or persist an index for a scope that is no longer active.
+        // Enqueue the last complete incremental index before cancellation. The
+        // manager serializes cache writes across panel scopes, so a retired
+        // scope cannot overwrite a newer scope after its write completes.
+        const flushPromise = this._indexManager.flushPersist();
         this._indexManager.dispose();
+        void flushPromise.catch(err =>
+            logger.warn(`[WorkspacePanel] flushPersist failed during dispose: ${err instanceof Error ? err.message : String(err)}`)
+        );
         this._messageHandler = null;
         this._panel.dispose();
 

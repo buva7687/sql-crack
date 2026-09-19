@@ -45,6 +45,7 @@ type ParserWorkerRequest =
     };
 
 type ParserWorkerResponse =
+    | { type: 'started'; requestId: number }
     | { type: 'parse'; requestId: number; result: ParseResult }
     | { type: 'parseBatch'; requestId: number; result: BatchParseResult }
     | { type: 'validate'; requestId: number; result: ValidationError | null }
@@ -63,6 +64,7 @@ function postWorkerMessage(message: ParserWorkerResponse): void {
 
 addEventListener('message', (event: MessageEvent<ParserWorkerRequest>) => {
     const message = event.data;
+    postWorkerMessage({ type: 'started', requestId: message.requestId });
 
     try {
         if (message.type === 'parse') {

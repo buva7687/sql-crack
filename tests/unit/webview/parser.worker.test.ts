@@ -80,6 +80,7 @@ describe('parser.worker', () => {
             },
         });
 
+        expect(postMessageMock).toHaveBeenNthCalledWith(1, { type: 'started', requestId: 7 });
         expect(parseSqlMock).toHaveBeenCalledWith('SELECT 1', 'PostgreSQL', { allowDialectFallback: false });
         expect(postMessageMock).toHaveBeenCalledWith({
             type: 'parse',

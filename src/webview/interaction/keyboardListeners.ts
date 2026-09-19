@@ -143,7 +143,7 @@ export function registerDocumentKeyboardListeners(
             return;
         }
 
-        if (e.altKey && !e.ctrlKey && !e.metaKey && e.key.toLowerCase() === 'p') {
+        if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyP') {
             e.preventDefault();
             callbacks.toggleCommandBar();
             return;

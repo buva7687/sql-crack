@@ -202,6 +202,8 @@ let persistStateIntervalId: number | null = null;
 let persistStateDebounceId: number | null = null;
 let persistStateDirty = false;
 let applyInitialStatePending = true;
+let dialectResyncAttempted = false;
+let renderedQueryIndex = 0;
 let cleanupDialectSuggestion: (() => void) | null = null;
 let hintActionListenerRegistered = false;
 const deferredQueryIndexes: Set<number> = new Set();
@@ -600,6 +602,10 @@ function showDialectSwitchSuggestion(dialect: SqlDialect, sql: string): void {
 }
 
 function capturePersistedState(): PersistedWebviewState {
+    const persistedQueryViewStates = new Map(queryViewStates);
+    // The renderer may still show the previous query while a deferred target is
+    // hydrating. Record the live viewport under the query actually on screen.
+    persistedQueryViewStates.set(renderedQueryIndex, getViewState());
     return {
         version: 1,
         currentDialect,
@@ -607,7 +613,7 @@ function capturePersistedState(): PersistedWebviewState {
         userExplicitlySetDialect,
         compareModeActive,
         activeTabId: getActiveTabId(),
-        queryViewStates: Array.from(queryViewStates.entries()).map(([queryIndex, viewState]) => ({ queryIndex, viewState })),
+        queryViewStates: Array.from(persistedQueryViewStates.entries()).map(([queryIndex, viewState]) => ({ queryIndex, viewState })),
         renderer: {
             viewState: getViewState(),
             layout: getCurrentLayout(),
@@ -708,7 +714,11 @@ async function applyInitialUiStateIfAvailable(): Promise<void> {
 
     // If the restored dialect differs from the dialect used for the current parse,
     // re-visualize with the restored dialect instead of applying stale view state
-    if (state.currentDialect !== lastParsedDialect && lastParsedDialect !== null) {
+    if (state.userExplicitlySetDialect
+        && !dialectResyncAttempted
+        && state.currentDialect !== lastParsedDialect
+        && lastParsedDialect !== null) {
+        dialectResyncAttempted = true;
         currentDialect = state.currentDialect;
         const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement | null;
         if (dialectSelect) {
@@ -723,7 +733,9 @@ async function applyInitialUiStateIfAvailable(): Promise<void> {
 
     applyInitialStatePending = false;
 
-    currentDialect = state.currentDialect;
+    currentDialect = state.userExplicitlySetDialect
+        ? state.currentDialect
+        : (lastParsedDialect || currentDialect);
     const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement | null;
     if (dialectSelect) {
         dialectSelect.value = currentDialect;
@@ -1182,8 +1194,11 @@ function init(): void {
     // Keyboard shortcuts for query navigation
     document.addEventListener('keydown', (e) => {
         // Don't trigger when typing in input fields
-        const isInputFocused = document.activeElement?.tagName === 'INPUT' ||
-                               document.activeElement?.tagName === 'TEXTAREA';
+        const activeElement = document.activeElement as HTMLElement | null;
+        const isInputFocused = activeElement?.tagName === 'INPUT'
+            || activeElement?.tagName === 'TEXTAREA'
+            || activeElement?.tagName === 'SELECT'
+            || activeElement?.isContentEditable === true;
         if (isInputFocused) { return; }
 
         // Skip if modifier keys are pressed (except for these shortcuts)
@@ -1686,6 +1701,7 @@ function renderCurrentQuery(): void {
     }
 
     render(query);
+    renderedQueryIndex = currentQueryIndex;
     schedulePersistUiState();
 }
 

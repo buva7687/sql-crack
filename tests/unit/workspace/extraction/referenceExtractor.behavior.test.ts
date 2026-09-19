@@ -119,6 +119,28 @@ describe('ReferenceExtractor behavioral coverage', () => {
         ]));
     });
 
+    it('discards earlier AST output when a later statement requires whole-file fallback', () => {
+        jest.spyOn((extractor as any).parser, 'astify')
+            .mockReturnValueOnce({
+                type: 'select',
+                columns: '*',
+                from: [{ table: 'users' }],
+            })
+            .mockImplementationOnce(() => {
+                throw new Error('force second statement fallback');
+            });
+
+        const result = extractor.extractReferencesWithStatus(
+            'SELECT * FROM users; SELECT * FROM orders WHERE :=: invalid_token;',
+            'mixed.sql',
+            'MySQL'
+        );
+
+        expect(result.references.map(ref => ref.tableName).sort()).toEqual(['orders', 'users']);
+        expect(result.queries).toEqual([]);
+        expect(result.warnings).toHaveLength(1);
+    });
+
     it('extracts real tables from subqueries without leaking the subquery alias', () => {
         const refs = extractor.extractReferences(
             `

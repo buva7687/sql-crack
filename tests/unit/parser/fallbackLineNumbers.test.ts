@@ -86,4 +86,16 @@ WHERE :=: invalid_token`;
 
         expect(result.nodes.filter(node => node.type === 'table').map(node => node.label)).toEqual(['orders']);
     });
+
+    it.each([
+        ["SELECT SUBSTRING(name FROM 2) FROM customers WHERE :=: invalid_token", 'customers'],
+        ["SELECT TRIM(BOTH 'x' FROM code) FROM products WHERE :=: invalid_token", 'products'],
+        ["SELECT POSITION('x' IN name) FROM contacts WHERE :=: invalid_token", 'contacts'],
+        ["SELECT OVERLAY(name PLACING 'x' FROM 2) FROM accounts WHERE :=: invalid_token", 'accounts'],
+        ["SELECT SUBSTRING(COALESCE(name, '') FROM 2) FROM customers WHERE :=: invalid_token", 'customers'],
+    ])('does not treat function FROM clauses as fallback tables: %s', (sql, expectedTable) => {
+        const result = regexFallbackParse(sql, 'PostgreSQL');
+        const tables = result.nodes.filter(node => node.type === 'table').map(node => node.label);
+        expect(tables).toEqual([expectedTable]);
+    });
 });

@@ -261,6 +261,11 @@ export class ReferenceExtractor {
             }
         } catch (error) {
             // Fallback to regex extraction with statement-local CTE/alias names.
+            // Discard AST output collected before the failing statement so the
+            // whole-file fallback cannot duplicate those references or leave a
+            // mixed query-analysis payload.
+            references.length = 0;
+            parsedStatements.length = 0;
             warnings.push(this.formatParserWarning('Reference', error));
             const regexRefs = this.extractWithRegex(normalizedSql, filePath);
             for (const ref of regexRefs) {

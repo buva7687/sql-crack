@@ -1,4 +1,4 @@
-import type { ValidationError, ValidationLimits } from '../../types';
+import type { SqlDialect, ValidationError, ValidationLimits } from '../../types';
 import { countSqlStatements } from './splitting';
 
 /**
@@ -22,7 +22,8 @@ function getUtf8ByteSize(value: string): number {
  */
 export function validateSql(
     sql: string,
-    limits: ValidationLimits = DEFAULT_VALIDATION_LIMITS
+    limits: ValidationLimits = DEFAULT_VALIDATION_LIMITS,
+    dialect: SqlDialect = 'MySQL'
 ): ValidationError | null {
     if (!sql || !sql.trim()) {
         return {
@@ -49,7 +50,7 @@ export function validateSql(
         };
     }
 
-    const estimatedStatements = countStatements(sql);
+    const estimatedStatements = countStatements(sql, dialect);
     if (estimatedStatements > limits.maxQueryCount) {
         return {
             type: 'query_count_limit',
@@ -65,8 +66,8 @@ export function validateSql(
     return null;
 }
 
-function countStatements(sql: string): number {
-    return countSqlStatements(sql);
+function countStatements(sql: string, dialect: SqlDialect): number {
+    return countSqlStatements(sql, dialect);
 }
 
 export function formatBytes(bytes: number): string {

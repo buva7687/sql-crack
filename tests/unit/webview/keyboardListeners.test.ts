@@ -295,7 +295,8 @@ describe('keyboardListeners', () => {
         expect(searchBox.focus).toHaveBeenCalled();
 
         keydown!({
-            key: 'p',
+            key: 'π',
+            code: 'KeyP',
             ctrlKey: false,
             metaKey: false,
             altKey: true,

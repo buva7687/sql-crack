@@ -5,7 +5,7 @@ describe('parsing edge hardening guards', () => {
     it('uses splitSqlStatements for validation statement counts', () => {
         const source = readFileSync(join(__dirname, '../../../src/webview/parser/validation/validate.ts'), 'utf8');
         expect(source).toContain("import { countSqlStatements } from './splitting';");
-        expect(source).toContain('return countSqlStatements(sql);');
+        expect(source).toContain('return countSqlStatements(sql, dialect);');
     });
 
     it('uses TextEncoder byte counting for validation size limits', () => {

@@ -219,7 +219,7 @@ describe('workspace clientScripts navigation context', () => {
         });
 
         expect(script).toContain("const workspaceCommandBtn = document.getElementById('btn-workspace-command');");
-        expect(script).toContain("if (event.altKey && !event.ctrlKey && !event.metaKey && event.key.toLowerCase() === 'k')");
+        expect(script).toContain("if (event.altKey && !event.ctrlKey && !event.metaKey && event.code === 'KeyK')");
         expect(script).toContain('let pendingWorkspaceSearchFocus = \'\';');
         expect(script).toContain('function requestWorkspaceSearchFocus(targetView)');
         expect(script).toContain("restoreWorkspaceViewRoot(normalizedTargetView);");

@@ -5,7 +5,7 @@ export interface KeyboardShortcut {
 
 export function getKeyboardShortcutsFeature(): KeyboardShortcut[] {
     return [
-        { key: 'Ctrl/Cmd + Shift + P', description: 'Command palette' },
+        { key: 'Alt + P', description: 'SQL Crack quick actions' },
         { key: 'Ctrl/Cmd + F', description: 'Search nodes' },
         { key: 'Ctrl/Cmd + Z', description: 'Undo layout change' },
         { key: 'Ctrl/Cmd + Shift + Z', description: 'Redo layout change' },

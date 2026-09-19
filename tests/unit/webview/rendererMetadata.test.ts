@@ -13,6 +13,7 @@ describe('rendererMetadata feature', () => {
             { key: 'Ctrl/Cmd + F', description: 'Search nodes' },
             { key: 'F', description: 'Toggle fullscreen' },
             { key: 'E', description: 'Expand/collapse all CTEs & subqueries' },
+            { key: 'Alt + P', description: 'SQL Crack quick actions' },
             { key: '?', description: 'Show all shortcuts' },
         ]));
         expect(shortcuts).toHaveLength(28);

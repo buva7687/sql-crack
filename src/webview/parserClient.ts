@@ -34,6 +34,7 @@ type ParserWorkerRequest =
     };
 
 type ParserWorkerResponse =
+    | { type: 'started'; requestId: number }
     | { type: 'parse'; requestId: number; result: ParseResult }
     | { type: 'parseBatch'; requestId: number; result: BatchParseResult }
     | { type: 'validate'; requestId: number; result: ValidationError | null }
@@ -43,12 +44,14 @@ interface PendingWorkerRequest {
     kind: 'parse' | 'parseBatch';
     sql: string;
     worker: Worker;
+    request: ParserWorkerRequest;
     resolve: (value: WorkerBackedResponse) => void;
     reject: (error: Error) => void;
-    timeoutId: ReturnType<typeof setTimeout>;
+    timeoutId: ReturnType<typeof setTimeout> | null;
 }
 
 const PARSER_WORKER_TIMEOUT_MS = 5000;
+const PARSER_WORKER_START_TIMEOUT_MS = 5000;
 
 const PARSE_TIMEOUT_MESSAGE =
     'Parsing timed out — the query may be too large or complex to visualize.';
@@ -155,8 +158,10 @@ function getParserWorkerUri(): string | null {
     return workerWindow.sqlCrackConfig?.parserWorkerUri || workerWindow.parserWorkerUri || null;
 }
 
-function clearWorkerRequestTimeout(timeoutId: ReturnType<typeof setTimeout>): void {
-    clearTimeout(timeoutId);
+function clearWorkerRequestTimeout(timeoutId: ReturnType<typeof setTimeout> | null): void {
+    if (timeoutId !== null) {
+        clearTimeout(timeoutId);
+    }
 }
 
 function resolveCancelledWorkerRequest(requestId: number, request: PendingWorkerRequest): void {
@@ -223,6 +228,11 @@ function handleWorkerMessage(event: MessageEvent<ParserWorkerResponse>): void {
         return;
     }
 
+    if (response.type === 'started') {
+        startWorkerRequestTimeout(response.requestId, pendingRequest);
+        return;
+    }
+
     clearWorkerRequestTimeout(pendingRequest.timeoutId);
     pendingWorkerRequests.delete(response.requestId);
 
@@ -267,34 +277,71 @@ function queueWorkerRequest<T extends WorkerBackedResponse>(
     const worker = getOrCreateWorker();
 
     return new Promise<T>((resolve, reject) => {
-        const timeoutId = setTimeout(() => {
-            const pendingRequest = pendingWorkerRequests.get(requestId);
-            if (!pendingRequest) {
-                return;
-            }
-
-            const timedOutWorker = pendingRequest.worker;
-            if (parserWorker === timedOutWorker) {
-                destroyWorker();
-            }
-            // A worker processes requests serially. Once it times out, every
-            // request posted to that worker is stranded and must be settled in
-            // the same cleanup pass. Clearing their timers also prevents an old
-            // request from later terminating a replacement worker.
-            rejectPendingWorkerRequests(new ParserWorkerTimeoutError(), timedOutWorker);
-        }, PARSER_WORKER_TIMEOUT_MS);
-
-        pendingWorkerRequests.set(requestId, {
+        const pendingRequest: PendingWorkerRequest = {
             kind,
             sql,
             worker,
+            request,
             resolve: (value) => resolve(value as T),
             reject,
-            timeoutId,
-        });
+            timeoutId: null,
+        };
+        const workerIsIdle = ![...pendingWorkerRequests.values()]
+            .some(pending => pending.worker === worker);
+        pendingWorkerRequests.set(requestId, pendingRequest);
+
+        // Only the head request gets a start watchdog. Requests queued behind
+        // synchronous parser work wait for the worker's `started` message, so
+        // their execution budget does not elapse before they begin.
+        if (workerIsIdle) {
+            startWorkerRequestTimeout(requestId, pendingRequest, PARSER_WORKER_START_TIMEOUT_MS);
+        }
 
         worker.postMessage(request);
     });
+}
+
+function startWorkerRequestTimeout(
+    requestId: number,
+    request: PendingWorkerRequest,
+    timeoutMs: number = PARSER_WORKER_TIMEOUT_MS
+): void {
+    clearWorkerRequestTimeout(request.timeoutId);
+    request.timeoutId = setTimeout(() => {
+        const timedOutRequest = pendingWorkerRequests.get(requestId);
+        if (!timedOutRequest || timedOutRequest !== request) {
+            return;
+        }
+
+        const timedOutWorker = timedOutRequest.worker;
+        clearWorkerRequestTimeout(timedOutRequest.timeoutId);
+        pendingWorkerRequests.delete(requestId);
+        timedOutRequest.reject(new ParserWorkerTimeoutError());
+
+        const stranded = [...pendingWorkerRequests.entries()]
+            .filter(([, pending]) => pending.worker === timedOutWorker);
+        if (parserWorker === timedOutWorker) {
+            destroyWorker();
+        }
+        if (stranded.length === 0) {
+            return;
+        }
+
+        const replacementWorker = getOrCreateWorker();
+        for (const [index, [strandedRequestId, pending]] of stranded.entries()) {
+            clearWorkerRequestTimeout(pending.timeoutId);
+            pending.timeoutId = null;
+            pending.worker = replacementWorker;
+            if (index === 0) {
+                startWorkerRequestTimeout(
+                    strandedRequestId,
+                    pending,
+                    PARSER_WORKER_START_TIMEOUT_MS
+                );
+            }
+            replacementWorker.postMessage(pending.request);
+        }
+    }, timeoutMs);
 }
 
 function beginParseRequest(mode: ParseRequestMode = 'latest'): number {
@@ -355,7 +402,9 @@ export async function parseAsync(
                     payload: { sql, dialect, options },
                 });
             } catch (error) {
-                destroyWorker();
+                if (!(error instanceof ParserWorkerTimeoutError)) {
+                    destroyWorker();
+                }
                 if (isParseRequestStale(requestId, requestMode)) {
                     return createCancelledParseResult(sql);
                 }
@@ -407,7 +456,9 @@ export async function parseBatchAsync(
                     payload: { sql, dialect, limits: appliedLimits, options },
                 });
             } catch (error) {
-                destroyWorker();
+                if (!(error instanceof ParserWorkerTimeoutError)) {
+                    destroyWorker();
+                }
                 if (isParseRequestStale(requestId, requestMode)) {
                     return createCancelledBatchParseResult(sql);
                 }
