@@ -165,6 +165,10 @@ export class IndexManager {
             return this._buildPromise;
         }
         this._buildPromise = this._doBuildIndex(progressCallback, cancellationToken);
+        // An explicit or automatic build authorizes indexing. Start watching
+        // immediately so edits made during the initial scan are queued and
+        // reconciled after the build completes.
+        this.setupFileWatcher();
         try {
             return await this._buildPromise;
         } finally {

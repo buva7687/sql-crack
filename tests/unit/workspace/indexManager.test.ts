@@ -238,6 +238,37 @@ describe('IndexManager', () => {
             expect(index.referenceMap.size).toBe(2);
         });
 
+        it('queues edits made during the first explicit build', async () => {
+            mockScanner.getFileCount.mockResolvedValue(100);
+            await indexManager.initialize();
+            expect(__getFileSystemWatcher()).toBeNull();
+
+            let resolveScan!: (analyses: FileAnalysis[]) => void;
+            mockScanner.analyzeWorkspace.mockImplementationOnce(() => new Promise(resolve => {
+                resolveScan = resolve;
+            }));
+            mockScanner.analyzeFile.mockResolvedValue(
+                createMockAnalysis('/changed-during-build.sql', [{ name: 'fresh_table' }])
+            );
+            (indexManager as any).updateDebounceMs = 0;
+
+            const buildPromise = indexManager.buildIndex();
+            await Promise.resolve();
+            const watcher = __getFileSystemWatcher();
+            expect(watcher).not.toBeNull();
+            watcher?.__triggerChange(vscode.Uri.file('/changed-during-build.sql'));
+
+            resolveScan([createMockAnalysis('/seed.sql', [{ name: 'seed_table' }])]);
+            await buildPromise;
+            await new Promise(resolve => setTimeout(resolve, 0));
+            await (indexManager as any)._queueProcessingPromise;
+
+            expect(mockScanner.analyzeFile).toHaveBeenCalledWith(
+                expect.objectContaining({ fsPath: '/changed-during-build.sql' })
+            );
+            expect(indexManager.findDefinition('fresh_table')).toBeDefined();
+        });
+
         it('should call progress callback during build', async () => {
             mockScanner.analyzeWorkspace.mockImplementation(async (progressCb) => {
                 // Simulate scanner calling progress
@@ -1647,8 +1678,9 @@ describe('IndexManager', () => {
 
     describe('file watcher', () => {
         const flushMicrotasks = async () => {
-            await Promise.resolve();
-            await Promise.resolve();
+            for (let tick = 0; tick < 8; tick++) {
+                await Promise.resolve();
+            }
         };
 
         const flushWatcherDebounce = async () => {
@@ -1989,8 +2021,16 @@ describe('IndexManager', () => {
             expect(watchers[0].createDisposable.dispose).toHaveBeenCalled();
             expect(watchers[0].deleteDisposable.dispose).toHaveBeenCalled();
 
+            watchers[0].triggerChange(vscode.Uri.file('/stale.sql'));
+            watchers[1].triggerChange(vscode.Uri.file('/fresh.sql'));
+            await flushWatcherDebounce();
+
             expect(vscode.workspace.createFileSystemWatcher).toHaveBeenLastCalledWith('**/*.{sql,hql}');
             expect(mockScanner.analyzeWorkspace).toHaveBeenCalledTimes(1);
+            expect(mockScanner.analyzeFile).toHaveBeenCalledTimes(1);
+            expect(mockScanner.analyzeFile).toHaveBeenCalledWith(
+                expect.objectContaining({ fsPath: '/fresh.sql' })
+            );
         });
     });
 

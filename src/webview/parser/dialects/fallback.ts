@@ -6,7 +6,7 @@ import type {
     QueryStats,
     SqlDialect
 } from '../../types';
-import { findMatchingParen } from './preprocessing';
+import { findMatchingParen, maskStringsAndComments } from './preprocessing';
 import { extractMergeOnCondition } from '../mergeCondition';
 import { stripSqlComments } from '../../../shared';
 
@@ -93,6 +93,7 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
     const commentStripped = stripSqlComments(sql, {
         preserveHashTempIdentifiers: dialect === 'TransactSQL',
     });
+    const structureMasked = maskStringsAndComments(commentStripped);
     const routineDdl = extractRoutineDdlInfo(commentStripped);
 
     const cteNames = new Set<string>();
@@ -184,7 +185,7 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
     for (const pattern of tablePatterns) {
         let match;
         while ((match = pattern.exec(commentStripped)) !== null) {
-            if (/^FROM\b/i.test(match[0]) && isFunctionFromDelimiter(commentStripped, match.index)) {
+            if (/^FROM\b/i.test(match[0]) && isFunctionFromDelimiter(structureMasked, match.index)) {
                 continue;
             }
             const tableName = normalizeObjectName(match[1]);
@@ -217,7 +218,7 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
 
     while ((refMatch = tableRefPattern.exec(commentStripped)) !== null) {
         const keyword = refMatch[1].toUpperCase();
-        if (keyword === 'FROM' && isFunctionFromDelimiter(commentStripped, refMatch.index)) {
+        if (keyword === 'FROM' && isFunctionFromDelimiter(structureMasked, refMatch.index)) {
             continue;
         }
         const table = normalizeObjectName(refMatch[2]);
@@ -248,9 +249,10 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
 
     for (const [cteName, body] of cteBodies) {
         const bodyRefPattern = new RegExp(`\\b(?:FROM|JOIN)\\s+(${qualifiedIdentifier})`, 'giu');
+        const maskedBody = maskStringsAndComments(body);
         let bodyRef;
         while ((bodyRef = bodyRefPattern.exec(body)) !== null) {
-            if (/^FROM\b/i.test(bodyRef[0]) && isFunctionFromDelimiter(body, bodyRef.index)) {
+            if (/^FROM\b/i.test(bodyRef[0]) && isFunctionFromDelimiter(maskedBody, bodyRef.index)) {
                 continue;
             }
             const srcTable = normalizeObjectName(bodyRef[1]);

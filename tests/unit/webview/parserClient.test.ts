@@ -517,6 +517,50 @@ describe('parserClient', () => {
             }
         });
 
+        it('keeps queued requests alive after a worker-reported parser error', async () => {
+            jest.useFakeTimers();
+            try {
+                const { workerInstances } = installWorkerEnvironment();
+                const first = parseBatchAsync('SELECT 1', 'MySQL', undefined, {}, 'independent');
+                const second = parseBatchAsync('SELECT 2', 'MySQL', undefined, {}, 'independent');
+
+                jest.advanceTimersByTime(0);
+                await Promise.resolve();
+
+                const worker = workerInstances[0];
+                const firstRequest = worker.postMessage.mock.calls[0][0];
+                const secondRequest = worker.postMessage.mock.calls[1][0];
+                worker.emitMessage({ type: 'started', requestId: firstRequest.requestId });
+                worker.emitMessage({
+                    type: 'error',
+                    requestId: firstRequest.requestId,
+                    error: 'request-local parser failure',
+                });
+
+                await expect(first).resolves.toEqual(expect.objectContaining({ errorCount: 0 }));
+                expect(worker.terminate).not.toHaveBeenCalled();
+
+                worker.emitMessage({ type: 'started', requestId: secondRequest.requestId });
+                worker.emitMessage({
+                    type: 'parseBatch',
+                    requestId: secondRequest.requestId,
+                    result: {
+                        queries: [],
+                        totalStats: { tables: 0, joins: 0, subqueries: 0, ctes: 0, aggregations: 0, windowFunctions: 0, unions: 0, conditions: 0, complexity: 'Simple', complexityScore: 0 },
+                        successCount: 1,
+                        errorCount: 0,
+                    },
+                });
+
+                await expect(second).resolves.toEqual(expect.objectContaining({
+                    successCount: 1,
+                    errorCount: 0,
+                }));
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+
         it('returns a lightweight result on worker timeout instead of parsing synchronously', async () => {
             jest.useFakeTimers();
             try {

@@ -68,6 +68,14 @@ class ParserWorkerTimeoutError extends Error {
     }
 }
 
+/** Parser code reported a request-local failure; the worker remains usable. */
+class ParserWorkerReportedError extends Error {
+    constructor(message: string) {
+        super(message);
+        this.name = 'ParserWorkerReportedError';
+    }
+}
+
 function yieldToMainLoop(): Promise<void> {
     return new Promise(resolve => {
         setTimeout(resolve, 0);
@@ -237,7 +245,7 @@ function handleWorkerMessage(event: MessageEvent<ParserWorkerResponse>): void {
     pendingWorkerRequests.delete(response.requestId);
 
     if (response.type === 'error') {
-        pendingRequest.reject(new Error(response.error));
+        pendingRequest.reject(new ParserWorkerReportedError(response.error));
         return;
     }
 
@@ -402,7 +410,8 @@ export async function parseAsync(
                     payload: { sql, dialect, options },
                 });
             } catch (error) {
-                if (!(error instanceof ParserWorkerTimeoutError)) {
+                if (!(error instanceof ParserWorkerTimeoutError)
+                    && !(error instanceof ParserWorkerReportedError)) {
                     destroyWorker();
                 }
                 if (isParseRequestStale(requestId, requestMode)) {
@@ -415,8 +424,9 @@ export async function parseAsync(
                 if (error instanceof ParserWorkerTimeoutError) {
                     return createTimedOutParseResult(sql);
                 }
-                // Other worker failures (unavailable/crashed) fall through to the
-                // synchronous parse below as a best-effort fallback.
+                // Request-local parser errors fall back synchronously while the
+                // healthy worker continues processing its queued requests. Worker
+                // crashes are already destroyed by handleWorkerError().
             }
         }
 
@@ -456,7 +466,8 @@ export async function parseBatchAsync(
                     payload: { sql, dialect, limits: appliedLimits, options },
                 });
             } catch (error) {
-                if (!(error instanceof ParserWorkerTimeoutError)) {
+                if (!(error instanceof ParserWorkerTimeoutError)
+                    && !(error instanceof ParserWorkerReportedError)) {
                     destroyWorker();
                 }
                 if (isParseRequestStale(requestId, requestMode)) {
@@ -469,8 +480,9 @@ export async function parseBatchAsync(
                 if (error instanceof ParserWorkerTimeoutError) {
                     return createTimedOutBatchParseResult(sql);
                 }
-                // Other worker failures (unavailable/crashed) fall through to the
-                // synchronous parse below as a best-effort fallback.
+                // Request-local parser errors fall back synchronously while the
+                // healthy worker continues processing its queued requests. Worker
+                // crashes are already destroyed by handleWorkerError().
             }
         }
 

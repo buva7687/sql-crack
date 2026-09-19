@@ -93,6 +93,8 @@ WHERE :=: invalid_token`;
         ["SELECT POSITION('x' IN name) FROM contacts WHERE :=: invalid_token", 'contacts'],
         ["SELECT OVERLAY(name PLACING 'x' FROM 2) FROM accounts WHERE :=: invalid_token", 'accounts'],
         ["SELECT SUBSTRING(COALESCE(name, '') FROM 2) FROM customers WHERE :=: invalid_token", 'customers'],
+        ["SELECT TRIM(BOTH '(' FROM phone) FROM contacts WHERE :=: invalid_token", 'contacts'],
+        ["SELECT POSITION('(' IN name) FROM users WHERE :=: invalid_token", 'users'],
     ])('does not treat function FROM clauses as fallback tables: %s', (sql, expectedTable) => {
         const result = regexFallbackParse(sql, 'PostgreSQL');
         const tables = result.nodes.filter(node => node.type === 'table').map(node => node.label);
