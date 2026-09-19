@@ -11,20 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Workspace indexing and extraction reliability**: Prevented queued file updates from deadlocking when they need to create the initial index. Function argument, CASE, and nested-expression AST shapes are normalized during reference extraction, eliminating parser fallbacks and phantom table references. Schema extraction now reads inline and table-level foreign keys, including composite keys.
 - **Dialect parsing and statement boundaries**: Preserved Oracle CTAS queries whose SELECT list begins with a function call, accepted PostgreSQL interval qualifiers, split SQL Server `GO` batches, recovered from unmatched closing parentheses, and kept Oracle `(+)` text inside string literals unchanged. Fallback extraction no longer treats `EXTRACT(... FROM ...)` as a table reference.
+- **Quoted statement boundaries and temp tables**: The splitter now treats SQL Server bracket identifiers as quoted content, including escaped `]]`, and applies backslash string escapes by dialect so PostgreSQL standard strings cannot merge later statements. Already-delimited `[#temp]`, `"#temp"`, and backtick temp names are preserved instead of being nested inside another quote pair.
 - **SQL rendering and dialect detection**: CAST targets such as `VARCHAR(10)` and `DECIMAL(10,2)` render from parser-specific AST shapes instead of `[object Object]`. Named bind parameters no longer trigger Snowflake detection, and repeated nodes at a flow-depth boundary are emitted once.
 - **Parser worker concurrency**: A timed-out worker now settles every request owned by that worker and cannot later terminate its replacement. Compare parsing uses an independent request so it does not cancel the active visualization.
+- **Panel and index lifecycle concurrency**: Cancelled foreground parse sentinels are ignored, duplicate workspace build requests share one progress operation, and disposing a scoped Workspace panel immediately cancels its scan and prevents the retired manager from publishing or persisting a late index over the active scope.
 - **Restored UI state**: Deferred default layouts initialize undo history only after their positions are applied, and persisted state remains pending while a restored dialect is reparsed. Returning from Lineage or Impact to the Workspace Graph keeps the live document so zoom and pan can be restored.
+- **Persisted query and error state**: State capture no longer mutates per-query viewport storage during asynchronous hydration, initial restore does not overwrite query 1's saved viewport, layout history restore waits for the requested layout, and layout/column-lineage preferences survive error or empty renders. Error renders now dismiss stale tooltips, context menus, and minimaps.
 - **Webview UX regressions**: Added required walkthrough media, theme-aware selected-node borders, SELECT focus guards for graph shortcuts, current fullscreen element IDs, and Unicode-safe label truncation. SQL Flow quick actions now use `Alt+P` and Workspace Quick Find uses `Alt+K`, avoiding VS Code's Command Palette and chord bindings.
 
 ### Performance
 
 - **Large workspace SQL files**: Reference and schema extractors parse masked statement slices individually instead of sending the entire multi-statement file through node-sql-parser's quadratic batch path.
 - **Lineage and impact analysis**: Critical-path calculation memoizes shared suffixes, impact analysis resolves columns through constructor-built indexes, and lineage detail rendering caps dagre input at 300 nodes. Capped graphs show the visible and available node counts and alternate upstream/downstream candidates so one side cannot consume the full budget.
+- **Workspace graph scaling**: Cyclic graphs receive a finite nonzero critical-path estimate; lineage depth boundaries deduplicate nodes when several parents converge; lineage SQL preload reads only files missing query analysis; file removal updates only reference buckets used by that file; reference locations reuse one masked SQL/boundary cache; similar-subquery analysis groups precomputed signatures in linear time; lineage views reuse a warm flow analyzer and parent-column index; and configured non-vertical layouts run before first-paint virtualization.
 
 ### Tests
 
 - Added regressions for all audit findings above, including the index queue deadlock, parser worker timeout fan-out, per-statement workspace parsing, high-fanout lineage rendering, dialect preprocessing and detection, foreign-key extraction, restored state, graph navigation, light-theme selection, keyboard focus, fullscreen coverage, and Unicode truncation.
-- Branch validation: 282 suites and 3,897 tests pass; `npx tsc --noEmit` and `git diff --check` pass.
+- Branch validation: 283 suites and 3,909 tests pass; `npx tsc --noEmit` and `git diff --check` pass.
 
 ## [0.9.4] - 2026-09-14
 

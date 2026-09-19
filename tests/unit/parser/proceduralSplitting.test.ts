@@ -378,4 +378,22 @@ describe('Item #4: Procedural SQL Splitting (BEGIN...END Blocks)', () => {
             expect(statements[0]).toContain('SELECT 1');
         });
     });
+
+    describe('dialect-aware quoted content', () => {
+        it('does not split on semicolons or parentheses inside T-SQL bracket identifiers', () => {
+            expect(splitSqlStatements('SELECT * FROM [my;table]; SELECT [a(b] FROM t;', 'TransactSQL'))
+                .toEqual(['SELECT * FROM [my;table]', 'SELECT [a(b] FROM t']);
+            expect(splitSqlStatements('SELECT [a]];b] FROM t; SELECT 2;', 'TransactSQL')).toHaveLength(2);
+        });
+
+        it('does not treat a backslash as an escape in PostgreSQL standard strings', () => {
+            const sql = String.raw`SELECT 'C:\temp\' AS p FROM t; SELECT id FROM u`;
+            expect(splitSqlStatements(sql, 'PostgreSQL')).toHaveLength(2);
+        });
+
+        it('preserves backslash escapes for PostgreSQL E strings', () => {
+            const sql = String.raw`SELECT E'can\'t; stop' FROM t; SELECT id FROM u`;
+            expect(splitSqlStatements(sql, 'PostgreSQL')).toHaveLength(2);
+        });
+    });
 });

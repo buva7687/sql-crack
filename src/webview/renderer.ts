@@ -1698,6 +1698,9 @@ export function render(result: ParseResult, options?: RenderOptions): void {
         renderError(result.error, result.errorSourceLine);
         updateStatsPanel();
         updateHintsPanel();
+        hideTooltip();
+        hideContextMenu();
+        updateMinimap();
         // Reset viewport to center so error message is visible
         resetViewportToCenter();
         return;
@@ -1717,6 +1720,9 @@ export function render(result: ParseResult, options?: RenderOptions): void {
         renderError('No visualization data');
         updateStatsPanel();
         updateHintsPanel();
+        hideTooltip();
+        hideContextMenu();
+        updateMinimap();
         // Reset viewport to center so error message is visible
         resetViewportToCenter();
         return;
@@ -1734,9 +1740,31 @@ export function render(result: ParseResult, options?: RenderOptions): void {
     renderEdges = clustered.edges;
     renderNodeMap = new Map(renderNodes.map(node => [node.id, node]));
 
+    // Parser coordinates are vertical. Apply the configured layout to the data
+    // before choosing the first visible subset so non-vertical layouts do not
+    // create hundreds of off-screen DOM nodes only to prune them a frame later.
+    const initialLayout = state.layoutType || 'vertical';
+    if (initialLayout !== 'vertical') {
+        const bottomUp = window.flowDirection === 'bottom-up';
+        switch (initialLayout) {
+            case 'horizontal':
+                layoutGraphHorizontal(renderNodes, renderEdges, bottomUp);
+                break;
+            case 'compact':
+                layoutGraphCompact(renderNodes, renderEdges, bottomUp);
+                break;
+            case 'force':
+                layoutGraphForce(renderNodes, renderEdges);
+                break;
+            case 'radial':
+                layoutGraphRadial(renderNodes, renderEdges);
+                break;
+        }
+    }
+
     // Determine if we should use virtualization
     const useVirtualization = virtualizationEnabled && shouldVirtualize(renderNodes.length);
-    const canVirtualizeOnFirstPaint = useVirtualization && (state.layoutType || 'vertical') === 'vertical';
+    const canVirtualizeOnFirstPaint = useVirtualization;
 
     // Get nodes and edges to render (all or visible subset)
     let nodesToRender = renderNodes;
@@ -1788,17 +1816,6 @@ export function render(result: ParseResult, options?: RenderOptions): void {
         fitView();
     }
 
-    // Apply non-default layout if configured (parser positions are always vertical).
-    // Its layout work is deferred, so history must also wait for that frame or
-    // the first undo entry captures the parser's vertical coordinates under the
-    // configured layout name.
-    const deferredInitialLayout = state.layoutType && state.layoutType !== 'vertical'
-        ? state.layoutType
-        : null;
-    if (deferredInitialLayout) {
-        switchLayout(deferredInitialLayout);
-    }
-
     // Update minimap for complex queries
     updateMinimap();
 
@@ -1814,7 +1831,7 @@ export function render(result: ParseResult, options?: RenderOptions): void {
         }
     }
 
-    if (!layoutHistory.getCurrent() && !deferredInitialLayout) {
+    if (!layoutHistory.getCurrent()) {
         layoutHistory.initialize(captureLayoutHistorySnapshot());
         syncUndoRedoUiState();
     }
@@ -3013,8 +3030,15 @@ export function toggleLayout(): void {
     switchLayout(LAYOUT_ORDER[nextIndex]);
 }
 
-export function switchLayout(layoutType: LayoutType): void {
+export function switchLayout(
+    layoutType: LayoutType,
+    options: { recordHistory?: boolean; onComplete?: () => void } = {}
+): void {
+    const previousLayout = state.layoutType;
+    state.layoutType = layoutType;
     if (!currentNodes || currentNodes.length === 0 || !svg || !mainGroup) {
+        options.onComplete?.();
+        notifyRendererStateChanged();
         return;
     }
     stopZeroGravityMode({ silent: true });
@@ -3029,10 +3053,7 @@ export function switchLayout(layoutType: LayoutType): void {
     // Use requestAnimationFrame to allow UI to update before heavy computation
     requestAnimationFrame(() => {
         if (switchGeneration !== layoutSwitchGeneration) { return; }
-        const previousLayout = state.layoutType;
         try {
-            state.layoutType = layoutType;
-
             // Re-run layout with selected algorithm
             const bottomUp = window.flowDirection === 'bottom-up';
             switch (layoutType) {
@@ -3103,7 +3124,9 @@ export function switchLayout(layoutType: LayoutType): void {
 
             fitView();
             announceLiveRegionMessage(`Layout switched to ${layoutType}`);
-            recordLayoutHistorySnapshot();
+            if (options.recordHistory !== false) {
+                recordLayoutHistorySnapshot();
+            }
 
             // Notify index.ts that layout state changed (covers keyboard shortcut paths)
             notifyRendererStateChanged();
@@ -3111,6 +3134,7 @@ export function switchLayout(layoutType: LayoutType): void {
             console.error('[SQL Crack] Layout switch failed:', e);
             state.layoutType = previousLayout;
         } finally {
+            options.onComplete?.();
             if (showLoadingIndicator) {
                 requestAnimationFrame(() => { hideGlobalLoading(); });
             }
@@ -3765,6 +3789,11 @@ export function toggleColumnFlows(show?: boolean): void {
 
     if (state.showColumnFlows) {
         if (!shouldEnableColumnLineage(currentColumnFlows?.length || 0)) {
+            if (currentNodes.length === 0) {
+                // Keep the persisted preference through an error/empty render;
+                // a later successful render will apply it once flows exist.
+                return;
+            }
             state.showColumnFlows = false;
             setColumnLineageBannerVisible(true, {
                 text: COLUMN_LINEAGE_UNAVAILABLE_BANNER_TEXT,
@@ -3913,7 +3942,7 @@ export function highlightNodeAtLine(line: number): void {
                 if (node) {
                     restoreNodeBorderState(rect);
                     if (state.selectedNodeId === highlightedLineNodeId) {
-                        rect.setAttribute('stroke', UI_COLORS.white);
+                        rect.setAttribute('stroke', state.isDarkTheme ? UI_COLORS.white : UI_COLORS.focusTextLight);
                         rect.setAttribute('stroke-width', '3');
                         rect.setAttribute('filter', 'url(#glow)');
                     }

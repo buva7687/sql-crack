@@ -101,6 +101,7 @@ export class WorkspacePanel {
     private readonly _scopeUri: vscode.Uri | undefined;
     private _disposables: vscode.Disposable[] = [];
     private _indexManager: IndexManager;
+    private _indexBuildPromise: Promise<void> | null = null;
     private _dialect: SqlDialect;
     private _currentGraph: WorkspaceDependencyGraph | null = null;
     private _currentView: ViewMode | 'graph' | 'issues' = 'graph';
@@ -459,6 +460,22 @@ export class WorkspacePanel {
      * Supports cancellation for large workspaces
      */
     private async buildIndexWithProgress(): Promise<void> {
+        if (this._indexBuildPromise) {
+            await this._indexBuildPromise;
+            return;
+        }
+        const buildPromise = this.runIndexBuildWithProgress();
+        this._indexBuildPromise = buildPromise;
+        try {
+            await buildPromise;
+        } finally {
+            if (this._indexBuildPromise === buildPromise) {
+                this._indexBuildPromise = null;
+            }
+        }
+    }
+
+    private async runIndexBuildWithProgress(): Promise<void> {
         let wasCancelled = false;
 
         await vscode.window.withProgress(
@@ -1097,12 +1114,9 @@ ${bodyContent}
 
         this._messageHandler?.markDisposed();
         this._indexManager.setOnIndexUpdated(null);
-        // Flush pending index persistence before disposing resources
-        void this._indexManager.flushPersist().catch(err =>
-            logger.warn(`[WorkspacePanel] flushPersist failed during dispose: ${err instanceof Error ? err.message : String(err)}`)
-        ).finally(() => {
-            this._indexManager.dispose();
-        });
+        // Cancel scanning immediately so a disposed panel cannot later publish
+        // or persist an index for a scope that is no longer active.
+        this._indexManager.dispose();
         this._messageHandler = null;
         this._panel.dispose();
 

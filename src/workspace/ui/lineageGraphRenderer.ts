@@ -94,6 +94,7 @@ export interface GraphRenderOptions {
 export class LineageGraphRenderer {
     private lineageGraph: LineageGraph;
     private flowAnalyzer: FlowAnalyzer;
+    private columnsByParentId = new Map<string, ColumnData[]>();
 
     // Layout configuration
     private readonly NODE_WIDTH = 200;
@@ -105,9 +106,20 @@ export class LineageGraphRenderer {
     private readonly EDGE_SEP = 20;
     private readonly MAX_RENDERED_NODES = 300;
 
-    constructor(lineageGraph: LineageGraph) {
+    constructor(lineageGraph: LineageGraph, flowAnalyzer?: FlowAnalyzer) {
         this.lineageGraph = lineageGraph;
-        this.flowAnalyzer = new FlowAnalyzer(lineageGraph);
+        this.flowAnalyzer = flowAnalyzer || new FlowAnalyzer(lineageGraph);
+        for (const node of lineageGraph.nodes.values()) {
+            if (node.type !== 'column' || !node.parentId) {continue;}
+            const columns = this.columnsByParentId.get(node.parentId) || [];
+            columns.push({
+                name: node.name,
+                dataType: node.columnInfo?.dataType,
+                isPrimaryKey: node.metadata?.isPrimaryKey,
+                isNullable: node.metadata?.nullable,
+            });
+            this.columnsByParentId.set(node.parentId, columns);
+        }
     }
 
     /**
@@ -284,23 +296,7 @@ export class LineageGraphRenderer {
      * Get columns for a node
      */
     private getNodeColumns(node: LineageNode): ColumnData[] {
-        const columns: ColumnData[] = [];
-
-        // Find column nodes that belong to this table
-        for (const [id, potentialColumn] of this.lineageGraph.nodes) {
-            if (potentialColumn.type === 'column') {
-                if (potentialColumn.parentId === node.id) {
-                    columns.push({
-                        name: potentialColumn.name,
-                        dataType: potentialColumn.columnInfo?.dataType,
-                        isPrimaryKey: potentialColumn.metadata?.isPrimaryKey,
-                        isNullable: potentialColumn.metadata?.nullable
-                    });
-                }
-            }
-        }
-
-        return columns;
+        return this.columnsByParentId.get(node.id) || [];
     }
 
     /**

@@ -12,6 +12,12 @@ describe('parser preprocessing transforms', () => {
             );
         });
 
+        it('does not re-quote already delimited hash temp-table identifiers', () => {
+            expect(preprocessHashTempTableIdentifiers('SELECT * FROM [#tmp]', 'TransactSQL')).toBeNull();
+            expect(preprocessHashTempTableIdentifiers('SELECT * FROM "#tmp"', 'TransactSQL')).toBeNull();
+            expect(preprocessHashTempTableIdentifiers('SELECT * FROM `#tmp`', 'TransactSQL')).toBeNull();
+        });
+
         it('finds the outer close parenthesis past backtick and bracket identifiers', () => {
             const sql = '(SELECT `a)b`, [order) items] FROM t) trailing';
             expect(findMatchingParen(sql, 0)).toBe(sql.indexOf(') trailing'));

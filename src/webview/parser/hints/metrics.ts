@@ -45,10 +45,11 @@ export function calculateEnhancedMetrics(context: ParserContext, nodes: FlowNode
     // Find root nodes (nodes with no incoming edges)
     const nodesWithIncoming = new Set(edges.map(e => e.target));
     const rootNodes = nodes.filter(n => !nodesWithIncoming.has(n.id));
+    const pathStartNodes = rootNodes.length > 0 ? rootNodes : nodes;
 
     context.stats.criticalPathLength = Math.max(
         0,
-        ...rootNodes.map(node => calculatePathLength(node.id))
+        ...pathStartNodes.map(node => calculatePathLength(node.id))
     );
 
     // Complexity breakdown

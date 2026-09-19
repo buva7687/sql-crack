@@ -84,6 +84,7 @@ export class IndexManager {
     private _lastCacheState: WorkspaceCacheState = 'missing';
     private _indexUpdateBatchDepth: number = 0;
     private _indexUpdatePending: boolean = false;
+    private _disposed: boolean = false;
 
     constructor(context: vscode.ExtensionContext, dialect: SqlDialect = 'MySQL', scopeUri?: vscode.Uri) {
         this.context = context;
@@ -138,6 +139,9 @@ export class IndexManager {
         progressCallback?: ProgressCallback,
         cancellationToken?: CancellationToken
     ): Promise<WorkspaceIndex> {
+        if (this._disposed) {
+            throw new Error('IndexManager has been disposed');
+        }
         if (this._buildPromise) {
             return this._buildPromise;
         }
@@ -186,7 +190,25 @@ export class IndexManager {
         cancellationToken?: CancellationToken
     ): Promise<WorkspaceIndex> {
         const previousIndex = this.index;
-        const analyses = await this.scanner.analyzeWorkspace(progressCallback, cancellationToken);
+        const manager = this;
+        const combinedCancellationToken: CancellationToken = {
+            get isCancellationRequested() {
+                return manager._disposed || cancellationToken?.isCancellationRequested === true;
+            }
+        };
+        const analyses = await this.scanner.analyzeWorkspace(progressCallback, combinedCancellationToken);
+
+        if (this._disposed) {
+            return previousIndex ?? {
+                version: INDEX_VERSION,
+                lastUpdated: Date.now(),
+                fileCount: 0,
+                files: new Map(),
+                fileHashes: new Map(),
+                definitionMap: new Map(),
+                referenceMap: new Map(),
+            };
+        }
 
         // A cancelled refresh must not replace a complete, usable index with
         // the scanner's partial result set.
@@ -664,6 +686,7 @@ export class IndexManager {
      * Dispose resources
      */
     dispose(): void {
+        this._disposed = true;
         this.disposeFileWatcherResources();
         if (this._configDisposable) {
             this._configDisposable.dispose();
@@ -730,8 +753,11 @@ export class IndexManager {
             }
         }
 
-        // Remove references from this file
-        for (const [key, refs] of this.index.referenceMap.entries()) {
+        // Only this file's reference keys can contain its entries. Targeting
+        // those buckets avoids sweeping the complete workspace map per save.
+        const referenceKeys = new Set(analysis.references.map(getReferenceKey));
+        for (const key of referenceKeys) {
+            const refs = this.index.referenceMap.get(key) || [];
             const filtered = refs.filter(r => r.filePath !== analysis.filePath);
             if (filtered.length === 0) {
                 this.index.referenceMap.delete(key);
@@ -1191,6 +1217,9 @@ export class IndexManager {
      * Persist index to workspace state
      */
     private schedulePersist(delayMs: number = this._persistDebounceMs): void {
+        if (this._disposed) {
+            return;
+        }
         if (this._persistTimer) {
             clearTimeout(this._persistTimer);
         }
@@ -1236,7 +1265,7 @@ export class IndexManager {
     }
 
     private async persistIndex(): Promise<void> {
-        if (!this.index) {return;}
+        if (this._disposed || !this.index) {return;}
 
         // Convert Maps to arrays for JSON serialization
         const serializable: SerializedWorkspaceIndex = {

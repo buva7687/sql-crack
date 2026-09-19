@@ -9,6 +9,7 @@ import {
 import { MONO_FONT_STACK } from '../../shared/themeTokens';
 import { getNodeAccentColor, NODE_SURFACE } from '../constants/colors';
 import { getWarningIndicatorState } from '../warningIndicator';
+import { truncateCodePoints } from '../../shared/stringUtils';
 
 export interface NodeVisualRendererDeps {
     state: ViewState;
@@ -414,7 +415,7 @@ export function renderCaseNodeVisual(node: FlowNode, group: SVGGElement, deps: N
             elseText.setAttribute('y', String(yOffset + 32));
             elseText.setAttribute('fill', surface.textMuted);
             elseText.setAttribute('font-size', '9');
-            const truncatedElse = caseStmt.elseValue.length > 20 ? `${caseStmt.elseValue.substring(0, 17)}...` : caseStmt.elseValue;
+            const truncatedElse = truncateCodePoints(caseStmt.elseValue, 20, '...');
             elseText.textContent = `ELSE: ${truncatedElse}`;
             group.appendChild(elseText);
         }
@@ -565,7 +566,7 @@ function renderAnalyticalNodeVisual(
         funcText.setAttribute('font-weight', '600');
         funcText.setAttribute('font-family', MONO_FONT_STACK);
         const expr = func.expression || '';
-        funcText.textContent = expr.length > 25 ? `${expr.substring(0, 22)}...` : expr;
+        funcText.textContent = truncateCodePoints(expr, 25, '...');
         group.appendChild(funcText);
 
         yOffset += funcHeight + 4;

@@ -85,8 +85,8 @@ describe('calculateEnhancedMetrics', () => {
             makeEdge('b', 'a'),
         ];
         calculateEnhancedMetrics(ctx, nodes, edges);
-        // Both nodes have incoming edges, so no root nodes exist → path length 0
-        expect(ctx.stats.criticalPathLength).toBe(0);
+        // A cyclic non-empty graph still has a meaningful finite path estimate.
+        expect(ctx.stats.criticalPathLength).toBeGreaterThan(0);
     });
 
     it('calculates shared diamond paths without re-exploring every route', () => {

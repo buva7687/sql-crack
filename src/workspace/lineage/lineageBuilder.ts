@@ -374,7 +374,9 @@ export class LineageBuilder implements LineageGraph {
 
     private async preloadFileSql(files: Map<string, FileAnalysis>): Promise<Map<string, string>> {
         const fileSqlByPath = new Map<string, string>();
-        const filePaths = Array.from(files.keys());
+        const filePaths = Array.from(files.entries())
+            .filter(([, analysis]) => !analysis.queries || analysis.queries.length === 0)
+            .map(([filePath]) => filePath);
         let nextIndex = 0;
 
         const workerCount = Math.min(MAX_PRELOAD_CONCURRENCY, filePaths.length);
@@ -1072,7 +1074,7 @@ export class LineageBuilder implements LineageGraph {
             entered: boolean;
         };
 
-        const visited = new Set<string>();
+        const visited = new Set<string>([nodeId]);
         const result: LineageNode[] = [];
         const frames: TraversalFrame[] = [{
             currentId: nodeId,
@@ -1090,12 +1092,6 @@ export class LineageBuilder implements LineageGraph {
                     frames.pop();
                     continue;
                 }
-                if (visited.has(frame.currentId)) {
-                    frames.pop();
-                    continue;
-                }
-
-                visited.add(frame.currentId);
                 frame.edges = direction === 'upstream'
                     ? this.getIncomingEdges(frame.currentId)
                     : this.getOutgoingEdges(frame.currentId);
@@ -1113,6 +1109,7 @@ export class LineageBuilder implements LineageGraph {
             const nextId = direction === 'upstream' ? edge.sourceId : edge.targetId;
             const nextNode = this.nodes.get(nextId);
             if (nextNode && !visited.has(nextNode.id)) {
+                visited.add(nextNode.id);
                 result.push(nextNode);
                 frames.push({
                     currentId: nextNode.id,

@@ -1,4 +1,5 @@
 import { getDollarQuoteDelimiterAt, isHashTempTableIdentifierAt } from '../../../shared/stringUtils';
+import type { SqlDialect } from '../../types/parser';
 import { maskStringsAndComments } from '../dialects/preprocessing';
 
 export function stripLeadingComments(sql: string): string {
@@ -51,10 +52,16 @@ export function stripLeadingComments(sql: string): string {
     return result;
 }
 
-function scanSqlStatements(sql: string, onStatement: (statement: string) => void): void {
+function scanSqlStatements(
+    sql: string,
+    onStatement: (statement: string) => void,
+    dialect: SqlDialect = 'MySQL'
+): void {
     let current = '';
     let inString = false;
     let stringChar = '';
+    let stringAllowsBackslashEscapes = false;
+    let inBracketIdentifier = false;
     let inLineComment = false;
     let blockCommentDepth = 0;
     let depth = 0;
@@ -105,6 +112,19 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
         const char = sql[i];
         const nextChar = i < sql.length - 1 ? sql[i + 1] : '';
         const prevChar = i > 0 ? sql[i - 1] : '';
+
+        if (inBracketIdentifier) {
+            current += char;
+            if (char === ']') {
+                if (nextChar === ']') {
+                    current += nextChar;
+                    i++;
+                } else {
+                    inBracketIdentifier = false;
+                }
+            }
+            continue;
+        }
 
         if (inLineComment) {
             current += char;
@@ -190,9 +210,15 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
         }
 
         if (!inDollarQuotes) {
-            if (inString && stringChar !== '`' && char === '\\' && nextChar) {
+            if (inString && stringChar !== '`' && stringAllowsBackslashEscapes && char === '\\' && nextChar) {
                 current += char + nextChar;
                 i++;
+                continue;
+            }
+
+            if (!inString && char === '[') {
+                inBracketIdentifier = true;
+                current += char;
                 continue;
             }
 
@@ -203,6 +229,9 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
                 if (!inString) {
                     inString = true;
                     stringChar = char;
+                    stringAllowsBackslashEscapes = dialect === 'MySQL'
+                        || dialect === 'MariaDB'
+                        || (char === '\'' && (dialect === 'PostgreSQL' || dialect === 'Redshift') && /[Ee]/.test(prevChar));
                 } else if (char === stringChar) {
                     // SQL-standard doubled quote escape: '' or "" (and `` for backticks)
                     const nextChar = i + 1 < sql.length ? sql[i + 1] : '';
@@ -215,6 +244,7 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
                         continue;
                     }
                     inString = false;
+                    stringAllowsBackslashEscapes = false;
                 }
             }
         }
@@ -280,19 +310,19 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
 }
 
 // Split SQL into individual statements
-export function splitSqlStatements(sql: string): string[] {
+export function splitSqlStatements(sql: string, dialect: SqlDialect = 'MySQL'): string[] {
     const statements: string[] = [];
     scanSqlStatements(sql, (statement) => {
         statements.push(statement);
-    });
+    }, dialect);
     return statements;
 }
 
-export function countSqlStatements(sql: string): number {
+export function countSqlStatements(sql: string, dialect: SqlDialect = 'MySQL'): number {
     let count = 0;
     scanSqlStatements(sql, () => {
         count++;
-    });
+    }, dialect);
     return count;
 }
 

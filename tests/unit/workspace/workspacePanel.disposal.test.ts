@@ -57,11 +57,8 @@ describe('WorkspacePanel disposal guards', () => {
 
         expect(markDisposed).toHaveBeenCalledTimes(1);
         expect(setOnIndexUpdated).toHaveBeenCalledWith(null);
-        expect(flushPersist).toHaveBeenCalledTimes(1);
+        expect(flushPersist).not.toHaveBeenCalled();
         expect(context._panel.dispose).toHaveBeenCalledTimes(1);
-
-        // indexManager.dispose() is called in the .finally() of flushPersist — drain microtasks
-        await new Promise(resolve => process.nextTick(resolve));
         expect(indexDispose).toHaveBeenCalledTimes(1);
     });
 });

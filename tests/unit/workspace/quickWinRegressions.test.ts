@@ -132,12 +132,14 @@ describe('Source-level regression guards', () => {
         expect(source).toMatch(/rebuildAndRenderGraph\(\)\.catch/);
     });
 
-    it('workspacePanel.ts: dispose calls flushPersist before dispose', () => {
+    it('workspacePanel.ts: dispose cancels the manager immediately', () => {
         const source = fs.readFileSync(
             path.join(__dirname, '../../../src/workspace/workspacePanel.ts'),
             'utf-8'
         );
-        expect(source).toMatch(/flushPersist\(\)/);
+        const disposeMatch = source.match(/public dispose\(\):\s*void\s*\{[\s\S]*?^\s{4}\}/m);
+        expect(disposeMatch?.[0]).toContain('this._indexManager.dispose();');
+        expect(disposeMatch?.[0]).not.toContain('flushPersist()');
     });
 
     it('indexManager.ts: dispose() does not fire-and-forget persistIndex', () => {

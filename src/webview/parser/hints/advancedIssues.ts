@@ -398,40 +398,26 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
     // Similarity criteria: same FROM table, same aggregate function, same WHERE presence
     const similarGroups: SubqueryMatch[][] = [];
     const processed = new Set<string>();
-    
-    allSubqueries.forEach((subq1, idx1) => {
-        if (processed.has(subq1.normalized)) {return;}
-        
-        const similar: SubqueryMatch[] = [subq1];
-        allSubqueries.forEach((subq2, idx2) => {
-            if (idx1 >= idx2 || processed.has(subq2.normalized)) {return;}
-            
-            // Check if subqueries are similar (same FROM table and similar structure)
-            const sig1 = subq1.normalized;
-            const sig2 = subq2.normalized;
-            
-            // Extract key parts: FROM table and aggregate function
-            const from1 = sig1.match(/from\s+(\w+)/);
-            const from2 = sig2.match(/from\s+(\w+)/);
-            const agg1 = sig1.match(/(avg|count|sum|max|min)\s*\(/);
-            const agg2 = sig2.match(/(avg|count|sum|max|min)\s*\(/);
-            const where1 = sig1.includes('where');
-            const where2 = sig2.includes('where');
-            
-            // Consider similar if: same FROM table, same aggregate (or both have aggregates), both have WHERE
-            if (from1 && from2 && from1[1] === from2[1] && 
-                where1 === where2 && 
-                (agg1 && agg2 && agg1[1] === agg2[1] || (!agg1 && !agg2))) {
-                similar.push(subq2);
-                processed.add(subq2.normalized);
-            }
-        });
-        
-        if (similar.length > 1) {
-            similarGroups.push(similar);
-            processed.add(subq1.normalized);
+    const candidatesBySignature = new Map<string, SubqueryMatch[]>();
+
+    for (const subquery of allSubqueries) {
+        const fromTable = subquery.normalized.match(/from\s+(\w+)/)?.[1];
+        if (!fromTable) {continue;}
+        const aggregate = subquery.normalized.match(/(avg|count|sum|max|min)\s*\(/)?.[1] || '';
+        const hasWhere = subquery.normalized.includes('where');
+        const signature = `${fromTable}\u0000${aggregate}\u0000${hasWhere ? '1' : '0'}`;
+        const group = candidatesBySignature.get(signature) || [];
+        group.push(subquery);
+        candidatesBySignature.set(signature, group);
+    }
+
+    for (const group of candidatesBySignature.values()) {
+        if (group.length <= 1) {continue;}
+        similarGroups.push(group);
+        for (const subquery of group) {
+            processed.add(subquery.normalized);
         }
-    });
+    }
     
     // Add warnings for similar groups
     similarGroups.forEach(group => {

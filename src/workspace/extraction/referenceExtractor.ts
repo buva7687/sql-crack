@@ -63,6 +63,9 @@ export class ReferenceExtractor {
     private transformExtractor: TransformExtractor;
     private _activeDialect: SqlDialect = 'MySQL'; // Per-call dialect for reserved word scoping
     private tableLineLookup: TableLineLookup | null = null;
+    private locationSearchSource: string | null = null;
+    private locationSearchSql: string = '';
+    private locationStatementBoundaries: number[] = [];
 
     constructor(options: Partial<ExtractionOptions> = {}) {
         this.parser = new Parser();
@@ -152,6 +155,7 @@ export class ReferenceExtractor {
     ): { references: TableReference[]; warnings: string[]; queries: QueryAnalysis[] } {
         this._activeDialect = dialect;
         this.tableLineLookup = null;
+        this.locationSearchSource = null;
         const references: TableReference[] = [];
         const warnings: string[] = [];
         let parsedStatements: ParsedStatement[] = [];
@@ -163,6 +167,9 @@ export class ReferenceExtractor {
         const sqlNoComments = this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(normalizedSql));
         const reservedWords = new Set(['select', 'from', 'where', 'join', 'inner', 'left', 'right', 'outer', 'on', 'as', 'with', 'recursive']);
         const statementBoundaries = this.getStatementBoundaries(sqlNoComments);
+        this.locationSearchSource = normalizedSql;
+        this.locationSearchSql = sqlNoComments;
+        this.locationStatementBoundaries = statementBoundaries;
         const getStatementIndex = (charIndex: number): number => this.getStatementIndex(statementBoundaries, charIndex);
         const scopedCteNames = new Map<number, Set<string>>();
         const cteBodyLineRanges = new Map<string, Array<{ startLine: number; endLine: number }>>();
@@ -1621,8 +1628,13 @@ export class ReferenceExtractor {
     private buildTableLineLookup(sql: string): TableLineLookup {
         const contextLineByTable = new Map<string, Map<number, number>>();
         const fallbackLineByTable = new Map<string, Map<number, number>>();
-        const searchableSql = this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(sql));
-        const statementBoundaries = this.getStatementBoundaries(searchableSql);
+        const cacheHit = this.locationSearchSource === sql;
+        const searchableSql = cacheHit
+            ? this.locationSearchSql
+            : this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(sql));
+        const statementBoundaries = cacheHit
+            ? this.locationStatementBoundaries
+            : this.getStatementBoundaries(searchableSql);
         const identifier = '["\'`]?([#A-Za-z_][#A-Za-z0-9_$]*)["\'`]?';
         const qualifiedIdentifier = `(?:["'\`]?[#A-Za-z_][#A-Za-z0-9_$]*["'\`]?\\.)?${identifier}`;
         const contextPatterns = [
@@ -1827,8 +1839,13 @@ export class ReferenceExtractor {
 
     private extractMergeWithRegex(sql: string, filePath: string): TableReference[] {
         const references: TableReference[] = [];
-        const searchableSql = this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(sql));
-        const statementBoundaries = this.getStatementBoundaries(searchableSql);
+        const cacheHit = this.locationSearchSource === sql;
+        const searchableSql = cacheHit
+            ? this.locationSearchSql
+            : this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(sql));
+        const statementBoundaries = cacheHit
+            ? this.locationStatementBoundaries
+            : this.getStatementBoundaries(searchableSql);
         const qualifiedPattern = `(${REFERENCE_SQL_IDENTIFIER_PATTERN})`
             + `(?:\\s*\\.\\s*(${REFERENCE_SQL_IDENTIFIER_PATTERN}))?`
             + `(?:\\s*\\.\\s*(${REFERENCE_SQL_IDENTIFIER_PATTERN}))?`;
@@ -2119,8 +2136,13 @@ export class ReferenceExtractor {
                 ? ''
                 : `(?:(?<schema>${REFERENCE_SQL_IDENTIFIER_PATTERN})\\s*\\.\\s*)?`;
         const qualifiedTablePart = `${catalogPart}${schemaPart}${tablePart}`;
-        const searchableSql = this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(sql));
-        const statementBoundaries = this.getStatementBoundaries(searchableSql);
+        const cacheHit = this.locationSearchSource === sql;
+        const searchableSql = cacheHit
+            ? this.locationSearchSql
+            : this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(sql));
+        const statementBoundaries = cacheHit
+            ? this.locationStatementBoundaries
+            : this.getStatementBoundaries(searchableSql);
         
         let pattern: RegExp;
         switch (context) {

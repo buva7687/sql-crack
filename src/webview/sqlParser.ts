@@ -312,11 +312,11 @@ function splitTransactSqlImplicitUpdateOutputStatements(statement: string): stri
 
 function splitSqlStatementsForDialect(sql: string, dialect: SqlDialect): string[] {
     if (dialect !== 'TransactSQL') {
-        return splitSqlStatements(sql);
+        return splitSqlStatements(sql, dialect);
     }
 
     return splitTransactSqlBatches(sql)
-        .flatMap(splitSqlStatements)
+        .flatMap(batch => splitSqlStatements(batch, dialect))
         .flatMap(splitTransactSqlImplicitUpdateOutputStatements);
 }
 

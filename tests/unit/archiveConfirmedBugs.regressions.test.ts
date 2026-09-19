@@ -169,7 +169,7 @@ describe('resolved former PARTIAL issue regression anchors', () => {
 
     it('#21 batchTabs uses the quote-safe shared escapeHtml implementation', () => {
         const source = readSource('src/webview/ui/batchTabs.ts');
-        expect(source).toContain("import { escapeHtml, stripSqlComments } from '../../shared/stringUtils';");
+        expect(source).toMatch(/import \{[^}]*escapeHtml[^}]*stripSqlComments[^}]*\} from '\.\.\/\.\.\/shared\/stringUtils';/);
     });
 
     it('#22 issuesPage allowlists item.type for CSS class and escapes text content', () => {

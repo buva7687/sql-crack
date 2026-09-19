@@ -24,6 +24,5 @@ export const FULLSCREEN_HIDE_SELECTORS = [
     '.details-panel',
     '.stats-panel',
     '.hints-panel',
-    '.legend-panel',
     '.sql-preview-panel',
 ] as const;

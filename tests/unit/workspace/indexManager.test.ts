@@ -261,7 +261,7 @@ describe('IndexManager', () => {
 
             mockScanner.analyzeWorkspace.mockImplementation(async (_progress, cancellation) => {
                 // Simulate checking cancellation
-                expect(cancellation).toBe(token);
+                expect(cancellation?.isCancellationRequested).toBe(false);
                 return [];
             });
 
@@ -269,8 +269,28 @@ describe('IndexManager', () => {
 
             expect(mockScanner.analyzeWorkspace).toHaveBeenCalledWith(
                 undefined,
-                token
+                expect.objectContaining({ isCancellationRequested: false })
             );
+        });
+
+        it('cancels an in-flight scan and does not publish its index after disposal', async () => {
+            let releaseScan!: () => void;
+            const scanReleased = new Promise<void>(resolve => { releaseScan = resolve; });
+            let observedToken: { readonly isCancellationRequested: boolean } | undefined;
+            mockScanner.analyzeWorkspace.mockImplementation(async (_progress, cancellation) => {
+                observedToken = cancellation;
+                await scanReleased;
+                return [createMockAnalysis('/late.sql', [{ name: 'late_table', type: 'table' }])];
+            });
+
+            const build = indexManager.buildIndex();
+            await Promise.resolve();
+            indexManager.dispose();
+            expect(observedToken?.isCancellationRequested).toBe(true);
+            releaseScan();
+            await build;
+
+            expect(indexManager.getIndex()).toBeNull();
         });
 
         it('should persist index after building', async () => {

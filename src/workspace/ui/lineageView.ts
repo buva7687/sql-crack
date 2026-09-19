@@ -10,6 +10,17 @@ import { ICONS, getWorkspaceNodeIcon } from '../../shared';
  * Generates HTML for lineage visualization
  */
 export class LineageView {
+    private readonly flowAnalyzers = new WeakMap<LineageGraph, FlowAnalyzer>();
+
+    private getFlowAnalyzer(graph: LineageGraph): FlowAnalyzer {
+        let analyzer = this.flowAnalyzers.get(graph);
+        if (!analyzer) {
+            analyzer = new FlowAnalyzer(graph);
+            this.flowAnalyzers.set(graph, analyzer);
+        }
+        return analyzer;
+    }
+
     /**
      * Generate the main lineage view with search interface and graph container
      * This is the new default view that replaces the overview
@@ -23,7 +34,7 @@ export class LineageView {
         const { depth = 5 } = options;
 
         // Get all searchable nodes
-        const renderer = new LineageGraphRenderer(graph);
+        const renderer = new LineageGraphRenderer(graph, this.getFlowAnalyzer(graph));
         const searchableNodes = renderer.getSearchableNodes();
 
         // Stats
@@ -133,7 +144,7 @@ export class LineageView {
             displayLabel
         } = options;
 
-        const renderer = new LineageGraphRenderer(graph);
+        const renderer = new LineageGraphRenderer(graph, this.getFlowAnalyzer(graph));
         const renderableGraph = renderer.buildGraph({
             centerNodeId,
             depth,
@@ -436,7 +447,7 @@ export class LineageView {
         graph: LineageGraph,
         depth: number
     ): Array<{ node: LineageNode; upstreamCount: number; downstreamCount: number; total: number }> {
-        const flowAnalyzer = new FlowAnalyzer(graph);
+        const flowAnalyzer = this.getFlowAnalyzer(graph);
         const nodeConnections: { node: LineageNode; upstreamCount: number; downstreamCount: number; total: number }[] = [];
 
         graph.nodes.forEach((node) => {

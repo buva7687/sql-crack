@@ -570,6 +570,11 @@ export function preprocessHashTempTableIdentifiers(sql: string, dialect: SqlDial
         if (before && /[A-Za-z0-9_$#]/.test(before)) {
             continue;
         }
+        // Preserve identifiers that are already delimited. Re-quoting #tmp in
+        // [#tmp], "#tmp", or `#tmp` changes the logical table name.
+        if (before === '[' || before === '"' || before === '`') {
+            continue;
+        }
         if (after && /[A-Za-z0-9_$]/.test(after)) {
             continue;
         }

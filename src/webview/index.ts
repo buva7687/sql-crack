@@ -600,7 +600,6 @@ function showDialectSwitchSuggestion(dialect: SqlDialect, sql: string): void {
 }
 
 function capturePersistedState(): PersistedWebviewState {
-    queryViewStates.set(currentQueryIndex, getViewState());
     return {
         version: 1,
         currentDialect,
@@ -739,7 +738,7 @@ async function applyInitialUiStateIfAvailable(): Promise<void> {
 
     const targetIndex = Math.max(0, Math.min(state.currentQueryIndex, batchResult.queries.length - 1));
     if (targetIndex !== currentQueryIndex) {
-        await switchToQueryIndex(targetIndex);
+        await switchToQueryIndex(targetIndex, { skipSaveCurrent: true });
     }
 
     const activeQueryViewState = queryViewStates.get(currentQueryIndex) || state.renderer.viewState;
@@ -747,8 +746,11 @@ async function applyInitialUiStateIfAvailable(): Promise<void> {
         setViewState(activeQueryViewState);
     }
 
+    const restoreHistory = () => restoreLayoutHistoryState(state.renderer.layoutHistory);
     if (state.renderer.layout !== getCurrentLayout()) {
-        switchLayout(state.renderer.layout);
+        switchLayout(state.renderer.layout, { recordHistory: false, onComplete: restoreHistory });
+    } else {
+        restoreHistory();
     }
     toggleLegend(state.renderer.legendVisible);
     toggleHints(state.renderer.hintsVisible);
@@ -760,8 +762,6 @@ async function applyInitialUiStateIfAvailable(): Promise<void> {
     } else {
         toggleFocusMode(false);
     }
-    restoreLayoutHistoryState(state.renderer.layoutHistory);
-
 }
 
 function clearDeferredQueryState(): void {
@@ -1563,6 +1563,9 @@ async function visualize(sql: string): Promise<void> {
                 allowDialectFallback: autoDetectDialect,
             }
         );
+        if (isCancelledBatchParseResult(result)) {
+            return;
+        }
         const t1 = performance.now();
         debugLog(`[SQL Crack] Parse completed in ${(t1 - t0).toFixed(1)}ms (${result.queries.length} queries, dialect: ${dialectForParse})`);
         if (requestId !== parseRequestId) {
@@ -1689,14 +1692,14 @@ function renderCurrentQuery(): void {
 /**
  * Switch to a different query index, preserving view state
  */
-async function switchToQueryIndex(newIndex: number): Promise<void> {
+async function switchToQueryIndex(newIndex: number, options: { skipSaveCurrent?: boolean } = {}): Promise<void> {
     const existingSwitch = querySwitchPromises.get(newIndex);
     if (existingSwitch) {
         await existingSwitch;
         return;
     }
 
-    const switchPromise = performSwitchToQueryIndex(newIndex);
+    const switchPromise = performSwitchToQueryIndex(newIndex, options);
     querySwitchPromises.set(newIndex, switchPromise);
     try {
         await switchPromise;
@@ -1707,7 +1710,7 @@ async function switchToQueryIndex(newIndex: number): Promise<void> {
     }
 }
 
-async function performSwitchToQueryIndex(newIndex: number): Promise<void> {
+async function performSwitchToQueryIndex(newIndex: number, options: { skipSaveCurrent?: boolean } = {}): Promise<void> {
     // Number.isInteger also rejects NaN, which would otherwise slip past both
     // range comparisons (every NaN comparison is false) and leave
     // currentQueryIndex as NaN, crashing the next renderCurrentQuery().
@@ -1716,7 +1719,9 @@ async function performSwitchToQueryIndex(newIndex: number): Promise<void> {
     }
 
     // Save current view state before switching
-    queryViewStates.set(currentQueryIndex, getViewState());
+    if (!options.skipSaveCurrent) {
+        queryViewStates.set(currentQueryIndex, getViewState());
+    }
 
     // Switch to new query
     currentQueryIndex = newIndex;
