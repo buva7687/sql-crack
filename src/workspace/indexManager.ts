@@ -190,10 +190,10 @@ export class IndexManager {
         cancellationToken?: CancellationToken
     ): Promise<WorkspaceIndex> {
         const previousIndex = this.index;
-        const manager = this;
+        const isManagerDisposed = (): boolean => this._disposed;
         const combinedCancellationToken: CancellationToken = {
             get isCancellationRequested() {
-                return manager._disposed || cancellationToken?.isCancellationRequested === true;
+                return isManagerDisposed() || cancellationToken?.isCancellationRequested === true;
             }
         };
         const analyses = await this.scanner.analyzeWorkspace(progressCallback, combinedCancellationToken);

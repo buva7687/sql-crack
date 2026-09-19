@@ -520,9 +520,8 @@ export class SchemaExtractor {
                 colDef.constraint?.type === 'primary key';
 
             // Extract foreign key if present
-            let foreignKey: ForeignKeyRef | undefined;
             const ref = colDef.reference_definition || colDef.reference || colDef.references;
-            foreignKey = this.parseAstForeignKey(ref);
+            const foreignKey: ForeignKeyRef | undefined = this.parseAstForeignKey(ref);
 
             return {
                 name,

@@ -158,7 +158,7 @@ export class ReferenceExtractor {
         this.locationSearchSource = null;
         const references: TableReference[] = [];
         const warnings: string[] = [];
-        let parsedStatements: ParsedStatement[] = [];
+        const parsedStatements: ParsedStatement[] = [];
         const { sql: normalizedSql } = preprocessSqlForWorkspaceParsing(sql, dialect);
 
         // Pre-collect CTE names via regex BEFORE attempting AST parse.

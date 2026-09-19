@@ -42,13 +42,13 @@ describe('remaining audit state and lifecycle regressions', () => {
     });
 
     it('cancels and suppresses persistence from disposed index managers', () => {
-        expect(managerSource).toContain('return manager._disposed || cancellationToken?.isCancellationRequested === true;');
+        expect(managerSource).toContain('return isManagerDisposed() || cancellationToken?.isCancellationRequested === true;');
         expect(managerSource).toContain('if (this._disposed || !this.index) {return;}');
     });
 
     it('reuses masked SQL and statement boundaries for reference locations', () => {
         const locationMethod = referenceExtractorSource.match(
-            /private findTableReferenceLocation\([\s\S]*?^    }/m
+            /private findTableReferenceLocation\([\s\S]*?^\s{4}}/m
         )?.[0] || '';
         expect(locationMethod).toContain('const cacheHit = this.locationSearchSource === sql;');
         expect(locationMethod).toContain('? this.locationSearchSql');
