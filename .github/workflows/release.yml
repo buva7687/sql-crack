@@ -157,6 +157,9 @@ jobs:
             }
           " "$VERSION"
 
+      - name: Validate changelog release date
+        run: node scripts/validateReleaseChangelog.js "$VERSION"
+
       - name: Install dependencies
         run: npm ci
 

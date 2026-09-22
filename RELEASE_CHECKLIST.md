@@ -2,10 +2,11 @@
 
 ## Prepare the Release
 
-- [ ] Merge the intended release branch into `main` through a reviewed PR.
+- [ ] Open a reviewed PR from the intended release branch into `main`.
 - [ ] Confirm `package.json` and `package-lock.json` contain the release version.
 - [ ] Confirm `release.config.json` uses `pre-release` for a candidate or `stable` for a normal release.
-- [ ] Change the top `CHANGELOG.md` heading to the actual release date.
+- [ ] Date the versioned `CHANGELOG.md` heading on the intended publication day.
+- [ ] Run `node scripts/validateReleaseChangelog.js 0.9.4` after setting the date and before merging; a push to `main` starts publication.
 - [ ] Run `npm run audit:prod`, `npm run typecheck`, `npm run lint`, `npm run test`, `npm run test:perf`, and `npm run package`.
 - [ ] Package a local VSIX with `npx @vscode/vsce@3.9.2 package --no-dependencies` (add `--pre-release` for a candidate) and inspect its file list.
 - [ ] Wait for the required Node 20, Node 22, performance, and build checks on the PR.

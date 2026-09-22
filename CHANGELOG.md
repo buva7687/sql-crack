@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Workspace Graph primary actions**: Enter and double-click now follow the node's advertised primary action: file nodes switch to Tables mode and show objects from that file, while table/view/CTE/external nodes open their lineage. Context-menu wording now matches the selection panel.
-- **Release toolchain**: Release CI now runs on Node 22, validation covers Node 20 and Node 22, Marketplace/Open VSX commands pin current publisher versions without adding them to the extension dependency tree, and the parser memory gate explicitly runs garbage collection so it measures retained memory rather than arbitrary heap timing.
+- **Release toolchain**: Release CI now runs on Node 22, validation covers Node 20 and Node 22, Marketplace/Open VSX commands pin current publisher versions without adding them to the extension dependency tree, and the parser memory gate explicitly runs garbage collection so it measures retained memory rather than arbitrary heap timing. Release CI also requires a valid dated changelog entry for the version being published.
 - **Webview bundle budget**: The production performance budget now uses an exact 4 MiB threshold. This keeps warnings meaningful while reflecting the intended binary-size limit for the CSP-constrained parser bundle.
 - **VSIX contents**: Removed legacy ignore metadata and test TypeScript configuration from the packaged extension while retaining the new support policy.
 
@@ -44,8 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Tests
 
 - Added regression coverage for cross-platform file-to-table routing, primary Graph actions, index timestamp validation, the 4 MiB bundle budget, pinned release tools, Node support, and pre-release channel propagation.
-- Added regressions for all audit findings above, including declined-workspace indexing, worker start/queue deadlines and replay, per-statement fallback reset, dialect-specific quotes and brackets, restored state, graph navigation, macOS Alt shortcuts, non-vertical fitting, panel-close persistence, fallback function delimiters, keyboard focus, high-fanout lineage rendering, foreign-key extraction, fullscreen coverage, and Unicode truncation.
-- Branch validation: 283 suites and 3,930 tests pass, plus 18 performance tests; source and test type checks, lint, production webpack packaging, production dependency audit, and `git diff --check` pass.
+- Added regressions for all audit findings above, including declined-workspace indexing, edits during the initial build, worker start/queue deadlines and replay, request-local worker errors, per-statement fallback reset, dialect-specific quotes and brackets, restored state, graph navigation, macOS Alt shortcuts, non-vertical fitting, panel-close persistence, literal-safe fallback function delimiters, watcher recreation, keyboard focus, high-fanout lineage rendering, foreign-key extraction, fullscreen coverage, and Unicode truncation.
+- Branch validation: 282 suites and 3,918 tests pass, plus 18 performance tests; source and test type checks, lint, production webpack packaging, local pre-release VSIX packaging, production dependency audit, and `git diff --check` pass.
 
 ## [0.9.3] - 2026-09-09
 
@@ -1581,6 +1581,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ---
 
 [Unreleased]: https://github.com/buva7687/sql-crack/compare/v0.9.3...HEAD
+[0.9.4]: https://github.com/buva7687/sql-crack/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/buva7687/sql-crack/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/buva7687/sql-crack/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/buva7687/sql-crack/compare/v0.9.0...v0.9.1
