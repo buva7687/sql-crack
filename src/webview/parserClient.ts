@@ -7,7 +7,7 @@
  */
 
 import { ParseResult, BatchParseResult, QueryStats, SqlDialect, ValidationError, ValidationLimits } from './types';
-import { parseSql, parseSqlBatch, validateSql, DEFAULT_VALIDATION_LIMITS, ParseOptions, BatchParseOptions } from './sqlParser';
+import { parseSql, parseSqlBatch, validateSql, setParseTimeout, DEFAULT_VALIDATION_LIMITS, ParseOptions, BatchParseOptions } from './sqlParser';
 
 type WorkerBackedResponse = ParseResult | BatchParseResult;
 export type ParseRequestMode = 'latest' | 'independent';
@@ -20,6 +20,7 @@ type ParserWorkerRequest =
             sql: string;
             dialect: SqlDialect;
             options: ParseOptions;
+            parseTimeoutMs: number;
         };
     }
     | {
@@ -30,6 +31,7 @@ type ParserWorkerRequest =
             dialect: SqlDialect;
             limits: ValidationLimits;
             options: BatchParseOptions;
+            parseTimeoutMs: number;
         };
     };
 
@@ -50,8 +52,27 @@ interface PendingWorkerRequest {
     timeoutId: ReturnType<typeof setTimeout> | null;
 }
 
-const PARSER_WORKER_TIMEOUT_MS = 5000;
+const DEFAULT_PARSE_TIMEOUT_MS = 5000;
 const PARSER_WORKER_START_TIMEOUT_MS = 5000;
+
+/**
+ * User-configured parse budget (`sqlCrack.advanced.parseTimeoutSeconds`).
+ * Governs both the worker execution watchdog and the worker's own per-query
+ * AST timeout, which lives in a separate module instance from the main thread.
+ */
+let parseTimeoutMs = DEFAULT_PARSE_TIMEOUT_MS;
+
+/**
+ * Apply the configured parse timeout to the main-thread parser, the worker
+ * watchdog, and every subsequent worker request. Invalid values restore the
+ * default.
+ */
+export function configureParseTimeout(ms?: number): void {
+    parseTimeoutMs = typeof ms === 'number' && Number.isFinite(ms) && ms > 0
+        ? ms
+        : DEFAULT_PARSE_TIMEOUT_MS;
+    setParseTimeout(parseTimeoutMs);
+}
 
 const PARSE_TIMEOUT_MESSAGE =
     'Parsing timed out — the query may be too large or complex to visualize.';
@@ -312,7 +333,7 @@ function queueWorkerRequest<T extends WorkerBackedResponse>(
 function startWorkerRequestTimeout(
     requestId: number,
     request: PendingWorkerRequest,
-    timeoutMs: number = PARSER_WORKER_TIMEOUT_MS
+    timeoutMs: number = parseTimeoutMs
 ): void {
     clearWorkerRequestTimeout(request.timeoutId);
     request.timeoutId = setTimeout(() => {
@@ -407,7 +428,7 @@ export async function parseAsync(
                 return await queueWorkerRequest<ParseResult>(requestId, 'parse', sql, {
                     type: 'parse',
                     requestId,
-                    payload: { sql, dialect, options },
+                    payload: { sql, dialect, options, parseTimeoutMs },
                 });
             } catch (error) {
                 if (!(error instanceof ParserWorkerTimeoutError)
@@ -463,7 +484,7 @@ export async function parseBatchAsync(
                 return await queueWorkerRequest<BatchParseResult>(requestId, 'parseBatch', sql, {
                     type: 'parseBatch',
                     requestId,
-                    payload: { sql, dialect, limits: appliedLimits, options },
+                    payload: { sql, dialect, limits: appliedLimits, options, parseTimeoutMs },
                 });
             } catch (error) {
                 if (!(error instanceof ParserWorkerTimeoutError)

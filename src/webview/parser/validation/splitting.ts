@@ -52,12 +52,21 @@ export function stripLeadingComments(sql: string): string {
     return result;
 }
 
+/** A trimmed statement and the source offset of its first character. */
+export interface SqlStatementSpan {
+    sql: string;
+    start: number;
+}
+
 function scanSqlStatements(
     sql: string,
-    onStatement: (statement: string) => void,
+    onStatement: (statement: string, startOffset: number) => void,
     dialect: SqlDialect = 'MySQL'
 ): void {
+    // `current` always holds the contiguous source text sql[currentStart, i),
+    // so each emitted statement can report its exact source offset.
     let current = '';
+    let currentStart = 0;
     let inString = false;
     let stringChar = '';
     let stringAllowsBackslashEscapes = false;
@@ -108,6 +117,16 @@ function scanSqlStatements(
         return false;
     };
 
+    const flushStatement = (): void => {
+        const trimmed = current.trim();
+        if (trimmed) {
+            const withoutComments = stripLeadingComments(trimmed).trim();
+            if (withoutComments) {
+                onStatement(trimmed, currentStart + (current.length - current.trimStart().length));
+            }
+        }
+    };
+
     for (let i = 0; i < sql.length; i++) {
         const char = sql[i];
         const nextChar = i < sql.length - 1 ? sql[i + 1] : '';
@@ -145,6 +164,18 @@ function scanSqlStatements(
                 i++;
                 blockCommentDepth--;
             }
+            continue;
+        }
+
+        // A custom DELIMITER (//, $$, ;;, ...) must win over comment and
+        // dollar-quote detection, otherwise `END //` opens a line comment and
+        // `END $$` opens a dollar-quoted body, merging the rest of the script.
+        if (customDelimiter && !inString && !inDollarQuotes && depth === 0 && beginEndDepth === 0
+            && sql.startsWith(customDelimiter, i)) {
+            flushStatement();
+            current = '';
+            i += customDelimiter.length - 1;
+            currentStart = i + 1;
             continue;
         }
 
@@ -203,6 +234,7 @@ function scanSqlStatements(
                             i++;
                         }
                         current = '';
+                        currentStart = i + 1;
                         continue;
                     }
                 }
@@ -287,30 +319,19 @@ function scanSqlStatements(
             : (sql.substring(i).startsWith(delimiter) && !inString && !inDollarQuotes && depth === 0 && beginEndDepth === 0);
 
         if (isDelimiter) {
-            const trimmed = current.trim();
-            if (trimmed) {
-                const withoutComments = stripLeadingComments(trimmed).trim();
-                if (withoutComments) {
-                    onStatement(trimmed);
-                }
-            }
+            flushStatement();
             current = '';
 
             if (delimiter !== ';') {
                 i += delimiter.length - 1;
             }
+            currentStart = i + 1;
         } else {
             current += char;
         }
     }
 
-    const trimmed = current.trim();
-    if (trimmed) {
-        const withoutComments = stripLeadingComments(trimmed).trim();
-        if (withoutComments) {
-            onStatement(trimmed);
-        }
-    }
+    flushStatement();
 }
 
 // Split SQL into individual statements
@@ -318,6 +339,15 @@ export function splitSqlStatements(sql: string, dialect: SqlDialect = 'MySQL'): 
     const statements: string[] = [];
     scanSqlStatements(sql, (statement) => {
         statements.push(statement);
+    }, dialect);
+    return statements;
+}
+
+/** Split SQL into statements, keeping each statement's start offset in `sql`. */
+export function splitSqlStatementsWithOffsets(sql: string, dialect: SqlDialect = 'MySQL'): SqlStatementSpan[] {
+    const statements: SqlStatementSpan[] = [];
+    scanSqlStatements(sql, (statement, start) => {
+        statements.push({ sql: statement, start });
     }, dialect);
     return statements;
 }
@@ -332,23 +362,30 @@ export function countSqlStatements(sql: string, dialect: SqlDialect = 'MySQL'): 
 
 /** Split SQL Server batches on a line containing only GO (optionally with a repeat count). */
 export function splitTransactSqlBatches(sql: string): string[] {
+    return splitTransactSqlBatchesWithOffsets(sql).map(batch => batch.sql);
+}
+
+/** Like `splitTransactSqlBatches`, keeping each trimmed batch's start offset in `sql`. */
+export function splitTransactSqlBatchesWithOffsets(sql: string): SqlStatementSpan[] {
     const masked = maskStringsAndComments(sql);
     const separator = /^[ \t]*GO(?:[ \t]+\d+)?[ \t]*(?:\r?\n|$)/gim;
-    const batches: string[] = [];
+    const batches: SqlStatementSpan[] = [];
     let batchStart = 0;
     let match: RegExpExecArray | null;
 
-    while ((match = separator.exec(masked)) !== null) {
-        const batch = sql.slice(batchStart, match.index).trim();
+    const pushBatch = (rawStart: number, rawEnd: number): void => {
+        const raw = sql.slice(rawStart, rawEnd);
+        const batch = raw.trim();
         if (batch && stripLeadingComments(batch).trim()) {
-            batches.push(batch);
+            batches.push({ sql: batch, start: rawStart + (raw.length - raw.trimStart().length) });
         }
+    };
+
+    while ((match = separator.exec(masked)) !== null) {
+        pushBatch(batchStart, match.index);
         batchStart = match.index + match[0].length;
     }
 
-    const tail = sql.slice(batchStart).trim();
-    if (tail && stripLeadingComments(tail).trim()) {
-        batches.push(tail);
-    }
+    pushBatch(batchStart, sql.length);
     return batches;
 }

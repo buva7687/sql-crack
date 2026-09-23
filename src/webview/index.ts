@@ -2,9 +2,9 @@
 import process from 'process/browser';
 (window as unknown as { process: typeof process }).process = process;
 
-import { isCancelledBatchParseResult, parseAsync, parseBatchAsync } from './parserClient';
+import { configureParseTimeout, isCancelledBatchParseResult, parseAsync, parseBatchAsync } from './parserClient';
 import { setMinimapMode, MinimapMode } from './minimapVisibility';
-import { detectDialect, setParseTimeout } from './sqlParser';
+import { detectDialect } from './sqlParser';
 import { getComponentUiColors } from './constants';
 import { BatchParseResult, LayoutType, ParseError, ParseResult, QueryLineRange, SqlDialect } from './types';
 import {
@@ -361,7 +361,7 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
     window.debugLogging = config.debugLogging;
 
     setMinimapMode(config.showMinimap as MinimapMode);
-    setParseTimeout(config.parseTimeoutSeconds * 1000);
+    configureParseTimeout(config.parseTimeoutSeconds * 1000);
     setRendererColorblindMode(config.colorblindMode);
 
     const requestedDefaultDialect = normalizeSqlDialect(config.defaultDialect);
@@ -1146,8 +1146,9 @@ function init(): void {
     initRenderer(container);
     setRendererColorblindMode((window.colorblindMode as ColorblindMode) || 'off');
 
-    // R key triggers a full re-visualize (same as toolbar refresh)
-    document.addEventListener('sql-crack-reset-view', () => {
+    // R key / command bar trigger a full re-visualize (same as toolbar refresh).
+    // Fit-to-view (Escape, ⊡) is handled in the renderer and never re-parses.
+    document.addEventListener('sql-crack-refresh-visualization', () => {
         if (window.vscodeApi) {
             window.vscodeApi.postMessage({ command: 'requestRefresh' });
         } else {
@@ -1164,7 +1165,7 @@ function init(): void {
     setMinimapMode(minimapMode);
 
     // Apply configurable parse timeout
-    setParseTimeout(runtimeConfig.parseTimeoutSeconds * 1000);
+    configureParseTimeout(runtimeConfig.parseTimeoutSeconds * 1000);
 
     // Create toolbar with callbacks
     const toolbarResult = createToolbar(container, createToolbarCallbacks(), {

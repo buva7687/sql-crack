@@ -208,7 +208,7 @@ Analyze cross-file dependencies:
 | `Cmd/Ctrl + F` or `/` | Search nodes |
 | `Enter` / `↓` | Next search result |
 | `↑` | Previous search result |
-| `Escape` | Clear selection |
+| `Escape` | Clear selection and fit to screen |
 | `C` | Toggle column lineage |
 | `L` | Toggle legend |
 | `S` | Toggle SQL preview |
@@ -220,7 +220,7 @@ Analyze cross-file dependencies:
 | `U` / `D` / `A` | Focus mode: upstream / downstream / all |
 | `T` | Toggle theme |
 | `F` | Toggle fullscreen |
-| `R` | Reset view (fit to screen) |
+| `R` | Refresh visualization (re-parse the file) |
 | `+` / `-` | Zoom in / out |
 | `Cmd/Ctrl + Z` | Undo latest layout change |
 | `Cmd/Ctrl + Shift + Z` | Redo layout change |

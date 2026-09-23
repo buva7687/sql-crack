@@ -166,6 +166,11 @@ export function registerDocumentKeyboardListeners(
         }
 
         if (e.key === 'Escape') {
+            // An overlay (shortcuts modal, export preview, menus) already
+            // consumed this Escape to dismiss itself; don't also clear graph state.
+            if (e.defaultPrevented) {
+                return;
+            }
             if (callbacks.isZeroGravityModeActive()) {
                 e.preventDefault();
                 callbacks.toggleZeroGravityMode(false);
@@ -224,7 +229,7 @@ export function registerDocumentKeyboardListeners(
         }
         if (e.key === 'r' || e.key === 'R') {
             e.preventDefault();
-            callbacks.resetView();
+            callbacks.refreshVisualization();
         }
         if (e.key === 'f' || e.key === 'F') {
             e.preventDefault();

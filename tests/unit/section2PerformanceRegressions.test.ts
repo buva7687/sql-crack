@@ -5,7 +5,7 @@ describe('audit section 2 performance regression guards', () => {
     it('P2: caches statement line counts instead of repeatedly splitting per loop iteration', () => {
         const source = readFileSync(join(__dirname, '../../src/webview/sqlParser.ts'), 'utf8');
         expect(source).toContain('const stmtLineCount = countLines(stmt);');
-        expect(source).toContain('currentLine = stmtStartLine + stmtLineCount;');
+        expect(source).toContain('const stmtStartLine = countStartsAtOrBefore(lineStarts, stmtStartOffset);');
         expect(source).not.toContain("stmt.split('\\n').length");
     });
 

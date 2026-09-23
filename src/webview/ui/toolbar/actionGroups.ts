@@ -220,7 +220,7 @@ function createZoomGroup(
         listenerOptions,
         ariaLabel: 'Fit to view',
     });
-    fitBtn.title = 'Fit to view (R)';
+    fitBtn.title = 'Fit to view (Esc)';
     fitBtn.style.borderLeft = `1px solid ${borderColor}`;
     zoomGroup.appendChild(fitBtn);
 

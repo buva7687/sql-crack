@@ -1100,7 +1100,8 @@ export function initRenderer(container: HTMLElement): void {
     registerCommandBarActions([
         { id: 'zoom-in', label: 'Zoom In', shortcut: '+', action: () => zoomIn() },
         { id: 'zoom-out', label: 'Zoom Out', shortcut: '-', action: () => zoomOut() },
-        { id: 'fit-view', label: 'Refresh Visualization', shortcut: 'R', action: () => resetView() },
+        { id: 'refresh', label: 'Refresh Visualization', shortcut: 'R', action: () => refreshVisualization() },
+        { id: 'fit-view', label: 'Fit to View', shortcut: 'Esc', action: () => resetView() },
         { id: 'toggle-theme', label: 'Toggle Theme', shortcut: 'T', category: 'View', action: () => toggleTheme() },
         { id: 'toggle-fullscreen', label: 'Toggle Fullscreen', shortcut: 'F', category: 'View', action: () => toggleFullscreen() },
         { id: 'toggle-legend', label: 'Toggle Legend', shortcut: 'L', category: 'View', action: () => toggleLegend() },
@@ -1248,6 +1249,7 @@ export function initRenderer(container: HTMLElement): void {
             hideContextMenu,
             clearSearch,
             resetView,
+            refreshVisualization,
             undoLayoutChange,
             redoLayoutChange,
             toggleCommandBar,
@@ -2592,8 +2594,20 @@ export function setViewState(viewState: TabViewState): void {
     updateZoomIndicator();
 }
 
+/**
+ * Fit the graph to the viewport. Used by Escape, the ⊡ toolbar button, the
+ * context menu, and the breadcrumb root — it must never re-parse, which would
+ * reset the active query, node positions, and undo history.
+ */
 export function resetView(): void {
-    document.dispatchEvent(new CustomEvent('sql-crack-reset-view'));
+    fitView();
+    updateZoomIndicator();
+    recordLayoutHistorySnapshot();
+}
+
+/** Re-parse and re-render the current document (R key and command bar). */
+export function refreshVisualization(): void {
+    document.dispatchEvent(new CustomEvent('sql-crack-refresh-visualization'));
 }
 
 export function undoLayoutChange(): void {

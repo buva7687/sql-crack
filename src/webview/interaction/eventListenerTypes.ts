@@ -30,6 +30,7 @@ export interface EventListenerCallbacks {
     hideContextMenu: () => void;
     clearSearch: () => void;
     resetView: () => void;
+    refreshVisualization: () => void;
     undoLayoutChange: () => void;
     redoLayoutChange: () => void;
     toggleCommandBar: () => void;

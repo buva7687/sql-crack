@@ -103,6 +103,22 @@ SELECT 3;
   });
 
   describe('splitSqlStatements', () => {
+    it.each(['//', '$$', ';;', '$', '|'])('splits MySQL DELIMITER %s blocks with or without a space before the delimiter', (delimiter) => {
+      for (const separator of ['', ' ', '\n']) {
+        const sql = [
+          `DELIMITER ${delimiter}`,
+          `CREATE PROCEDURE p1() BEGIN SELECT a FROM t1; END${separator}${delimiter}`,
+          `CREATE PROCEDURE p2() BEGIN SELECT b FROM t2; END${separator}${delimiter}`,
+          'DELIMITER ;',
+          'SELECT c FROM t3;',
+        ].join('\n');
+
+        const statements = splitSqlStatements(sql, 'MySQL');
+        expect(statements).toHaveLength(3);
+        expect(statements[2]).toBe('SELECT c FROM t3');
+      }
+    });
+
     it('splits on semicolons', () => {
       const sql = 'SELECT * FROM users; SELECT * FROM orders;';
       const statements = splitSqlStatements(sql);
@@ -1200,6 +1216,44 @@ WHERE amount_1 > 0
       const secondTable = result.queries[1].nodes.find(node => node.label === 'second_table');
       expect(secondTable?.startLine).toBe(5);
       expect(result.queries.some(query => query.nodes.some(node => node.label === 'omitted_table'))).toBe(false);
+    });
+
+    const tableLines = (result: ReturnType<typeof parseSqlBatch>) => result.queries.map(query =>
+      query.nodes.filter(node => node.type === 'table').map(node => `${node.label}@${node.startLine}`));
+
+    it('keeps later statement lines exact after a trailing comment on a statement line', () => {
+      const result = parseSqlBatch([
+        'SELECT a FROM t1; -- first',
+        'SELECT b FROM t2;',
+        'SELECT c FROM t3;',
+        'SELECT d FROM t4;',
+      ].join('\n'));
+
+      expect(tableLines(result)).toEqual([['t1@1'], ['t2@2'], ['t3@3'], ['t4@4']]);
+      expect(result.queryLineRanges?.slice(2)).toEqual([
+        { startLine: 3, endLine: 3 },
+        { startLine: 4, endLine: 4 },
+      ]);
+    });
+
+    it('keeps later statement lines exact when two statements share a line', () => {
+      const result = parseSqlBatch('SELECT a FROM t1; SELECT b FROM t2;\nSELECT c FROM t3;\nSELECT d FROM t4;');
+
+      expect(tableLines(result)).toEqual([['t1@1'], ['t2@1'], ['t3@2'], ['t4@3']]);
+      expect(result.queryLineRanges).toEqual([
+        { startLine: 1, endLine: 1 },
+        { startLine: 1, endLine: 1 },
+        { startLine: 2, endLine: 2 },
+        { startLine: 3, endLine: 3 },
+      ]);
+    });
+
+    it('maps identical statements and SQL Server GO batches to their own lines', () => {
+      const repeated = parseSqlBatch('SELECT 1 FROM t;\nSELECT 1 FROM t;\n\nSELECT 1 FROM t;');
+      expect(repeated.queryLineRanges?.map(range => range.startLine)).toEqual([1, 2, 4]);
+
+      const batches = parseSqlBatch('SELECT a FROM t1\nGO\n\n  SELECT b FROM t2; SELECT c FROM t3\nGO\nSELECT d FROM t4', 'TransactSQL');
+      expect(tableLines(batches)).toEqual([['t1@1'], ['t2@4'], ['t3@4'], ['t4@6']]);
     });
   });
 

@@ -32,7 +32,8 @@ import {
     formatBytes,
     validateSql
 } from './parser/validation/validate';
-import { splitSqlStatements, splitTransactSqlBatches, stripLeadingComments } from './parser/validation/splitting';
+import { splitSqlStatements, splitSqlStatementsWithOffsets, splitTransactSqlBatchesWithOffsets, stripLeadingComments, type SqlStatementSpan } from './parser/validation/splitting';
+import { buildSegmentStarts, countStartsAtOrBefore } from '../shared/textOffsets';
 import { createFreshContext, type ParserContext } from './parser/context';
 import { layoutGraph } from './parser/layout';
 import { assignLineNumbers } from './parser/lineNumbers';
@@ -265,10 +266,11 @@ function extractLeadingCommentDialect(stmt: string): SqlDialect | null {
     return selected?.dialect ?? null;
 }
 
-function splitTransactSqlImplicitUpdateOutputStatements(statement: string): string[] {
+function splitTransactSqlImplicitUpdateOutputStatements(span: SqlStatementSpan): SqlStatementSpan[] {
+    const statement = span.sql;
     const stripped = stripLeadingComments(statement).trimStart();
     if (!/^INSERT\b/i.test(stripped) || !/\bUPDATE\b/i.test(stripped) || !/\bOUTPUT\b/i.test(stripped)) {
-        return [statement];
+        return [span];
     }
 
     const masked = maskStringsAndComments(statement);
@@ -298,25 +300,31 @@ function splitTransactSqlImplicitUpdateOutputStatements(statement: string): stri
             continue;
         }
 
+        // `statement` is already trimmed, so `before` starts at span.start and
+        // `after` starts exactly at the UPDATE keyword.
         const before = statement.slice(0, updateStart).trim();
         const after = statement.slice(updateStart).trim();
         if (!before || !after || !/^INSERT\b/i.test(stripLeadingComments(before).trimStart())) {
             continue;
         }
 
-        return [before, after];
+        return [
+            { sql: before, start: span.start },
+            { sql: after, start: span.start + updateStart },
+        ];
     }
 
-    return [statement];
+    return [span];
 }
 
-function splitSqlStatementsForDialect(sql: string, dialect: SqlDialect): string[] {
+function splitSqlStatementsForDialect(sql: string, dialect: SqlDialect): SqlStatementSpan[] {
     if (dialect !== 'TransactSQL') {
-        return splitSqlStatements(sql, dialect);
+        return splitSqlStatementsWithOffsets(sql, dialect);
     }
 
-    return splitTransactSqlBatches(sql)
-        .flatMap(batch => splitSqlStatements(batch, dialect))
+    return splitTransactSqlBatchesWithOffsets(sql)
+        .flatMap(batch => splitSqlStatementsWithOffsets(batch.sql, dialect)
+            .map(statement => ({ sql: statement.sql, start: batch.start + statement.start })))
         .flatMap(splitTransactSqlImplicitUpdateOutputStatements);
 }
 
@@ -428,9 +436,10 @@ function parseSqlBatchInternal(
     const queries: ParseResult[] = [];
     const queryLineRanges: Array<{ startLine: number; endLine: number }> = [];
 
-    // Track line offsets for each statement
-    let currentLine = 1;
-    const lines = sql.split('\n');
+    // Statement start lines come from the splitter's source offsets. Matching
+    // statement text against source lines drifted whenever a trailing comment
+    // or a second statement shared a line with the previous `;`.
+    const lineStarts = buildSegmentStarts(sql, '\n');
 
     // Collect consecutive session commands to merge them
     let pendingSessionCommands: Array<{
@@ -504,43 +513,10 @@ function parseSqlBatchInternal(
         return count;
     };
 
-    const normalizeStatementLineForMatch = (line: string): string => {
-        return line.trim().replace(/;$/, '').trimEnd();
-    };
-
-    const lineMatchesStatementLine = (sourceLine: string, statementLine: string): boolean => {
-        return normalizeStatementLineForMatch(sourceLine) === normalizeStatementLineForMatch(statementLine);
-    };
-
-    for (const stmt of statements) {
+    for (const { sql: stmt, start: stmtStartOffset } of statements) {
         const statementDialect = extractLeadingCommentDialect(stmt) || dialect;
-        const stmtTrimmed = stmt.trim();
-        const firstNewlineIdx = stmtTrimmed.indexOf('\n');
-        const stmtFirstLine = firstNewlineIdx === -1
-            ? stmtTrimmed
-            : stmtTrimmed.slice(0, firstNewlineIdx);
         const stmtLineCount = countLines(stmt);
-
-        // Find the starting line of this statement in the original SQL
-        // Use the full first line for matching; for short lines also verify
-        // the next line to reduce false matches on duplicated prefixes
-        let stmtStartLine = currentLine;
-        const matchPrefix = stmtFirstLine.trimEnd();
-        const stmtSecondLine = firstNewlineIdx !== -1
-            ? stmtTrimmed.slice(firstNewlineIdx + 1).split('\n')[0]?.trim() || ''
-            : '';
-        for (let i = currentLine - 1; i < lines.length; i++) {
-            if (lineMatchesStatementLine(lines[i], matchPrefix)) {
-                if (stmtSecondLine && i + 1 < lines.length) {
-                    const secondLineMatches = lineMatchesStatementLine(lines[i + 1], stmtSecondLine);
-                    if (!secondLineMatches) {
-                        continue;
-                    }
-                }
-                stmtStartLine = i + 1;
-                break;
-            }
-        }
+        const stmtStartLine = countStartsAtOrBefore(lineStarts, stmtStartOffset);
 
         const stmtEndLine = stmtStartLine + stmtLineCount - 1;
 
@@ -629,9 +605,6 @@ function parseSqlBatchInternal(
                 queryLineRanges.push({ startLine: stmtStartLine, endLine: stmtEndLine });
             }
         }
-
-        // Update current line past this statement
-        currentLine = stmtStartLine + stmtLineCount;
     }
 
     // Flush any remaining session commands at the end

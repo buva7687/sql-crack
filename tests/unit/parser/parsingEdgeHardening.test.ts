@@ -34,12 +34,11 @@ describe('parsing edge hardening guards', () => {
         expect(source).toContain("if ((col.type === 'window_func' || col.over) && col.expr) {");
     });
 
-    it('uses exact statement-start line matching for batch line ranges', () => {
+    it('uses exact statement source offsets for batch line ranges', () => {
         const source = readFileSync(join(__dirname, '../../../src/webview/sqlParser.ts'), 'utf8');
-        expect(source).toContain('const lineMatchesStatementLine = (sourceLine: string, statementLine: string): boolean => {');
-        expect(source).toContain('normalizeStatementLineForMatch(sourceLine) === normalizeStatementLineForMatch(statementLine)');
+        expect(source).toContain('for (const { sql: stmt, start: stmtStartOffset } of statements) {');
+        expect(source).not.toContain('lineMatchesStatementLine');
         expect(source).not.toContain('lines[i].includes(matchPrefix)');
-        expect(source).not.toContain('lines[i + 1].includes(stmtSecondLine)');
     });
 
     it('keeps unicode-aware identifier matching in regex fallback parser', () => {

@@ -12,6 +12,7 @@ import {
     cancelPendingParse,
     getWorkerStatus,
     isCancelledBatchParseResult,
+    configureParseTimeout,
 } from '../../../src/webview/parserClient';
 import { SqlDialect } from '../../../src/webview/types';
 
@@ -30,6 +31,7 @@ describe('parserClient', () => {
     `;
 
     afterEach(() => {
+        configureParseTimeout();
         terminateWorker();
         delete (global as Record<string, unknown>).window;
         delete (global as Record<string, unknown>).Worker;
@@ -688,6 +690,37 @@ describe('parserClient', () => {
                 expect(workerInstances).toHaveLength(2);
                 expect(olderResult.error).toBe('Parse cancelled');
                 expect(newerResult.nodes).toEqual([{ id: 'n2' }]);
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+
+        it('uses the configured parse timeout for the worker watchdog and request payload', async () => {
+            jest.useFakeTimers();
+            try {
+                configureParseTimeout(30000);
+                const { workerInstances } = installWorkerEnvironment();
+                let settled = false;
+                const pending = parseBatchAsync('SELECT 1; SELECT 2;', 'MySQL').then(result => {
+                    settled = true;
+                    return result;
+                });
+
+                jest.runOnlyPendingTimers();
+                await Promise.resolve();
+                const [request] = workerInstances[0].postMessage.mock.calls[0];
+                expect(request.payload.parseTimeoutMs).toBe(30000);
+
+                workerInstances[0].emitMessage({ type: 'started', requestId: request.requestId });
+                jest.advanceTimersByTime(29000);
+                await Promise.resolve();
+                expect(settled).toBe(false);
+                expect(workerInstances[0].terminate).not.toHaveBeenCalled();
+
+                jest.advanceTimersByTime(1000);
+                const result = await pending;
+                expect(result.parseErrors?.[0]?.message).toContain('timed out');
+                expect(workerInstances[0].terminate).toHaveBeenCalled();
             } finally {
                 jest.useRealTimers();
             }
