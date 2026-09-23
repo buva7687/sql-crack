@@ -11,6 +11,7 @@ import {
 import { ColumnInfo, QueryAnalysis } from '../extraction/types';
 import { getColumnKey, getDisplayName, getQualifiedKey, parseQualifiedKey } from '../identifiers';
 import { getDollarQuotedTokenEnd } from '../../shared/stringUtils';
+import { buildSegmentStarts, countStartsAtOrBefore } from '../../shared/textOffsets';
 import {
     LineageNode,
     LineageEdge,
@@ -176,8 +177,10 @@ function findMatchingSqlParenthesis(sql: string, openingIndex: number): number {
     return -1;
 }
 
-function findCteDeclarations(sql: string): Array<{ name: string; index: number }> {
-    const maskedSql = maskSqlCommentsPreservingPositions(sql);
+function findCteDeclarations(
+    sql: string,
+    maskedSql = maskSqlCommentsPreservingPositions(sql)
+): Array<{ name: string; index: number }> {
     const declarations: Array<{ name: string; index: number }> = [];
     const withPattern = /\b(WITH\s+(?:RECURSIVE\s+)?)(\w+)\s+AS\s*\(/gi;
     let match: RegExpExecArray | null;
@@ -220,6 +223,38 @@ function findCteDeclarations(sql: string): Array<{ name: string; index: number }
     }
 
     return declarations;
+}
+
+const CTE_PARSE_DIALECTS = ['postgresql', 'mysql', 'transactsql', 'snowflake', 'bigquery'];
+
+/**
+ * Top-level `;`-delimited statement ranges of comment-masked SQL. Semicolons
+ * inside quoted strings, quoted identifiers, and dollar-quoted bodies do not
+ * split statements.
+ */
+function splitTopLevelStatementRanges(maskedSql: string): Array<{ start: number; end: number }> {
+    const ranges: Array<{ start: number; end: number }> = [];
+    let start = 0;
+    for (let index = 0; index < maskedSql.length; index++) {
+        const char = maskedSql[index];
+        const dollarQuotedEnd = skipDollarQuotedSqlToken(maskedSql, index);
+        if (dollarQuotedEnd !== null) {
+            index = dollarQuotedEnd - 1;
+            continue;
+        }
+        if (char === "'" || char === '"' || char === '`' || char === '[') {
+            index = skipQuotedSqlToken(maskedSql, index) - 1;
+            continue;
+        }
+        if (char === ';') {
+            ranges.push({ start, end: index });
+            start = index + 1;
+        }
+    }
+    if (start < maskedSql.length) {
+        ranges.push({ start, end: maskedSql.length });
+    }
+    return ranges;
 }
 
 function getNodeSqlParserCtor(): NodeSqlParserCtor | null {
@@ -1244,10 +1279,12 @@ export class LineageBuilder implements LineageGraph {
         filePath: string,
         cteNames: Map<string, { name: string; filePath: string; lineNumber: number }>
     ): void {
-        const declarations = findCteDeclarations(sql);
+        const maskedSql = maskSqlCommentsPreservingPositions(sql);
+        const declarations = findCteDeclarations(sql, maskedSql);
+        const lineStarts = buildSegmentStarts(sql, '\n');
         const ParserCtor = getNodeSqlParserCtor();
         if (!ParserCtor) {
-            this.extractCTEsWithRegex(sql, filePath, cteNames, declarations);
+            this.extractCTEsWithRegex(sql, filePath, cteNames, declarations, lineStarts);
             return;
         }
 
@@ -1256,58 +1293,74 @@ export class LineageBuilder implements LineageGraph {
         for (const declaration of declarations) {
             const cteKey = declaration.name.toLowerCase();
             if (!cteLineNumbers.has(cteKey)) {
-                const lineNumber = sql.substring(0, declaration.index).split('\n').length;
-                cteLineNumbers.set(cteKey, lineNumber);
+                cteLineNumbers.set(cteKey, countStartsAtOrBefore(lineStarts, declaration.index));
             }
         }
-        // Try different dialects
-        const dialects = ['postgresql', 'mysql', 'transactsql', 'snowflake', 'bigquery'];
-        let parsedSuccessfully = false;
 
-        for (const dialect of dialects) {
-            try {
-                const ast = parser.astify(sql, { database: dialect });
-                const statements = Array.isArray(ast) ? ast : [ast];
-
-                for (const stmt of statements) {
-                    if (!stmt || !stmt.type) {
-                        continue;
-                    }
-                    const stmtType = stmt.type.toLowerCase();
-                    // Check for WITH clause in SELECT statements
-                    if (stmtType !== 'select' || !stmt.with) {
-                        continue;
-                    }
-                    const withClause = Array.isArray(stmt.with) ? stmt.with : [stmt.with];
-                    for (const cte of withClause) {
-                        const cteName = cte.name?.value || cte.name;
-                        if (cteName && typeof cteName === 'string') {
-                            const cteKey = cteName.toLowerCase();
-                            if (!cteNames.has(cteKey)) {
-                                cteNames.set(cteKey, {
-                                    name: cteName,
-                                    filePath: filePath,
-                                    lineNumber: cteLineNumbers.get(cteKey) ?? 1
-                                });
-                            }
-                        }
-                    }
-                }
-
-                parsedSuccessfully = true;
-                break;
-            } catch (parseError) {
-                // Try next dialect
+        // Parse one statement at a time, and only statements that can carry a
+        // WITH clause. A whole-file astify is quadratic in node-sql-parser and
+        // one unparseable statement used to make every dialect attempt fail
+        // after re-parsing everything before it.
+        let failedStatements = 0;
+        for (const range of splitTopLevelStatementRanges(maskedSql)) {
+            if (!/\bWITH\b/i.test(maskedSql.slice(range.start, range.end))) {
                 continue;
             }
+            const statementSql = sql.slice(range.start, range.end);
+            let parsedSuccessfully = false;
+            for (const dialect of CTE_PARSE_DIALECTS) {
+                try {
+                    const ast = parser.astify(statementSql, { database: dialect });
+                    const statements = Array.isArray(ast) ? ast : [ast];
+                    for (const stmt of statements) {
+                        this.collectAstCteNames(stmt, filePath, cteNames, cteLineNumbers);
+                    }
+                    parsedSuccessfully = true;
+                    break;
+                } catch {
+                    // Try next dialect
+                }
+            }
+            if (!parsedSuccessfully) {
+                failedStatements++;
+            }
         }
 
-        if (!parsedSuccessfully) {
-            logger.debug(`[LineageBuilder] CTE parsing failed for ${filePath}; using regex fallback.`);
+        if (failedStatements > 0) {
+            logger.debug(`[LineageBuilder] CTE parsing failed for ${failedStatements} statement(s) in ${filePath}; using regex fallback.`);
         }
 
         // Fallback to regex extraction
-        this.extractCTEsWithRegex(sql, filePath, cteNames, declarations);
+        this.extractCTEsWithRegex(sql, filePath, cteNames, declarations, lineStarts);
+    }
+
+    private collectAstCteNames(
+        stmt: { type?: string; with?: unknown } | null | undefined,
+        filePath: string,
+        cteNames: Map<string, { name: string; filePath: string; lineNumber: number }>,
+        cteLineNumbers: Map<string, number>
+    ): void {
+        if (!stmt || typeof stmt.type !== 'string') {
+            return;
+        }
+        // Check for WITH clause in SELECT statements
+        if (stmt.type.toLowerCase() !== 'select' || !stmt.with) {
+            return;
+        }
+        const withClause = Array.isArray(stmt.with) ? stmt.with : [stmt.with];
+        for (const cte of withClause) {
+            const cteName = cte?.name?.value || cte?.name;
+            if (cteName && typeof cteName === 'string') {
+                const cteKey = cteName.toLowerCase();
+                if (!cteNames.has(cteKey)) {
+                    cteNames.set(cteKey, {
+                        name: cteName,
+                        filePath: filePath,
+                        lineNumber: cteLineNumbers.get(cteKey) ?? 1
+                    });
+                }
+            }
+        }
     }
 
     /**
@@ -1317,12 +1370,13 @@ export class LineageBuilder implements LineageGraph {
         sql: string,
         filePath: string,
         cteNames: Map<string, { name: string; filePath: string; lineNumber: number }>,
-        declarations = findCteDeclarations(sql)
+        declarations = findCteDeclarations(sql),
+        lineStarts = buildSegmentStarts(sql, '\n')
     ): void {
         for (const declaration of declarations) {
             const cteName = declaration.name;
             if (cteName && !this.isReservedWord(cteName)) {
-                const lineNumber = sql.substring(0, declaration.index).split('\n').length;
+                const lineNumber = countStartsAtOrBefore(lineStarts, declaration.index);
                 const cteKey = cteName.toLowerCase();
                 if (!cteNames.has(cteKey)) {
                     cteNames.set(cteKey, {

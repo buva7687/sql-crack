@@ -794,6 +794,35 @@ describe('LineageBuilder', () => {
     });
 
     describe('extractCTEsWithRegex', () => {
+        it('parses only WITH statements, one statement at a time', async () => {
+            const { Parser } = jest.requireActual('node-sql-parser');
+            const astifySpy = jest.spyOn(Parser.prototype, 'astify');
+            const views = Array.from({ length: 50 }, (_, index) =>
+                `CREATE VIEW v${index} AS SELECT id FROM t${index};`
+            ).join('\n');
+            // COPY cannot be parsed; it used to make every whole-file dialect
+            // attempt fail after re-parsing all preceding statements.
+            const sql = `${views}\nCOPY foo FROM STDIN;\nWITH q(a, b) AS (SELECT 1, 2) SELECT * FROM q;`;
+            (mockedFs.promises.readFile as jest.Mock).mockResolvedValue(sql);
+
+            const fa = makeFileAnalysis('mixed.sql', [], []);
+            const index = makeIndex([], new Map([['mixed.sql', fa]]));
+
+            try {
+                const builder = new LineageBuilder();
+                await builder.buildFromIndexAsync(index);
+
+                // Column-list CTEs are only recoverable from the AST.
+                expect(builder.nodes.get('cte:q')).toEqual(expect.objectContaining({ name: 'q' }));
+                expect(astifySpy).toHaveBeenCalled();
+                for (const [input] of astifySpy.mock.calls) {
+                    expect(String(input)).toMatch(/^\s*WITH q/);
+                }
+            } finally {
+                astifySpy.mockRestore();
+            }
+        });
+
         it('extracts simple CTEs from preloaded SQL', async () => {
             const sql = 'WITH my_cte AS (\n  SELECT * FROM orders\n)\nSELECT * FROM my_cte';
             (mockedFs.promises.readFile as jest.Mock).mockResolvedValue(sql);

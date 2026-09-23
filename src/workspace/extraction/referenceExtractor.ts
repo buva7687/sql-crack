@@ -17,7 +17,7 @@ import {
 } from './types';
 import { ColumnExtractor } from './columnExtractor';
 import { TransformExtractor } from './transformExtractor';
-import { escapeRegex, getDollarQuoteDelimiterAt, maskSqlCommentsPreservingPositions, unwrapIdentifierValue } from '../../shared';
+import { countStartsAtOrBefore, escapeRegex, getDollarQuoteDelimiterAt, maskSqlCommentsPreservingPositions, TextOffsetIndex, unwrapIdentifierValue } from '../../shared';
 import { preprocessSqlForWorkspaceParsing } from '../parserConfig';
 import { getIdentifierSemantics, getQualifiedKey } from '../identifiers';
 import { REFERENCE_SQL_RESERVED_WORDS, TERADATA_RESERVED_WORDS } from './constants';
@@ -66,6 +66,8 @@ export class ReferenceExtractor {
     private locationSearchSource: string | null = null;
     private locationSearchSql: string = '';
     private locationStatementBoundaries: number[] = [];
+    /** Per-extraction line lookup; cleared after each call so file text is not retained. */
+    private readonly offsets = new TextOffsetIndex();
 
     constructor(options: Partial<ExtractionOptions> = {}) {
         this.parser = new Parser();
@@ -152,6 +154,19 @@ export class ReferenceExtractor {
         sql: string,
         filePath: string,
         dialect: SqlDialect = this.options.dialect
+    ): { references: TableReference[]; warnings: string[]; queries: QueryAnalysis[] } {
+        this.offsets.clear();
+        try {
+            return this.extractReferencesUncached(sql, filePath, dialect);
+        } finally {
+            this.offsets.clear();
+        }
+    }
+
+    private extractReferencesUncached(
+        sql: string,
+        filePath: string,
+        dialect: SqlDialect
     ): { references: TableReference[]; warnings: string[]; queries: QueryAnalysis[] } {
         this._activeDialect = dialect;
         this.tableLineLookup = null;
@@ -1622,12 +1637,9 @@ export class ReferenceExtractor {
     }
 
     private getStatementIndex(boundaries: number[], charIndex: number): number {
-        for (let index = boundaries.length - 1; index >= 0; index--) {
-            if (charIndex >= boundaries[index]) {
-                return index;
-            }
-        }
-        return 0;
+        // Boundaries are ascending statement start offsets; binary search keeps
+        // per-token lookups logarithmic on files with thousands of statements.
+        return Math.max(0, countStartsAtOrBefore(boundaries, charIndex) - 1);
     }
 
     private buildTableLineLookup(sql: string): TableLineLookup {
@@ -2170,6 +2182,10 @@ export class ReferenceExtractor {
                 return null;
         }
 
+        // Matches cannot span an unquoted `;`, so scanning can start at the
+        // requested statement and stop once matches move past it instead of
+        // rescanning the whole file for every reference.
+        pattern.lastIndex = statementBoundaries[statementIndex] ?? 0;
         let m: RegExpExecArray | null;
         while ((m = pattern.exec(searchableSql)) !== null) {
             const rawTable = m.groups?.table || tableName;
@@ -2178,6 +2194,9 @@ export class ReferenceExtractor {
             const tableOffset = m[0].lastIndexOf(rawTable);
             const tableIndex = m.index + Math.max(0, tableOffset);
             const matchStatementIndex = this.getStatementIndex(statementBoundaries, tableIndex);
+            if (matchStatementIndex > statementIndex) {
+                break;
+            }
             const statementStart = statementBoundaries[matchStatementIndex] ?? 0;
             const isCommaFromEntry = context === 'FROM' && m[0].trimStart().startsWith(',');
             if (matchStatementIndex === statementIndex
@@ -2211,7 +2230,7 @@ export class ReferenceExtractor {
      * @returns Line number (1-based) where the character index falls
      */
     private getLineNumberAtIndex(sql: string, charIndex: number): number {
-        return sql.substring(0, charIndex).split('\n').length;
+        return this.offsets.lineNumberAt(sql, charIndex);
     }
 
     /**

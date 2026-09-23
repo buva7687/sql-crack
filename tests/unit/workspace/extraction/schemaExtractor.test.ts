@@ -20,6 +20,44 @@ describe('SchemaExtractor.extractDefinitions', () => {
         expect(Math.max(...astifySpy.mock.calls.map(call => String(call[0]).length))).toBeLessThan(80);
     });
 
+    it('scans CREATE headers once per file instead of once per definition', () => {
+        const headerRegexSpy = jest.spyOn(extractor as any, 'createHeaderRegex');
+        const sql = Array.from({ length: 200 }, (_, index) =>
+            index % 2 === 0
+                ? `CREATE TABLE s.table_${index} (\n  id INT\n);`
+                : `CREATE VIEW view_${index} AS\nSELECT id FROM s.table_${index - 1};`
+        ).join('\n');
+
+        const definitions = extractor.extractDefinitions(sql, '/sql/schema.sql', 'MySQL');
+
+        expect(definitions).toHaveLength(200);
+        expect(definitions[198]).toEqual(expect.objectContaining({
+            type: 'table', name: 'table_198', schema: 's', statementIndex: 198, lineNumber: 496,
+        }));
+        expect(definitions[199]).toEqual(expect.objectContaining({
+            type: 'view', name: 'view_199', statementIndex: 199, lineNumber: 499,
+        }));
+        // Whole-file header scans happen once per (type, text) view. The only
+        // per-definition regex is the quote-flag probe over that definition's
+        // own SQL; the old lookups built ~5 whole-file regexes per definition.
+        expect(headerRegexSpy.mock.calls.length).toBeLessThan(definitions.length / 2 + 20);
+    });
+
+    it('extracts thousands of definitions from one file in linear time', () => {
+        const sql = Array.from({ length: 2000 }, (_, index) =>
+            `CREATE TABLE t${index} (\n  id INT,\n  name VARCHAR(10)\n);`
+        ).join('\n');
+
+        const start = Date.now();
+        const definitions = extractor.extractDefinitions(sql, '/sql/dump.sql', 'MySQL');
+        const elapsed = Date.now() - start;
+
+        expect(definitions).toHaveLength(2000);
+        expect(definitions[1999]).toEqual(expect.objectContaining({ name: 't1999', lineNumber: 7997 }));
+        // Previously ~18 s (cubic prefix rescans); now well under a second.
+        expect(elapsed).toBeLessThan(5000);
+    });
+
     describe('CREATE TABLE via AST parser', () => {
         it('extracts a simple CREATE TABLE', () => {
             const sql = 'CREATE TABLE orders (id INT, customer_id INT, amount DECIMAL(10,2));';

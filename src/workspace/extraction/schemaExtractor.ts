@@ -9,7 +9,7 @@ import {
     ExtractionOptions,
     DEFAULT_EXTRACTION_OPTIONS,
 } from './types';
-import { escapeRegex, getDollarQuoteDelimiterAt, maskSqlCommentsPreservingPositions, stripSqlComments, unwrapIdentifierValue } from '../../shared';
+import { escapeRegex, getDollarQuoteDelimiterAt, maskSqlCommentsPreservingPositions, stripSqlComments, TextOffsetIndex, unwrapIdentifierValue } from '../../shared';
 import { preprocessSqlForWorkspaceParsing } from '../parserConfig';
 import { getIdentifierSemantics } from '../identifiers';
 import { SCHEMA_SQL_RESERVED_WORDS } from './constants';
@@ -37,12 +37,38 @@ interface QualifiedIdentifierParts {
     rawCatalog?: string;
 }
 
+interface HeaderMatch {
+    index: number;
+    parts: QualifiedIdentifierParts;
+}
+
+type DefinitionType = 'table' | 'view';
+
 /**
  * Extracts schema definitions (CREATE TABLE/VIEW) from SQL
  */
 export class SchemaExtractor {
     private parser: Parser;
     private options: ExtractionOptions;
+    /**
+     * Per-extraction lookup caches. Every definition asks for its header
+     * match, statement index, and line number; recomputing those from the
+     * start of the file made large schema dumps cubic. Cleared after each
+     * extraction so file text is not retained between calls.
+     */
+    private readonly offsets = new TextOffsetIndex();
+    private readonly headerMatchCache: Record<DefinitionType, Map<string, HeaderMatch[]>> = {
+        table: new Map(),
+        view: new Map(),
+    };
+    private readonly headerMatchesByStatementCache: Record<DefinitionType, Map<string, Map<number, HeaderMatch[]>>> = {
+        table: new Map(),
+        view: new Map(),
+    };
+    private readonly firstHeaderIndexByNameCache: Record<DefinitionType, Map<string, Map<string, number>>> = {
+        table: new Map(),
+        view: new Map(),
+    };
 
     constructor(options: Partial<ExtractionOptions> = {}) {
         this.parser = new Parser();
@@ -69,6 +95,27 @@ export class SchemaExtractor {
         sql: string,
         filePath: string,
         dialect: SqlDialect = this.options.dialect
+    ): { definitions: SchemaDefinition[]; warnings: string[] } {
+        try {
+            return this.extractDefinitionsUncached(sql, filePath, dialect);
+        } finally {
+            this.clearLookupCaches();
+        }
+    }
+
+    private clearLookupCaches(): void {
+        this.offsets.clear();
+        for (const type of ['table', 'view'] as const) {
+            this.headerMatchCache[type].clear();
+            this.headerMatchesByStatementCache[type].clear();
+            this.firstHeaderIndexByNameCache[type].clear();
+        }
+    }
+
+    private extractDefinitionsUncached(
+        sql: string,
+        filePath: string,
+        dialect: SqlDialect
     ): { definitions: SchemaDefinition[]; warnings: string[] } {
         const definitions: SchemaDefinition[] = [];
         const warnings: string[] = [];
@@ -571,24 +618,19 @@ export class SchemaExtractor {
         type: 'table' | 'view',
         statementIndex: number
     ): IdentifierMetadata {
-        const regex = this.createHeaderRegex(type);
-        let match: RegExpExecArray | null;
-        while ((match = regex.exec(searchableSql)) !== null) {
-            const parts = this.getQualifiedIdentifierParts(match);
-            if (parts.name.toLowerCase() !== identifier.toLowerCase()) {
-                continue;
-            }
-            const matchStatementIndex = searchableSql.slice(0, match.index).split(';').length - 1;
-            if (matchStatementIndex !== statementIndex) {
-                continue;
-            }
-            return {
-                nameQuoted: this.isQuotedIdentifier(parts.rawName),
-                schemaQuoted: this.isQuotedIdentifier(parts.rawSchema),
-                catalogQuoted: this.isQuotedIdentifier(parts.rawCatalog),
-            };
+        const identifierKey = identifier.toLowerCase();
+        const match = this.getHeaderMatchesByStatement(searchableSql, type)
+            .get(statementIndex)
+            ?.find(candidate => candidate.parts.name.toLowerCase() === identifierKey);
+        if (!match) {
+            return { nameQuoted: false, schemaQuoted: false, catalogQuoted: false };
         }
-        return { nameQuoted: false, schemaQuoted: false, catalogQuoted: false };
+        const { parts } = match;
+        return {
+            nameQuoted: this.isQuotedIdentifier(parts.rawName),
+            schemaQuoted: this.isQuotedIdentifier(parts.rawSchema),
+            catalogQuoted: this.isQuotedIdentifier(parts.rawCatalog),
+        };
     }
 
     /**
@@ -597,7 +639,7 @@ export class SchemaExtractor {
      * cannot inflate the count.
      */
     private getStatementIndexAt(structuralSql: string, charIndex: number): number {
-        return structuralSql.slice(0, charIndex).split(';').length - 1;
+        return this.offsets.semicolonSegmentAt(structuralSql, charIndex);
     }
 
     private findDefinitionIdentifierParts(
@@ -605,15 +647,41 @@ export class SchemaExtractor {
         type: 'table' | 'view',
         statementIndex: number
     ): QualifiedIdentifierParts | null {
+        return this.getHeaderMatchesByStatement(structuralSql, type).get(statementIndex)?.[0]?.parts ?? null;
+    }
+
+    /** All CREATE TABLE/VIEW header matches in `text`, in source order. */
+    private getHeaderMatches(text: string, type: DefinitionType): HeaderMatch[] {
+        const cached = this.headerMatchCache[type].get(text);
+        if (cached) {return cached;}
+
+        const matches: HeaderMatch[] = [];
         const regex = this.createHeaderRegex(type);
         let match: RegExpExecArray | null;
-        while ((match = regex.exec(structuralSql)) !== null) {
-            const matchStatementIndex = this.getStatementIndexAt(structuralSql, match.index);
-            if (matchStatementIndex === statementIndex) {
-                return this.getQualifiedIdentifierParts(match);
+        while ((match = regex.exec(text)) !== null) {
+            matches.push({ index: match.index, parts: this.getQualifiedIdentifierParts(match) });
+        }
+        this.headerMatchCache[type].set(text, matches);
+        return matches;
+    }
+
+    /** Header matches grouped by the `;`-delimited statement of `text` they start in. */
+    private getHeaderMatchesByStatement(text: string, type: DefinitionType): Map<number, HeaderMatch[]> {
+        const cached = this.headerMatchesByStatementCache[type].get(text);
+        if (cached) {return cached;}
+
+        const byStatement = new Map<number, HeaderMatch[]>();
+        for (const match of this.getHeaderMatches(text, type)) {
+            const statementIndex = this.getStatementIndexAt(text, match.index);
+            const matches = byStatement.get(statementIndex);
+            if (matches) {
+                matches.push(match);
+            } else {
+                byStatement.set(statementIndex, [match]);
             }
         }
-        return null;
+        this.headerMatchesByStatementCache[type].set(text, byStatement);
+        return byStatement;
     }
 
     private getQualifiedIdentifierParts(match: RegExpExecArray): QualifiedIdentifierParts {
@@ -1226,17 +1294,19 @@ export class SchemaExtractor {
         identifier: string,
         type: 'table' | 'view'
     ): number | null {
-        const re = this.createHeaderRegex(type);
-        let match: RegExpExecArray | null;
-
-        while ((match = re.exec(searchableSql)) !== null) {
-            const matchedName = this.getQualifiedIdentifierParts(match).name;
-            if (matchedName.toLowerCase() === identifier.toLowerCase()) {
-                return match.index;
+        let firstIndexByName = this.firstHeaderIndexByNameCache[type].get(searchableSql);
+        if (!firstIndexByName) {
+            firstIndexByName = new Map<string, number>();
+            for (const match of this.getHeaderMatches(searchableSql, type)) {
+                const key = match.parts.name.toLowerCase();
+                if (!firstIndexByName.has(key)) {
+                    firstIndexByName.set(key, match.index);
+                }
             }
+            this.firstHeaderIndexByNameCache[type].set(searchableSql, firstIndexByName);
         }
 
-        return null;
+        return firstIndexByName.get(identifier.toLowerCase()) ?? null;
     }
 
     /**
@@ -1301,7 +1371,7 @@ export class SchemaExtractor {
      * @returns Line number (1-based) where the character index falls
      */
     private getLineNumberAtIndex(sql: string, charIndex: number): number {
-        return sql.substring(0, charIndex).split('\n').length;
+        return this.offsets.lineNumberAt(sql, charIndex);
     }
 
     /**

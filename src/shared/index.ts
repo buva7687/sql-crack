@@ -28,6 +28,7 @@ export {
 } from './stringUtils';
 export type { StripSqlCommentsOptions } from './stringUtils';
 export { unwrapIdentifierValue } from './astUtils';
+export { TextOffsetIndex, buildSegmentStarts, countStartsAtOrBefore } from './textOffsets';
 
 export {
     CANVAS,
