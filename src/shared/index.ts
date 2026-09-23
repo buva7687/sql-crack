@@ -23,6 +23,10 @@ export {
     stripSqlComments,
     maskSqlCommentsPreservingPositions,
     isHashTempTableIdentifierAt,
+    isPostgresJsonPathOperatorAt,
+    dialectSupportsHashComments,
+    dialectSupportsBackslashEscapes,
+    quotedStringAllowsBackslashEscapes,
     getDollarQuoteDelimiterAt,
     getDollarQuotedTokenEnd,
 } from './stringUtils';

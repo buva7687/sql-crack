@@ -264,9 +264,12 @@ export function findSourceColumn(
         if (!targetColumn.sourceColumn && !targetColumn.sourceTable) {
             return null;
         }
+        // Keep sourceColumn so the next step can match the originating table
+        // node; without it the trace stopped at the JOIN node.
         return {
             name: targetColumn.sourceColumn || targetColumn.name,
             expression: targetColumn.sourceColumn || targetColumn.name,
+            sourceColumn: targetColumn.sourceColumn,
             sourceTable: targetColumn.sourceTable
         };
     }

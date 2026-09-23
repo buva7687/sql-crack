@@ -1,4 +1,4 @@
-import { getDollarQuoteDelimiterAt, isHashTempTableIdentifierAt } from '../../../shared/stringUtils';
+import { dialectSupportsBackslashEscapes, dialectSupportsHashComments, getDollarQuoteDelimiterAt, isHashTempTableIdentifierAt, isPostgresJsonPathOperatorAt } from '../../../shared/stringUtils';
 import type { SqlDialect } from '../../types/parser';
 import { maskStringsAndComments } from '../dialects/preprocessing';
 
@@ -81,6 +81,9 @@ function scanSqlStatements(
     let inDollarQuotes = false;
     let dollarQuoteTag = '';
     let customDelimiter = null as string | null;
+    // `#` is an operator in PostgreSQL (`#`, `#>`, `#>>`, `#-`) and has no
+    // comment meaning outside MySQL-family dialects.
+    const hashStartsComment = dialectSupportsHashComments(dialect);
 
     const isIdentifierChar = (ch: string | undefined): boolean => {
         if (!ch) { return false; }
@@ -193,7 +196,9 @@ function scanSqlStatements(
                 i++;
                 continue;
             }
-            if (char === '#' && !isHashTempTableIdentifierAt(sql, i)) {
+            if (char === '#' && hashStartsComment
+                && !isPostgresJsonPathOperatorAt(sql, i)
+                && !isHashTempTableIdentifierAt(sql, i)) {
                 inLineComment = true;
                 current += char;
                 continue;
@@ -261,12 +266,7 @@ function scanSqlStatements(
                 if (!inString) {
                     inString = true;
                     stringChar = char;
-                    stringAllowsBackslashEscapes = dialect === 'MySQL'
-                        || dialect === 'MariaDB'
-                        || dialect === 'BigQuery'
-                        || dialect === 'Snowflake'
-                        || dialect === 'Hive'
-                        || dialect === 'Redshift'
+                    stringAllowsBackslashEscapes = dialectSupportsBackslashEscapes(dialect)
                         || (char === '\'' && dialect === 'PostgreSQL' && /[Ee]/.test(prevChar));
                 } else if (char === stringChar) {
                     // SQL-standard doubled quote escape: '' or "" (and `` for backticks)

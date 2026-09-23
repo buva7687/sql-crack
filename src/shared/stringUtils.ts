@@ -82,6 +82,49 @@ export function escapeForInlineScriptValue(value: unknown): string {
  * comments such as `#CONNECT BY ...` are still removed while `FROM #temp` and
  * `CREATE TABLE ##temp` remain intact.
  */
+/**
+ * SQL dialects whose quoted strings treat `\` as an escape character. In the
+ * others (PostgreSQL standard strings, SQL Server, Oracle, Teradata, ...)
+ * `'\'` is a complete one-character literal.
+ */
+const BACKSLASH_ESCAPE_DIALECTS: ReadonlySet<string> = new Set([
+    'MySQL', 'MariaDB', 'BigQuery', 'Snowflake', 'Hive', 'Redshift',
+]);
+
+/** Whether `\` escapes the next character inside quoted strings in `dialect`. */
+export function dialectSupportsBackslashEscapes(dialect: string): boolean {
+    return BACKSLASH_ESCAPE_DIALECTS.has(dialect);
+}
+
+/**
+ * Whether a string opened at `quoteOffset` honours backslash escapes: always in
+ * backslash-escape dialects, and for PostgreSQL-style `E'...'` strings.
+ */
+export function quotedStringAllowsBackslashEscapes(
+    sql: string,
+    quoteOffset: number,
+    backslashEscapes: boolean
+): boolean {
+    return backslashEscapes || (sql[quoteOffset] === "'" && /[Ee]/.test(sql[quoteOffset - 1] || ''));
+}
+
+/** SQL dialects in which `#` starts a line comment. */
+const HASH_COMMENT_DIALECTS: ReadonlySet<string> = new Set(['MySQL', 'MariaDB', 'BigQuery']);
+
+/** Whether `#` starts a line comment in `dialect` (MySQL, MariaDB, BigQuery). */
+export function dialectSupportsHashComments(dialect: string): boolean {
+    return HASH_COMMENT_DIALECTS.has(dialect);
+}
+
+/**
+ * PostgreSQL JSON path operators `#>` and `#>>` are never treated as `#` line
+ * comments. Without this, dialect-agnostic comment masking swallows the rest of
+ * a JSON path expression — including the statement's terminating `;`.
+ */
+export function isPostgresJsonPathOperatorAt(sql: string, offset: number): boolean {
+    return sql[offset] === '#' && sql[offset + 1] === '>';
+}
+
 export function isHashTempTableIdentifierAt(sql: string, offset: number): boolean {
     // The scanner visits both characters in a global-temp `##name`; normalize
     // the second hash back to the start of the identifier.
@@ -115,6 +158,11 @@ export function isHashTempTableIdentifierAt(sql: string, offset: number): boolea
 export interface StripSqlCommentsOptions {
     /** Set false when the caller knows `#` always starts a MySQL-style comment. */
     preserveHashTempIdentifiers?: boolean;
+    /**
+     * Set false for dialects where `\` is an ordinary character inside quotes
+     * (see `dialectSupportsBackslashEscapes`). Defaults to true.
+     */
+    backslashEscapes?: boolean;
 }
 
 const DOLLAR_QUOTE_DELIMITER_PATTERN = /^\$(?:[_\p{L}][_\p{L}\p{M}\p{N}]*)?\$/u;
@@ -215,9 +263,11 @@ export function maskSqlCommentsPreservingPositions(
 
         if (ch === "'" || ch === '"' || ch === '`' || ch === '[') {
             const closingQuote = ch === '[' ? ']' : ch;
+            const escapesAllowed = ch !== '['
+                && quotedStringAllowsBackslashEscapes(sql, i, options.backslashEscapes !== false);
             i++;
             while (i < len) {
-                if (sql[i] === '\\' && ch !== '[' && i + 1 < len) {
+                if (escapesAllowed && sql[i] === '\\' && i + 1 < len) {
                     i += 2;
                     continue;
                 }
@@ -260,7 +310,7 @@ export function maskSqlCommentsPreservingPositions(
             continue;
         }
 
-        if (ch === '#') {
+        if (ch === '#' && !isPostgresJsonPathOperatorAt(sql, i)) {
             const preserveTempIdentifier = options.preserveHashTempIdentifiers !== false
                 && isHashTempTableIdentifierAt(sql, i);
             if (!preserveTempIdentifier) {
@@ -385,8 +435,9 @@ export function stripSqlComments(sql: string, options: StripSqlCommentsOptions =
             continue;
         }
 
-        // Hash line comment: # (but not a contextual #identifier/##identifier temp table)
-        if (ch === '#') {
+        // Hash line comment: # (but not a contextual #identifier/##identifier
+        // temp table, or a PostgreSQL #> / #>> JSON path operator)
+        if (ch === '#' && !isPostgresJsonPathOperatorAt(sql, i)) {
             const preserveTempIdentifier = options.preserveHashTempIdentifiers !== false
                 && isHashTempTableIdentifierAt(sql, i);
             if (!preserveTempIdentifier) {

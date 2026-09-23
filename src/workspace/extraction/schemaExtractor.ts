@@ -9,7 +9,7 @@ import {
     ExtractionOptions,
     DEFAULT_EXTRACTION_OPTIONS,
 } from './types';
-import { escapeRegex, getDollarQuoteDelimiterAt, maskSqlCommentsPreservingPositions, stripSqlComments, TextOffsetIndex, unwrapIdentifierValue } from '../../shared';
+import { dialectSupportsBackslashEscapes, escapeRegex, getDollarQuoteDelimiterAt, isPostgresJsonPathOperatorAt, maskSqlCommentsPreservingPositions, quotedStringAllowsBackslashEscapes, stripSqlComments, TextOffsetIndex, unwrapIdentifierValue } from '../../shared';
 import { preprocessSqlForWorkspaceParsing } from '../parserConfig';
 import { getIdentifierSemantics } from '../identifiers';
 import { SCHEMA_SQL_RESERVED_WORDS } from './constants';
@@ -57,6 +57,11 @@ export class SchemaExtractor {
      * extraction so file text is not retained between calls.
      */
     private readonly offsets = new TextOffsetIndex();
+    /**
+     * Whether `\` escapes inside quotes for the dialect being extracted. In
+     * PostgreSQL, SQL Server, Oracle, and Teradata `'\'` is a complete literal.
+     */
+    private backslashEscapes = true;
     private readonly headerMatchCache: Record<DefinitionType, Map<string, HeaderMatch[]>> = {
         table: new Map(),
         view: new Map(),
@@ -119,6 +124,7 @@ export class SchemaExtractor {
     ): { definitions: SchemaDefinition[]; warnings: string[] } {
         const definitions: SchemaDefinition[] = [];
         const warnings: string[] = [];
+        this.backslashEscapes = dialectSupportsBackslashEscapes(dialect);
         const { sql: normalizedSql } = preprocessSqlForWorkspaceParsing(sql, dialect);
         const sourceViews = this.createSqlSearchViews(sql);
         const normalizedViews = normalizedSql === sql
@@ -219,7 +225,9 @@ export class SchemaExtractor {
         const result = new Map<string, boolean>();
         if (!definition.sql || definition.columns.length === 0) {return result;}
 
-        const searchableSql = maskSqlCommentsPreservingPositions(definition.sql);
+        const searchableSql = maskSqlCommentsPreservingPositions(definition.sql, {
+            backslashEscapes: this.backslashEscapes,
+        });
         const header = this.createHeaderRegex(definition.type).exec(searchableSql);
         if (!header) {return result;}
         const openingIndex = searchableSql.indexOf('(', header.index + header[0].length);
@@ -1073,7 +1081,7 @@ export class SchemaExtractor {
             const char = sql[i];
             if (quote) {
                 const closing = quote === ']' ? ']' : quote;
-                if (char === '\\' && quote !== ']' && i + 1 < sql.length) {
+                if (char === '\\' && quote !== ']' && this.backslashEscapes && i + 1 < sql.length) {
                     i += 2;
                     continue;
                 }
@@ -1124,7 +1132,7 @@ export class SchemaExtractor {
             if (quote) {
                 current += char;
                 const closing = quote === ']' ? ']' : quote;
-                if (char === '\\' && quote !== ']' && i + 1 < body.length) {
+                if (char === '\\' && quote !== ']' && this.backslashEscapes && i + 1 < body.length) {
                     current += body[++i];
                     continue;
                 }
@@ -1212,9 +1220,11 @@ export class SchemaExtractor {
             if (char === "'" || char === '"' || char === '`' || char === '[') {
                 const start = i;
                 const closing = char === '[' ? ']' : char;
+                const escapesAllowed = closing !== ']'
+                    && quotedStringAllowsBackslashEscapes(sql, i, this.backslashEscapes);
                 i++;
                 while (i < sql.length) {
-                    if (sql[i] === '\\' && closing !== ']' && i + 1 < sql.length) {
+                    if (escapesAllowed && sql[i] === '\\' && i + 1 < sql.length) {
                         i += 2;
                         continue;
                     }
@@ -1255,7 +1265,7 @@ export class SchemaExtractor {
 
             const isDashComment = char === '-' && sql[i + 1] === '-';
             let isHashComment = false;
-            if (char === '#') {
+            if (char === '#' && !isPostgresJsonPathOperatorAt(sql, i)) {
                 const tempIdentifier = /^#?[A-Za-z0-9_][\w$@]*/.exec(sql.slice(i + 1));
                 const prefix = masked.slice(0, i).join('');
                 const followsTempTarget = /(?:\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMP(?:ORARY)?\s+)?TABLE(?:\s+IF\s+NOT\s+EXISTS)?|\bINTO(?:\s+TEMP(?:ORARY)?(?:\s+TABLE)?)?)\s*$/i

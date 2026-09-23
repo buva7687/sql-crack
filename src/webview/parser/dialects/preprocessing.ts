@@ -1,5 +1,5 @@
 import type { SqlDialect } from '../../types';
-import { getDollarQuoteDelimiterAt } from '../../../shared';
+import { getDollarQuoteDelimiterAt, isPostgresJsonPathOperatorAt } from '../../../shared';
 import { preprocessJinjaTemplates } from './jinjaPreprocessor';
 
 interface TextRewrite {
@@ -1482,7 +1482,7 @@ export function maskStringsAndComments(sql: string): string {
             }
             continue;
         }
-        if (chars[i] === '#') {
+        if (chars[i] === '#' && !isPostgresJsonPathOperatorAt(sql, i)) {
             const next = i + 1 < chars.length ? chars[i + 1] : '';
             const afterDoubleHash = i + 2 < chars.length ? chars[i + 2] : '';
             const isTempIdentifier =

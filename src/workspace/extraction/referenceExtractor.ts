@@ -17,7 +17,9 @@ import {
 } from './types';
 import { ColumnExtractor } from './columnExtractor';
 import { TransformExtractor } from './transformExtractor';
-import { countStartsAtOrBefore, escapeRegex, getDollarQuoteDelimiterAt, maskSqlCommentsPreservingPositions, TextOffsetIndex, unwrapIdentifierValue } from '../../shared';
+import { countStartsAtOrBefore, dialectSupportsBackslashEscapes, escapeRegex, getDollarQuoteDelimiterAt, maskSqlCommentsPreservingPositions, quotedStringAllowsBackslashEscapes, TextOffsetIndex, unwrapIdentifierValue } from '../../shared';
+import type { StripSqlCommentsOptions } from '../../shared';
+import { selectMultiTableUpdateTargets } from '../../shared/dmlTargets';
 import { preprocessSqlForWorkspaceParsing } from '../parserConfig';
 import { getIdentifierSemantics, getQualifiedKey } from '../identifiers';
 import { REFERENCE_SQL_RESERVED_WORDS, TERADATA_RESERVED_WORDS } from './constants';
@@ -179,7 +181,7 @@ export class ReferenceExtractor {
         // Pre-collect CTE names via regex BEFORE attempting AST parse.
         // This ensures the catch block (regex fallback) has CTE names available
         // even when the AST parser fails on complex multi-statement files.
-        const sqlNoComments = this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(normalizedSql));
+        const sqlNoComments = this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(normalizedSql, this.getCommentMaskOptions()));
         const reservedWords = new Set(['select', 'from', 'where', 'join', 'inner', 'left', 'right', 'outer', 'on', 'as', 'with', 'recursive']);
         const statementBoundaries = this.getStatementBoundaries(sqlNoComments);
         this.locationSearchSource = normalizedSql;
@@ -394,7 +396,14 @@ export class ReferenceExtractor {
             : [];
         let transformations: Transformation[] = selectStatement
             ? this.transformExtractor.extractTransformations(selectStatement, tableAliases)
-            : this.extractUpdateTransformations(statement, tableAliases, queryLineNumber);
+            : this.extractUpdateTransformations(
+                statement,
+                // Only alias resolution for SET expressions needs the MySQL
+                // multi-table list; source scoping above must keep subquery
+                // tables such as `WHERE id IN (SELECT ... FROM other)`.
+                this.columnExtractor.buildAliasMap(this.getMultiTableUpdateAliasSource(statement)),
+                queryLineNumber
+            );
 
         const sourceTableNames = new Set(inputTables.map(reference => reference.tableName).filter(Boolean));
         const soleSourceTable = directSourceTableNames.length === 1
@@ -563,6 +572,18 @@ export class ReferenceExtractor {
         return statement.columns
             .map(column => unwrapIdentifierValue(column))
             .filter((column): column is string => Boolean(column));
+    }
+
+    /**
+     * MySQL multi-table UPDATE (`UPDATE a JOIN b ... SET a.x = b.y`) has no FROM
+     * clause; its aliases live on stmt.table, so expose them for alias lookup.
+     */
+    private getMultiTableUpdateAliasSource(statement: AstStatement): AstStatement {
+        if (statement?.type?.toLowerCase() === 'update' && !statement.from
+            && Array.isArray(statement.table) && statement.table.length > 1) {
+            return { ...statement, from: statement.table } as AstStatement;
+        }
+        return statement;
     }
 
     private extractUpdateTransformations(
@@ -1076,9 +1097,28 @@ export class ReferenceExtractor {
         // Target table
         if (stmt.table) {
             const fromAliases = this.collectFromAliases(stmt.from);
-            const tables = Array.isArray(stmt.table) ? stmt.table : [stmt.table];
-            for (const t of tables) {
-                const tableRef = typeof t === 'string' ? { table: t } as AstTableRef : t as AstTableRef;
+            const tables = (Array.isArray(stmt.table) ? stmt.table : [stmt.table]).map(t =>
+                typeof t === 'string' ? { table: t } as AstTableRef : t as AstTableRef
+            );
+            // MySQL `UPDATE a JOIN b ... SET a.x = b.y` lists the joined source
+            // tables in stmt.table too; only SET-qualified tables are written.
+            const targetTables = stmt.from
+                ? tables
+                : selectMultiTableUpdateTargets(tables, stmt.set, entry => this.getTableName(entry));
+            for (const tableRef of tables) {
+                if (!targetTables.includes(tableRef)) {
+                    this.extractFromItem(
+                        tableRef,
+                        filePath,
+                        sql,
+                        references,
+                        aliasMap,
+                        'select',
+                        depth,
+                        statementIndex
+                    );
+                    continue;
+                }
                 const targetName = this.getTableName(tableRef);
                 const resolvedAlias = targetName ? fromAliases.get(targetName.toLowerCase()) : undefined;
                 const ref = this.createTableReference(
@@ -1151,6 +1191,28 @@ export class ReferenceExtractor {
     }
 
     /**
+     * FROM entries named (by table or alias) in a multi-table DELETE's target
+     * list. Falls back to every entry when targets cannot be matched.
+     */
+    private selectDeleteTargets(stmt: AstStatement, fromTables: AstTableRef[]): AstTableRef[] {
+        if (!stmt.from || !stmt.table || fromTables.length <= 1) {
+            return fromTables;
+        }
+        const targetKeys = new Set(
+            (Array.isArray(stmt.table) ? stmt.table : [stmt.table])
+                .map(t => (typeof t === 'string' ? t : this.getTableName(t as AstTableRef)))
+                .filter((name): name is string => typeof name === 'string' && name.length > 0)
+                .map(name => name.toLowerCase())
+        );
+        const matched = fromTables.filter(entry => {
+            const alias = typeof entry.as === 'string' ? entry.as.toLowerCase() : null;
+            const name = this.getTableName(entry)?.toLowerCase() ?? null;
+            return (alias !== null && targetKeys.has(alias)) || (name !== null && targetKeys.has(name));
+        });
+        return matched.length > 0 ? matched : fromTables;
+    }
+
+    /**
      * Extract references from DELETE statement
      */
     private extractFromDelete(
@@ -1190,9 +1252,26 @@ export class ReferenceExtractor {
         // Target table
         const tableSource = stmt.from || stmt.table;
         if (tableSource) {
-            const tables = Array.isArray(tableSource) ? tableSource : [tableSource];
-            for (const t of tables) {
-                const tableRef = typeof t === 'string' ? { table: t } as AstTableRef : t as AstTableRef;
+            const tables = (Array.isArray(tableSource) ? tableSource : [tableSource]).map(t =>
+                typeof t === 'string' ? { table: t } as AstTableRef : t as AstTableRef
+            );
+            const deleteTargets = this.selectDeleteTargets(stmt, tables);
+            for (const tableRef of tables) {
+                if (!deleteTargets.includes(tableRef)) {
+                    // `DELETE t FROM tgt t JOIN src s ...` only deletes from the
+                    // listed targets; the joined tables are read sources.
+                    this.extractFromItem(
+                        tableRef,
+                        filePath,
+                        sql,
+                        references,
+                        aliasMap,
+                        'select',
+                        depth,
+                        statementIndex
+                    );
+                    continue;
+                }
                 const ref = this.createTableReference(tableRef, filePath, sql, 'delete', 'DELETE FROM', statementIndex);
                 if (ref?.tableName) {
                     const isCTE = this.isCTEReference(aliasMap.cteNames, ref);
@@ -1648,7 +1727,7 @@ export class ReferenceExtractor {
         const cacheHit = this.locationSearchSource === sql;
         const searchableSql = cacheHit
             ? this.locationSearchSql
-            : this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(sql));
+            : this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(sql, this.getCommentMaskOptions()));
         const statementBoundaries = cacheHit
             ? this.locationStatementBoundaries
             : this.getStatementBoundaries(searchableSql);
@@ -1808,8 +1887,22 @@ export class ReferenceExtractor {
         return depth === 0 && fromListActive;
     }
 
+    /**
+     * Backslash escapes only exist in some dialects. Elsewhere `'\'` is a
+     * complete literal; treating it as an escape flips string parity and masks
+     * every later reference in the file.
+     */
+    private supportsBackslashEscapes(): boolean {
+        return dialectSupportsBackslashEscapes(this._activeDialect);
+    }
+
+    private getCommentMaskOptions(): StripSqlCommentsOptions {
+        return { backslashEscapes: this.supportsBackslashEscapes() };
+    }
+
     /** Mask value literals while retaining delimited identifiers and offsets. */
     private maskSqlStringLiterals(sql: string): string {
+        const backslashEscapes = this.supportsBackslashEscapes();
         const masked = sql.split('');
         const blankRange = (start: number, end: number): void => {
             for (let index = start; index < end; index++) {
@@ -1821,6 +1914,7 @@ export class ReferenceExtractor {
 
         for (let index = 0; index < sql.length;) {
             if (sql[index] === "'") {
+                const escapesAllowed = quotedStringAllowsBackslashEscapes(sql, index, backslashEscapes);
                 const start = index++;
                 while (index < sql.length) {
                     if (sql[index] === "'" && sql[index + 1] === "'") {
@@ -1828,7 +1922,7 @@ export class ReferenceExtractor {
                     } else if (sql[index] === "'") {
                         index++;
                         break;
-                    } else if (sql[index] === '\\' && index + 1 < sql.length) {
+                    } else if (escapesAllowed && sql[index] === '\\' && index + 1 < sql.length) {
                         index += 2;
                     } else {
                         index++;
@@ -1859,7 +1953,7 @@ export class ReferenceExtractor {
         const cacheHit = this.locationSearchSource === sql;
         const searchableSql = cacheHit
             ? this.locationSearchSql
-            : this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(sql));
+            : this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(sql, this.getCommentMaskOptions()));
         const statementBoundaries = cacheHit
             ? this.locationStatementBoundaries
             : this.getStatementBoundaries(searchableSql);
@@ -1935,7 +2029,7 @@ export class ReferenceExtractor {
         const functionFromKeywords = ['extract', 'substring', 'trim', 'position'];
 
         // Strip comments to prevent false matches like "UPDATE without WHERE" in comments
-        const sqlNoComments = this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(sql));
+        const sqlNoComments = this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(sql, this.getCommentMaskOptions()));
 
         const statementBoundaries = this.getStatementBoundaries(sqlNoComments);
         const lineStarts = [0];
@@ -2156,7 +2250,7 @@ export class ReferenceExtractor {
         const cacheHit = this.locationSearchSource === sql;
         const searchableSql = cacheHit
             ? this.locationSearchSql
-            : this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(sql));
+            : this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(sql, this.getCommentMaskOptions()));
         const statementBoundaries = cacheHit
             ? this.locationStatementBoundaries
             : this.getStatementBoundaries(searchableSql);

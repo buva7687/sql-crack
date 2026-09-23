@@ -135,7 +135,7 @@ function maskSqlCommentsPreservingPositions(sql: string): string {
             /[a-zA-Z0-9_]/.test(sql[index + 1] || '') ||
             (sql[index + 1] === '#' && /[a-zA-Z0-9_]/.test(sql[index + 2] || ''))
         );
-        if (char === '#' && !isTempTableIdentifier) {
+        if (char === '#' && !isTempTableIdentifier && sql[index + 1] !== '>') {
             const commentStart = index;
             while (index < sql.length && sql[index] !== '\n' && sql[index] !== '\r') {
                 index++;

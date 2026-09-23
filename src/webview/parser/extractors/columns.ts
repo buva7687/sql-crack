@@ -96,8 +96,20 @@ export function formatExpressionFromAst(expr: any, options: ExpressionFormatOpti
         return `${funcName}(${argsStr})`;
     }
 
+    // IN (...) / BETWEEN operands arrive as an expr_list whose value is an
+    // array of AST nodes; String() on it renders "[object Object],...".
+    if (expr.type === 'expr_list') {
+        const items = Array.isArray(expr.value) ? expr.value : [];
+        return `(${items.map((item: any) => formatExpressionFromAst(item, options)).join(', ')})`;
+    }
+
     if (expr.type === 'binary_expr') {
         const left = formatExpressionFromAst(expr.left, options);
+        if (/BETWEEN$/i.test(String(expr.operator)) && expr.right?.type === 'expr_list'
+            && Array.isArray(expr.right.value) && expr.right.value.length === 2) {
+            const [low, high] = expr.right.value.map((item: any) => formatExpressionFromAst(item, options));
+            return `${left} ${expr.operator} ${low} AND ${high}`;
+        }
         const right = formatExpressionFromAst(expr.right, options);
         return `${left} ${expr.operator || '?'} ${right}`;
     }

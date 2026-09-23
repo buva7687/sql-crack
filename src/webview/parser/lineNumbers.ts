@@ -1,7 +1,7 @@
 // Line number extraction and assignment for nodes
 
 import { FlowNode } from '../types';
-import { escapeRegex } from '../../shared';
+import { escapeRegex, isPostgresJsonPathOperatorAt } from '../../shared';
 
 function stripCommentsPreserveLineNumbers(sql: string): string {
     const chars = sql.split('');
@@ -35,7 +35,7 @@ function stripCommentsPreserveLineNumbers(sql: string): string {
             continue;
         }
 
-        if (chars[i] === '#') {
+        if (chars[i] === '#' && !isPostgresJsonPathOperatorAt(sql, i)) {
             const next = i + 1 < chars.length ? chars[i + 1] : '';
             const isIdentChar = /[a-zA-Z0-9_]/.test(next);
             if (!isIdentChar) {
