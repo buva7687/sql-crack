@@ -35,7 +35,7 @@ export type SqlFlowWebviewMessage =
 // ─── Host → Webview messages ───
 
 export type SqlFlowHostMessage =
-    | { command: 'refresh'; sql: string; options: { dialect: string; fileName: string } }
+    | { command: 'refresh'; sql: string; options: { dialect: string; fileName: string }; documentKey?: string | null }
     | { command: 'cursorPosition'; line: number }
     | { command: 'switchToQuery'; queryIndex: number }
     | { command: 'markStale' }
@@ -46,4 +46,4 @@ export type SqlFlowHostMessage =
     }
     | { command: 'setEditorActivity'; isSqlLikeActiveEditor: boolean }
     | { command: 'viewLocationOptions'; currentLocation: ViewLocation; pinnedTabs: PinnedVisualizationInfo[] }
-    | { command: 'pinCreated'; pinId: string };
+    | { command: 'pinCreated'; pinId: string; pinnedTabs: PinnedVisualizationInfo[] };

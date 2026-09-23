@@ -1649,6 +1649,8 @@ export function render(result: ParseResult, options?: RenderOptions): void {
         clearSearch();
         clearBreadcrumbBar();
         highlightedLineNodeId = null;
+        // Focus mode and column lineage were reset above; let toolbar toggles resync.
+        notifyRendererStateChanged();
     }
 
     currentNodes = result.nodes;
@@ -3207,6 +3209,10 @@ function applyFocusMode(nodeId: string): void {
 
 function clearFocusMode(): void {
     clearFocusModeFeature({ mainGroup, state });
+    // Escape and "clear" paths turn focus off without toggleFocusMode(); keep
+    // the Focus chip and toolbar button in sync with the renderer state.
+    removeBreadcrumbSegment('focus-mode');
+    notifyRendererStateChanged();
 }
 
 export function setFocusMode(mode: FocusMode): void {

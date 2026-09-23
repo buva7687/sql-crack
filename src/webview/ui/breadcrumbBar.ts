@@ -151,6 +151,9 @@ function renderSegments(): void {
 
     if (currentSegments.length === 0) {
         barElement.style.display = 'none';
+        // Clear stale chips so a later display change (e.g. leaving
+        // fullscreen) cannot reveal filters that are no longer active.
+        barElement.innerHTML = '';
         return;
     }
 

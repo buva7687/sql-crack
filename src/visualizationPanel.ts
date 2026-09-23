@@ -313,7 +313,10 @@ export class VisualizationPanel {
             VisualizationPanel.currentPanel._postMessage({
                 command: 'refresh',
                 sql: sqlCode,
-                options: options
+                options: options,
+                // Lets the webview keep the selected query across refreshes of
+                // the same document while resetting it for a different one.
+                documentKey: options.documentUri?.toString() ?? options.fileName ?? null
             });
             VisualizationPanel.currentPanel._currentSql = sqlCode;
             VisualizationPanel.currentPanel._currentOptions = options;
@@ -482,7 +485,8 @@ export class VisualizationPanel {
                             );
                             this._postMessage({
                                 command: 'pinCreated',
-                                pinId: pinId
+                                pinId: pinId,
+                                pinnedTabs: VisualizationPanel.getPinnedTabs()
                             });
                             vscode.window.showInformationMessage(`Pinned: ${message.name || this._currentOptions.fileName}`);
                         } else {
@@ -920,6 +924,7 @@ export class VisualizationPanel {
         window.defaultDialect = ${this._escapeForInlineScript(options.dialect)};
         window.autoDetectDialect = ${this._escapeForInlineScript(runtimeConfig.autoDetectDialect)};
         window.fileName = ${this._escapeForInlineScript(options.fileName)};
+        window.documentKey = ${this._escapeForInlineScript(options.documentUri?.toString() ?? options.fileName ?? null)};
         window.isPinnedView = ${this._escapeForInlineScript(this._isPinned)};
         window.pinId = ${this._escapeForInlineScript(this._pinId || null)};
         window.viewLocation = ${this._escapeForInlineScript(runtimeConfig.viewLocation)};

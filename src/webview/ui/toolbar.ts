@@ -36,10 +36,14 @@ export interface ToolbarCallbacks {
     onCopyMermaidToClipboard?: () => void;
     onToggleLegend: () => void;
     onToggleFocusMode: (active: boolean) => void;
+    /** Renderer focus-mode state; keeps the toolbar button in sync with keyboard and command-bar toggles. */
+    isFocusModeEnabled?: () => boolean;
     onFocusModeChange: (mode: FocusMode) => void;
     getFocusMode: () => FocusMode;
     onToggleSqlPreview: () => void;
     onToggleColumnFlows: (active: boolean) => void;
+    /** Renderer column-lineage state; keeps the toolbar button in sync with keyboard and command-bar toggles. */
+    isColumnFlowsVisible?: () => boolean;
     onToggleHints: () => void;
     onToggleTheme: () => void;
     onToggleFullscreen: () => void;

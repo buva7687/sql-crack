@@ -64,7 +64,7 @@ const makeBatch = (prefix: string, count: number) => ({
     parseErrors: [],
 });
 
-describe('webview deferred hydration during refresh (H11)', () => {
+describe('webview refresh query state (H11, M15)', () => {
     const originalWindow = (global as any).window;
     const originalDocument = (global as any).document;
     const originalRequestAnimationFrame = (global as any).requestAnimationFrame;
@@ -88,7 +88,7 @@ describe('webview deferred hydration during refresh (H11)', () => {
         jest.resetModules();
     });
 
-    it('does not write a hydration started before the refreshed result into that result', async () => {
+    const bootWebview = () => {
         const batchCalls: Array<{ sql: string; result: Deferred<unknown> }> = [];
         const parseBatchAsync = jest.fn((sql: string) => {
             const result = deferred<unknown>();
@@ -108,10 +108,12 @@ describe('webview deferred hydration during refresh (H11)', () => {
             getCurrentLayout: jest.fn(() => 'vertical'),
             isDarkTheme: jest.fn(() => true),
         }));
-        jest.doMock('../../../src/webview/ui', () => proxyModule({
+        const ui = {
             createToolbar: jest.fn(() => ({ cleanup: jest.fn() })),
             isCompareViewActive: jest.fn(() => false),
-        }));
+            showCompareView: jest.fn(),
+        };
+        jest.doMock('../../../src/webview/ui', () => proxyModule(ui));
         jest.doMock('../../../src/webview/hintActions', () => proxyModule());
         jest.doMock('../../../src/webview/state/persistedViewState', () => proxyModule({
             readPersistedUiState: jest.fn(() => null),
@@ -164,6 +166,12 @@ describe('webview deferred hydration during refresh (H11)', () => {
             }
         };
         const send = (data: unknown) => messageHandler!({ data });
+        const toolbarCallbacks = () => (ui.createToolbar.mock.calls[0] as unknown[] | undefined)?.[1] as any;
+        return { batchCalls, render, send, settle, ui, toolbarCallbacks };
+    };
+
+    it('does not write a hydration started before the refreshed result into that result', async () => {
+        const { batchCalls, render, send, settle } = bootWebview();
         const options = { dialect: 'MySQL', fileName: 'big.sql' };
 
         // 1. Initial result A: 60 statements, so queries 1..59 are compacted.
@@ -186,15 +194,79 @@ describe('webview deferred hydration during refresh (H11)', () => {
         hydrationOfA!.result.resolve({ ...makeBatch('a1-hydrated', 1), queries: [makeQuery('SELECT a1 FROM t;')] });
         await settle();
 
-        // 4. Opening query 2 of result B must hydrate B's statement, not show A's.
+        // 4. Result B keeps query 2 active. Re-opening it after the stale
+        //    hydration settled must still show B's statement, not A's.
+        send({ command: 'switchToQuery', queryIndex: 0 });
+        await settle();
         send({ command: 'switchToQuery', queryIndex: 1 });
         await settle();
         const hydrationOfB = batchCalls.find(call => call.sql === 'SELECT b1 FROM t;');
-        expect(hydrationOfB).toBeDefined();
-        hydrationOfB!.result.resolve({ ...makeBatch('b1-hydrated', 1), queries: [makeQuery('SELECT b1 FROM t;')] });
-        await settle();
+        if (hydrationOfB) {
+            hydrationOfB.result.resolve({ ...makeBatch('b1-hydrated', 1), queries: [makeQuery('SELECT b1 FROM t;')] });
+            await settle();
+        }
 
         const lastRendered = render.mock.calls[render.mock.calls.length - 1]?.[0];
         expect(lastRendered?.sql).toBe('SELECT b1 FROM t;');
+        expect(render.mock.calls.some(([result]) => result?.sql === 'SELECT a1 FROM t;')).toBe(false);
+    });
+
+    it('keeps the selected query across refreshes of the same document and resets for another (M15)', async () => {
+        const { batchCalls, render, send, settle } = bootWebview();
+        const refresh = async (sql: string, documentKey: string, prefix: string, count: number) => {
+            send({ command: 'refresh', sql, options: { dialect: 'MySQL', fileName: 'q.sql' }, documentKey });
+            await settle();
+            batchCalls.filter(call => call.sql === sql).pop()!.result.resolve(makeBatch(prefix, count));
+            await settle();
+        };
+        const lastRenderedSql = () => render.mock.calls[render.mock.calls.length - 1]?.[0]?.sql;
+
+        await refresh('v1', 'file:///a.sql', 'v1_', 4);
+        send({ command: 'switchToQuery', queryIndex: 2 });
+        await settle();
+        expect(lastRenderedSql()).toBe('SELECT v1_2 FROM t;');
+
+        // Editing the same document (auto-refresh) stays on Q3.
+        await refresh('v2', 'file:///a.sql', 'v2_', 4);
+        expect(lastRenderedSql()).toBe('SELECT v2_2 FROM t;');
+
+        // Removing statements clamps to the last remaining query.
+        await refresh('v3', 'file:///a.sql', 'v3_', 2);
+        expect(lastRenderedSql()).toBe('SELECT v3_1 FROM t;');
+
+        // A different document starts at Q1.
+        await refresh('other', 'file:///b.sql', 'b_', 4);
+        expect(lastRenderedSql()).toBe('SELECT b_0 FROM t;');
+    });
+
+    it('uses pins created after page load as the Compare baseline (M11)', async () => {
+        const { batchCalls, send, settle, ui, toolbarCallbacks } = bootWebview();
+        (global as any).alert = jest.fn();
+        send({ command: 'refresh', sql: 'one', options: { dialect: 'MySQL', fileName: 'q.sql' }, documentKey: 'file:///q.sql' });
+        await settle();
+        batchCalls[0].result.resolve(makeBatch('cur', 1));
+        await settle();
+
+        send({
+            command: 'pinCreated',
+            pinId: 'pin-1',
+            pinnedTabs: [{ id: 'pin-1', name: 'Earlier', sql: 'SELECT pinned FROM t;', dialect: 'MySQL', timestamp: 1 }],
+        });
+        toolbarCallbacks().onToggleCompareMode();
+        await settle();
+
+        expect((global as any).alert).not.toHaveBeenCalled();
+        expect(ui.showCompareView).toHaveBeenCalledWith(expect.objectContaining({
+            left: expect.objectContaining({ label: 'Pinned • Earlier' }),
+        }));
+
+        // After unpinning, that pin is no longer offered as a baseline.
+        ui.showCompareView.mockClear();
+        send({ command: 'viewLocationOptions', currentLocation: 'tab', pinnedTabs: [] });
+        toolbarCallbacks().onToggleCompareMode();
+        await settle();
+        expect(ui.showCompareView).not.toHaveBeenCalled();
+        expect((global as any).alert).toHaveBeenCalled();
+        delete (global as any).alert;
     });
 });

@@ -144,6 +144,8 @@ declare global {
         defaultDialect?: string;
         autoDetectDialect?: boolean;
         fileName?: string;
+        /** Source document identity (URI, else file name) for the current SQL. */
+        documentKey?: string | null;
         isPinnedView?: boolean;
         pinId?: string | null;
         viewLocation?: string;
@@ -1008,7 +1010,7 @@ function setupVSCodeMessageListener(): void {
             const message = event.data;
             switch (message.command) {
                 case 'refresh':
-                    handleRefresh(message.sql, message.options);
+                    handleRefresh(message.sql, message.options, message.documentKey);
                     break;
                 case 'cursorPosition':
                     void handleCursorPosition(message.line);
@@ -1027,8 +1029,13 @@ function setupVSCodeMessageListener(): void {
                     syncRefreshButtonState();
                     break;
                 case 'viewLocationOptions':
-                    break;
                 case 'pinCreated':
+                    // The host sends the current pin list after pin/unpin so
+                    // Compare picks its baseline from real pins, not the list
+                    // captured when this page was built.
+                    if (Array.isArray(message.pinnedTabs)) {
+                        window.persistedPinnedTabs = message.pinnedTabs;
+                    }
                     break;
             }
         } catch (err) {
@@ -1037,8 +1044,20 @@ function setupVSCodeMessageListener(): void {
     });
 }
 
-function handleRefresh(sql: string, options: { dialect: string; fileName: string }): void {
+function handleRefresh(
+    sql: string,
+    options: { dialect: string; fileName: string },
+    documentKey?: string | null
+): void {
     window.initialSqlCode = sql;
+    // Refreshes of the same document keep the selected query (visualize()
+    // clamps it to the new statement count); a different document starts at Q1.
+    const nextDocumentKey = documentKey ?? options.fileName ?? null;
+    if (nextDocumentKey !== (window.documentKey ?? window.fileName ?? null)) {
+        currentQueryIndex = 0;
+    }
+    window.documentKey = nextDocumentKey;
+    window.fileName = options.fileName;
     if (!userExplicitlySetDialect) {
         currentDialect = options.dialect as SqlDialect;
     }
@@ -1425,6 +1444,8 @@ function createToolbarCallbacks(): ToolbarCallbacks {
             toggleColumnFlows(show);
             schedulePersistUiState();
         },
+        isFocusModeEnabled,
+        isColumnFlowsVisible,
         onToggleHints: (show?: boolean) => {
             toggleHints(show);
             schedulePersistUiState();
@@ -1490,6 +1511,7 @@ function createToolbarCallbacks(): ToolbarCallbacks {
             }
         },
         onUnpinTab: (pinId: string) => {
+            window.persistedPinnedTabs = (window.persistedPinnedTabs || []).filter(pin => pin.id !== pinId);
             if (window.vscodeApi) {
                 window.vscodeApi.postMessage({
                     command: 'unpinTab',
@@ -1510,6 +1532,8 @@ function createToolbarCallbacks(): ToolbarCallbacks {
 
 async function visualize(sql: string): Promise<void> {
     const requestId = ++parseRequestId;
+    // Error and empty results below have a single entry, so they fall back to Q1.
+    let retainedQueryIndex = 0;
     cancelQueryLoading();
 
     // Clear view states when loading new SQL
@@ -1598,7 +1622,10 @@ async function visualize(sql: string): Promise<void> {
         if (requestId !== parseRequestId) {
             return;
         }
-        compactBatchResultMemory(result, 0, runtimeConfig.deferredQueryThreshold);
+        // Keep the query the user is on (including a switch made while this
+        // parse ran), clamped to the new statement count.
+        retainedQueryIndex = clampQueryIndex(currentQueryIndex, result.queries.length);
+        compactBatchResultMemory(result, retainedQueryIndex, runtimeConfig.deferredQueryThreshold);
         batchResult = result;
     } catch (error) {
         if (requestId !== parseRequestId) {
@@ -1686,11 +1713,18 @@ async function visualize(sql: string): Promise<void> {
         clearDialectSwitchSuggestion();
     }
 
-    currentQueryIndex = 0;
+    currentQueryIndex = clampQueryIndex(retainedQueryIndex, batchResult?.queries.length ?? 0);
     updateBatchTabsUI();
     renderCurrentQuery();
     await applyInitialUiStateIfAvailable();
     schedulePersistUiState();
+}
+
+function clampQueryIndex(index: number, queryCount: number): number {
+    if (!Number.isInteger(index) || index < 0 || queryCount <= 0) {
+        return 0;
+    }
+    return Math.min(index, queryCount - 1);
 }
 
 function renderCurrentQuery(): void {

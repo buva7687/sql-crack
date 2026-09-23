@@ -67,6 +67,7 @@ export function createFeatureGroupElement(deps: FeatureGroupDeps): HTMLElement {
     refreshBtn.id = 'refresh-btn';
     refreshBtn.title = 'Refresh visualization';
     refreshBtn.dataset.overflowIcon = ICONS.refresh;
+    refreshBtn.dataset.compareSafe = 'true';
     featureGroup.appendChild(refreshBtn);
 
     const hintsSummaryBtn = createButton(createHintsBadgeMarkup('OK'), callbacks.onToggleHints, 'Show optimization hints');
@@ -88,6 +89,7 @@ export function createFeatureGroupElement(deps: FeatureGroupDeps): HTMLElement {
             getListenerOptions,
             getBtnStyle,
         });
+        viewLocBtn.dataset.compareSafe = 'true';
         featureGroup.appendChild(viewLocBtn);
 
         const pinBtn = createButton(ICONS.pin, () => {
@@ -97,6 +99,7 @@ export function createFeatureGroupElement(deps: FeatureGroupDeps): HTMLElement {
         pinBtn.title = 'Pin visualization as new tab';
         pinBtn.style.borderLeft = `1px solid ${borderColor}`;
         pinBtn.dataset.overflowIcon = ICONS.pin;
+        pinBtn.dataset.compareSafe = 'true';
         featureGroup.appendChild(pinBtn);
 
         if (options.persistedPinnedTabs.length > 0) {
@@ -105,6 +108,7 @@ export function createFeatureGroupElement(deps: FeatureGroupDeps): HTMLElement {
                 getListenerOptions,
                 getBtnStyle,
             });
+            pinsBtn.dataset.compareSafe = 'true';
             featureGroup.appendChild(pinsBtn);
         }
     } else {
@@ -150,6 +154,7 @@ export function createFeatureGroupElement(deps: FeatureGroupDeps): HTMLElement {
             pinnedContainer.appendChild(unpinBtn);
         }
 
+        pinnedContainer.dataset.compareSafe = 'true';
         featureGroup.appendChild(pinnedContainer);
     }
 
@@ -172,6 +177,7 @@ export function createFeatureGroupElement(deps: FeatureGroupDeps): HTMLElement {
         compareBtn.style.color = active ? (dark ? '#a5b4fc' : '#4f46e5') : (dark ? '#f1f5f9' : '#1e293b');
     };
     setCompareButtonState(callbacks.isCompareMode());
+    compareBtn.dataset.compareSafe = 'true';
     featureGroup.appendChild(compareBtn);
 
     const compareStateHandler = ((event: CustomEvent) => {
@@ -180,11 +186,21 @@ export function createFeatureGroupElement(deps: FeatureGroupDeps): HTMLElement {
     document.addEventListener('compare-mode-state', compareStateHandler, listenerOptions);
     documentListeners.push({ type: 'compare-mode-state', handler: compareStateHandler });
 
+    // Toggle state comes from the renderer when available: C/U/D/A keys, the
+    // command bar, Escape, breadcrumb chips, and query switches all change it
+    // without clicking these buttons.
     let focusModeActive = false;
-    const focusBtn = createButton(ICONS.eye, () => {
-        focusModeActive = !focusModeActive;
-        callbacks.onToggleFocusMode(focusModeActive);
+    const readFocusModeActive = (): boolean => callbacks.isFocusModeEnabled?.() ?? focusModeActive;
+    const syncFocusButton = (): void => {
+        focusModeActive = readFocusModeActive();
         focusBtn.style.background = focusModeActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
+        focusBtn.setAttribute('aria-pressed', String(focusModeActive));
+    };
+    const focusBtn = createButton(ICONS.eye, () => {
+        const nextActive = !readFocusModeActive();
+        focusModeActive = nextActive;
+        callbacks.onToggleFocusMode(nextActive);
+        syncFocusButton();
     }, 'Toggle focus mode');
     focusBtn.title = 'Focus mode - highlight connected nodes';
     focusBtn.style.borderLeft = `1px solid ${borderColor}`;
@@ -207,11 +223,18 @@ export function createFeatureGroupElement(deps: FeatureGroupDeps): HTMLElement {
     featureGroup.appendChild(sqlBtn);
 
     let columnFlowActive = false;
-    const columnFlowBtn = createButton(ICONS.columnLineage, () => {
-        columnFlowActive = !columnFlowActive;
-        callbacks.onToggleColumnFlows(columnFlowActive);
+    const readColumnFlowActive = (): boolean => callbacks.isColumnFlowsVisible?.() ?? columnFlowActive;
+    const syncColumnFlowButton = (): void => {
+        columnFlowActive = readColumnFlowActive();
         columnFlowBtn.style.background = columnFlowActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent';
-        columnFlowBtn.style.color = columnFlowActive ? '#818cf8' : '';
+        columnFlowBtn.style.color = columnFlowActive ? '#818cf8' : mutedText;
+        columnFlowBtn.setAttribute('aria-pressed', String(columnFlowActive));
+    };
+    const columnFlowBtn = createButton(ICONS.columnLineage, () => {
+        const nextActive = !readColumnFlowActive();
+        columnFlowActive = nextActive;
+        callbacks.onToggleColumnFlows(nextActive);
+        syncColumnFlowButton();
         if (columnFlowActive && !lineagePulseApplied && !prefersReducedMotion()) {
             lineagePulseApplied = true;
             if (!document.getElementById(LINEAGE_PULSE_STYLE_ID)) {
@@ -235,6 +258,13 @@ export function createFeatureGroupElement(deps: FeatureGroupDeps): HTMLElement {
     columnFlowBtn.dataset.overflowIcon = ICONS.columnLineage;
     featureGroup.appendChild(columnFlowBtn);
 
+    const rendererStateHandler = (() => {
+        syncFocusButton();
+        syncColumnFlowButton();
+    }) as EventListener;
+    document.addEventListener('layout-state-changed', rendererStateHandler, listenerOptions);
+    documentListeners.push({ type: 'layout-state-changed', handler: rendererStateHandler });
+
     const themeBtn = createButton(callbacks.isDarkTheme() ? '◐' : '◑', () => {
         callbacks.onToggleTheme();
         themeBtn.innerHTML = callbacks.isDarkTheme() ? '◐' : '◑';
@@ -242,6 +272,7 @@ export function createFeatureGroupElement(deps: FeatureGroupDeps): HTMLElement {
     themeBtn.title = 'Toggle dark/light theme (T)';
     themeBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     themeBtn.dataset.overflowIcon = callbacks.isDarkTheme() ? '◐' : '◑';
+    themeBtn.dataset.compareSafe = 'true';
     featureGroup.appendChild(themeBtn);
 
     const layoutPicker = createLayoutPicker({
@@ -275,6 +306,7 @@ export function createFeatureGroupElement(deps: FeatureGroupDeps): HTMLElement {
     helpBtn.style.fontWeight = '700';
     helpBtn.style.borderLeft = '1px solid rgba(148, 163, 184, 0.2)';
     helpBtn.dataset.overflowIcon = '?';
+    helpBtn.dataset.compareSafe = 'true';
     featureGroup.appendChild(helpBtn);
     applyFirstRunHelpPulse(helpBtn, options.isFirstRun);
 
