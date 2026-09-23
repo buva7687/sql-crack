@@ -2081,6 +2081,11 @@ describe('IndexManager', () => {
         });
 
         it('coalesces rapid dialect changes into one rebuild for the latest dialect', async () => {
+            // Dialect rebuilds only apply once indexing has been authorized.
+            mockScanner.analyzeWorkspace.mockResolvedValueOnce([
+                createMockAnalysis('/users.sql', [{ name: 'users' }]),
+            ]);
+            await indexManager.buildIndex();
             mockScanner.analyzeWorkspace.mockResolvedValue([
                 createMockAnalysis('/snowflake.sql', [{ name: 'snow_orders' }]),
             ]);
@@ -2093,7 +2098,7 @@ describe('IndexManager', () => {
 
             expect(mockScanner.setDialect).toHaveBeenNthCalledWith(1, 'PostgreSQL');
             expect(mockScanner.setDialect).toHaveBeenNthCalledWith(2, 'Snowflake');
-            expect(mockScanner.analyzeWorkspace).toHaveBeenCalledTimes(1);
+            expect(mockScanner.analyzeWorkspace).toHaveBeenCalledTimes(2);
             expect(indexManager.findDefinition('snow_orders')).toBeDefined();
         });
 

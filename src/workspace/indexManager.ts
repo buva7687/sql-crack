@@ -73,6 +73,12 @@ export class IndexManager {
     private onIndexUpdated: (() => void) | null = null;
     private _configDisposable: vscode.Disposable | null = null;
     private _buildPromise: Promise<WorkspaceIndex> | null = null;
+    /**
+     * True once any full build has been requested (auto-index, explicit
+     * rebuild, or a large-workspace "Index now"). Until then the workspace is
+     * idle by the user's choice and dialect changes must not start a scan.
+     */
+    private _indexingAuthorized = false;
     private _queueProcessingPromise: Promise<void> | null = null;
     private _changesSinceIndex: number = 0;
     private _persistTimer: NodeJS.Timeout | null = null;
@@ -104,7 +110,20 @@ export class IndexManager {
         cacheState: WorkspaceCacheState;
         hasValidIndex: boolean;
     }> {
+        // The panel can be closed or re-scoped while any await below is
+        // pending; return an idle result instead of throwing "disposed" from
+        // buildIndex() into the command that opened the panel.
+        const disposedResult = (fileCount: number) => ({
+            autoIndexed: false,
+            fileCount,
+            cacheState: this._lastCacheState,
+            hasValidIndex: false,
+        });
+
         const fileCount = await this.scanner.getFileCount();
+        if (this._disposed) {
+            return disposedResult(fileCount);
+        }
         const shouldAutoIndex = fileCount < autoIndexThreshold && fileCount > 0;
 
         // Try to load cached index. loadCachedIndex() records the precise reason
@@ -112,12 +131,18 @@ export class IndexManager {
         // disabled) so callers don't have to infer it from a bare null.
         this.index = await this.loadCachedIndex(fileCount);
         const cacheState = this._lastCacheState;
+        if (this._disposed) {
+            return disposedResult(fileCount);
+        }
 
         // Auto-index small workspaces when there is no valid cache to reuse. A
         // freshly loaded valid index already passed the TTL check in
         // loadCachedIndex, so isIndexStale() only matters on the auto-build path.
         if (shouldAutoIndex && (!this.index || this.isIndexStale())) {
             await this.buildIndex();
+            if (this._disposed) {
+                return disposedResult(fileCount);
+            }
         }
 
         // A declined/manual index must remain idle. Install incremental
@@ -146,6 +171,7 @@ export class IndexManager {
         if (this._disposed) {
             throw new Error('IndexManager has been disposed');
         }
+        this._indexingAuthorized = true;
         if (this._buildPromise) {
             return this._buildPromise;
         }
@@ -623,6 +649,13 @@ export class IndexManager {
         }
         this.dialect = dialect;
         this.scanner.setDialect(dialect);
+        // Without authorized indexing (the user declined a large workspace, or
+        // indexing is manual) only record the dialect; the next explicit build
+        // uses it. Rebuilding here started an unprompted full scan. The cache
+        // identity includes the dialect, so an old-dialect cache is not reused.
+        if (!this.index && !this._indexingAuthorized) {
+            return;
+        }
         this._pendingDialectRebuildVersion += 1;
         this.scheduleDialectRebuild();
     }
@@ -810,6 +843,18 @@ export class IndexManager {
         }
     }
 
+    /** Path relative to the containing workspace folder (the absolute path when outside any folder). */
+    private getWorkspaceRelativePath(uri: vscode.Uri): string {
+        const candidatePath = this.canonicalizePathForComparison(uri.fsPath);
+        for (const folder of vscode.workspace.workspaceFolders ?? []) {
+            const folderPath = this.canonicalizePathForComparison(folder.uri.fsPath);
+            if (candidatePath.startsWith(folderPath + path.sep)) {
+                return candidatePath.slice(folderPath.length + 1);
+            }
+        }
+        return uri.fsPath;
+    }
+
     private isInScope(filePath: string): boolean {
         if (!this.scopeUri) {
             return true;
@@ -846,7 +891,10 @@ export class IndexManager {
      * do not re-index generated/dependency folders.
      */
     private shouldIndexFile(uri: vscode.Uri): boolean {
-        if (/(^|[\\/])(node_modules|\.git|dist|build)([\\/]|$)/i.test(uri.fsPath)) {
+        // Match the scanner's findFiles exclude, which applies relative to the
+        // workspace folder. Testing the absolute path ignored every change in
+        // a workspace located under e.g. ~/build/<repo>.
+        if (/(^|[\\/])(node_modules|\.git|dist|build)([\\/]|$)/i.test(this.getWorkspaceRelativePath(uri))) {
             return false;
         }
         // When scoped to a subfolder, only index files within that folder

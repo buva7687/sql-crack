@@ -309,7 +309,7 @@ describe('parser worker migration prep', () => {
     it('pinned-tab restore parse flow is cancellation-safe during rapid refresh/switch', () => {
         expect(indexSource).toContain('await switchToQueryIndex(targetIndex);');
         expect(indexSource).toContain('const hydrateToken = parseRequestId;');
-        expect(indexSource).toContain('if (batchResult && parseRequestId === hydrateToken) {');
+        expect(indexSource).toContain('if (batchResult === owningBatch && parseRequestId === hydrateToken) {');
         expect(indexSource).toContain('if (currentQueryIndex !== newIndex) {');
         expect(indexSource).toContain('if (currentQueryIndex !== newIndex) { return; }');
         expect(indexSource).toContain('if (requestId !== parseRequestId) {');

@@ -101,6 +101,14 @@ export function getPersistedWorkspaceStateScriptFragment(): string {
         }
 
         function getPersistedImpactResult() {
+            // The host drops its impact report when the index is rebuilt. A
+            // saved report would then restore stale results whose exports
+            // fail, so only restore while the host still holds the report.
+            const hostImpact = initialWorkspaceRestoreState && initialWorkspaceRestoreState.impact;
+            if (hostImpact && hostImpact.hasReport === false) {
+                clearPersistedImpactResult();
+                return { html: '', meta: null };
+            }
             const state = getWorkspacePersistedState();
             return {
                 html: typeof state.workspaceImpactResultHtml === 'string' && state.workspaceImpactResultHtml

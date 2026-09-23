@@ -827,7 +827,11 @@ async function reparseStoredQuery(queryIndex: number, fallbackMessage: string): 
     }
 
     const parseToken = parseRequestId;
-    const query = batchResult.queries[queryIndex];
+    // visualize() bumps parseRequestId before the new result replaces
+    // batchResult, so the token alone cannot tell a hydration started during
+    // a refresh apart from one for the new result. Pin the owning batch.
+    const owningBatch = batchResult;
+    const query = owningBatch.queries[queryIndex];
     const querySql = query?.sql;
     if (!querySql) {
         deferredQueryIndexes.delete(queryIndex);
@@ -850,7 +854,7 @@ async function reparseStoredQuery(queryIndex: number, fallbackMessage: string): 
             'independent'
         );
 
-        if (!batchResult || parseToken !== parseRequestId) {
+        if (batchResult !== owningBatch || parseToken !== parseRequestId) {
             return;
         }
         // A newer full parse/interaction may intentionally cancel this
@@ -873,13 +877,13 @@ async function reparseStoredQuery(queryIndex: number, fallbackMessage: string): 
             hydratedQuery.error = query.error;
         }
 
-        const lineRange = batchResult.queryLineRanges?.[queryIndex];
+        const lineRange = owningBatch.queryLineRanges?.[queryIndex];
         if (lineRange?.startLine && lineRange.startLine > 0) {
             const lineOffset = lineRange.startLine - 1;
             applyLineOffsetToResult(hydratedQuery, lineOffset);
         }
 
-        batchResult.queries[queryIndex] = hydratedQuery;
+        owningBatch.queries[queryIndex] = hydratedQuery;
         deferredQueryIndexes.delete(queryIndex);
     })();
 
@@ -887,7 +891,10 @@ async function reparseStoredQuery(queryIndex: number, fallbackMessage: string): 
     try {
         await hydrationPromise;
     } finally {
-        hydrationPromises.delete(queryIndex);
+        // A newer batch may have started its own hydration for this index.
+        if (hydrationPromises.get(queryIndex) === hydrationPromise) {
+            hydrationPromises.delete(queryIndex);
+        }
     }
 }
 
@@ -897,7 +904,8 @@ function recoverQueryVisualization(queryIndex: number): void {
     }
 
     const recoverToken = parseRequestId;
-    const querySql = batchResult.queries[queryIndex]?.sql || '';
+    const owningBatch = batchResult;
+    const querySql = owningBatch.queries[queryIndex]?.sql || '';
     const fallbackMessage = deferredQueryIndexes.has(queryIndex)
         ? 'Failed to hydrate deferred query'
         : 'Failed to recover query visualization';
@@ -905,15 +913,15 @@ function recoverQueryVisualization(queryIndex: number): void {
     const loadingToken = beginQueryLoading();
     void reparseStoredQuery(queryIndex, fallbackMessage)
         .catch((error) => {
-            if (!batchResult || parseRequestId !== recoverToken) {
+            if (batchResult !== owningBatch || parseRequestId !== recoverToken) {
                 return;
             }
             const message = error instanceof Error ? error.message : fallbackMessage;
-            batchResult.queries[queryIndex] = buildFallbackQueryErrorResult(querySql, message);
+            owningBatch.queries[queryIndex] = buildFallbackQueryErrorResult(querySql, message);
             deferredQueryIndexes.delete(queryIndex);
         })
         .finally(() => {
-            if (parseRequestId !== recoverToken || currentQueryIndex !== queryIndex) {
+            if (batchResult !== owningBatch || parseRequestId !== recoverToken || currentQueryIndex !== queryIndex) {
                 return;
             }
             endQueryLoading(loadingToken);
@@ -1336,10 +1344,13 @@ async function toggleCompareMode(): Promise<void> {
 
     const compareToken = parseRequestId;
     const compareQueryIndex = currentQueryIndex;
+    const owningBatch = batchResult;
     const baselineResult = await parseAsync(baseline.sql, baseline.dialect, {
         allowDialectFallback: isDialectAutoDetectionEnabled(),
     }, 'independent');
-    if (!batchResult || compareToken !== parseRequestId || currentQueryIndex !== compareQueryIndex) {
+    // currentQuery belongs to owningBatch; a refresh that finished meanwhile
+    // would otherwise show the old statement beside the new graph.
+    if (batchResult !== owningBatch || compareToken !== parseRequestId || currentQueryIndex !== compareQueryIndex) {
         return;
     }
     const currentTitle = batchResult.queries.length > 1
@@ -1749,20 +1760,23 @@ async function performSwitchToQueryIndex(newIndex: number, options: { skipSaveCu
     if (deferredQueryIndexes.has(newIndex)) {
         const loadingToken = beginQueryLoading();
         const hydrateToken = parseRequestId;
+        const owningBatch = batchResult;
         try {
             await hydrateQueryIfNeeded(newIndex);
         } catch (error) {
-            // Only mutate if this is still the same parse cycle
-            if (batchResult && parseRequestId === hydrateToken) {
-                const querySql = batchResult.queries[newIndex]?.sql || '';
+            // Only mutate if this is still the same parse cycle and result
+            if (batchResult === owningBatch && parseRequestId === hydrateToken) {
+                const querySql = owningBatch.queries[newIndex]?.sql || '';
                 const msg = error instanceof Error ? error.message : 'Failed to load query details';
-                batchResult.queries[newIndex] = buildFallbackQueryErrorResult(querySql, msg);
+                owningBatch.queries[newIndex] = buildFallbackQueryErrorResult(querySql, msg);
+                deferredQueryIndexes.delete(newIndex);
             }
-            deferredQueryIndexes.delete(newIndex);
         } finally {
             endQueryLoading(loadingToken);
         }
-        if (currentQueryIndex !== newIndex) {
+        // A refresh replaced the result while this query was loading; the
+        // new result's visualize() owns rendering from here.
+        if (currentQueryIndex !== newIndex || batchResult !== owningBatch) {
             return;
         }
     } else {

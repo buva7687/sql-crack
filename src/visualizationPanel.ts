@@ -458,7 +458,9 @@ export class VisualizationPanel {
                         this._goToLine(message.line);
                         return;
                     case 'traceInWorkspaceLineage':
-                        void this._traceInWorkspaceLineage(message.tableName, message.nodeType);
+                        this._traceInWorkspaceLineage(message.tableName, message.nodeType).catch(error => {
+                            logger.warn(`[VisualizationPanel] Failed to trace in workspace lineage: ${error instanceof Error ? error.message : String(error)}`);
+                        });
                         return;
                     case 'requestFullscreen':
                         // VS Code doesn't support programmatic fullscreen, but we can maximize the panel
