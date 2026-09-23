@@ -27,6 +27,7 @@ export function getKeyboardShortcutsFeature(): KeyboardShortcut[] {
         { key: 'E', description: 'Expand/collapse all CTEs & subqueries' },
         { key: 'Esc', description: 'Close panels / Exit fullscreen / Fit to view' },
         { key: 'Enter', description: 'Next search result' },
+        { key: 'Shift + Enter', description: 'Previous search result' },
         { key: '↑', description: 'Navigate to upstream node' },
         { key: '↓', description: 'Navigate to downstream node' },
         { key: '←/→', description: 'Cycle sibling nodes at same depth' },

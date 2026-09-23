@@ -186,6 +186,8 @@ export function setupOverflowObserver(
         for (const { btn, label, icon } of hiddenButtons) {
             const row = document.createElement('div');
             row.setAttribute('data-overflow-row', 'true');
+            row.setAttribute('role', 'menuitem');
+            row.setAttribute('tabindex', '-1');
             row.style.cssText = `
                 padding: 8px 12px;
                 cursor: pointer;

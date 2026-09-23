@@ -72,7 +72,9 @@ function findAll(element: FakeElement, selector: string): FakeElement[] {
 }
 
 function createElement(tagName: string): FakeElement {
-    const listeners = new Map<string, Listener>();
+    // Real elements keep every listener per event type; menus attach both
+    // their own toggle and the shared keyboard/aria wiring to the trigger.
+    const listeners = new Map<string, Listener[]>();
     const attributes = new Map<string, string>();
     const styleState = {
         cssText: '',
@@ -181,7 +183,7 @@ function createElement(tagName: string): FakeElement {
             return child;
         }),
         addEventListener: jest.fn((type: string, handler: Listener) => {
-            listeners.set(type, handler);
+            listeners.set(type, [...(listeners.get(type) || []), handler]);
         }),
         setAttribute: jest.fn((name: string, value: string) => {
             attributes.set(name, value);
@@ -198,10 +200,7 @@ function createElement(tagName: string): FakeElement {
             element.parent = null;
         }),
         emit(type: string, event: any = {}) {
-            const listener = listeners.get(type);
-            if (listener) {
-                listener(event);
-            }
+            (listeners.get(type) || []).forEach(listener => listener(event));
         },
     };
     return element;
@@ -222,6 +221,8 @@ function setupDomHarness() {
     global.window = {
         innerWidth: 500,
         addEventListener: jest.fn(),
+        // Menu keyboard wiring defers focusing the first item; not exercised here.
+        setTimeout: jest.fn(),
     } as unknown as Window & typeof globalThis;
 
     return {

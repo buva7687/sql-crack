@@ -1849,6 +1849,10 @@ export function getGraphStyles(): string {
 
         /* ========== Graph Container ========== */
         /* Container for the graph SVG - matches Lineage view structure */
+        #graph-container:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: -2px;
+        }
         #graph-container {
             width: 100%;
             height: 100%;

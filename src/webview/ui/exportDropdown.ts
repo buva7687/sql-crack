@@ -5,6 +5,7 @@ import { getComponentUiColors } from '../constants';
 import { MONO_FONT_STACK } from '../../shared/themeTokens';
 import { prefersReducedMotion } from './motion';
 import { disposeExportPreview } from './exportPreview';
+import { attachMenuKeyboardNavigation } from './menuKeyboard';
 
 export interface ExportDropdownCallbacks {
     onOpenExportPreview: (format: 'png' | 'svg' | 'pdf') => void;
@@ -80,9 +81,10 @@ export function createExportDropdown(
     const textColor = theme.textBright;
     const hoverBg = theme.hover;
 
-    const modKey = navigator.platform?.includes('Mac') ? '⌘' : 'Ctrl+';
+    // No keyboard shortcut is bound to copy (Cmd/Ctrl+C must keep copying
+    // selected text), so the row does not advertise one.
     const items = [
-        { label: 'Copy to clipboard (PNG)', shortcut: `${modKey}C`, action: callbacks.onCopyToClipboard },
+        { label: 'Copy to clipboard (PNG)', shortcut: '', action: callbacks.onCopyToClipboard },
         { label: 'PNG Preview', shortcut: '', action: () => callbacks.onOpenExportPreview('png') },
         { label: 'SVG Preview', shortcut: '', action: () => callbacks.onOpenExportPreview('svg') },
         { label: 'PDF Preview', shortcut: '', action: () => callbacks.onOpenExportPreview('pdf') },
@@ -183,6 +185,7 @@ export function createExportDropdown(
     // Append dropdown to body so it escapes overflow:hidden clipping
     document.body.appendChild(dropdown);
     dropdownElement = dropdown;
+    attachMenuKeyboardNavigation({ trigger: btn, menu: dropdown, isOpen: () => isOpen, close: closeDropdown });
 
     // Theme update listener — update all colors including row text
     document.addEventListener('theme-change', ((e: CustomEvent) => {

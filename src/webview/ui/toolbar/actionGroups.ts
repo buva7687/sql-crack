@@ -3,6 +3,7 @@ import { Z_INDEX } from '../../../shared/zIndex';
 import { applyOverflowMenuTheme, getOverflowPalette } from './overflowMenu';
 import type { ToolbarCallbacks } from '../toolbar';
 import { createToolbarButton } from './buttonFactory';
+import { attachMenuKeyboardNavigation } from '../menuKeyboard';
 
 export interface ToolbarActionOptions {
     isPinnedView: boolean;
@@ -183,6 +184,14 @@ export function createActionButtons(deps: ActionGroupsDeps): ActionButtonsResult
         }
     }, listenerOptions);
 
+    attachMenuKeyboardNavigation({
+        trigger: overflowBtn,
+        menu: overflowDropdown,
+        isOpen: () => overflowDropdown.style.display === 'block',
+        close: () => { overflowDropdown.style.display = 'none'; },
+        listenerOptions,
+    });
+
     const overflowClickHandler = () => {
         overflowDropdown.style.display = 'none';
     };
@@ -266,6 +275,14 @@ function createZoomGroup(
     zoomLevel.setAttribute('aria-live', 'polite');
     zoomLevel.setAttribute('aria-atomic', 'true');
     zoomGroup.appendChild(zoomLevel);
+
+    // The label color was fixed at creation; after a theme toggle it kept the
+    // other theme's muted color (e.g. #94a3b8 on white, ~2.6:1).
+    const zoomLevelThemeHandler = ((event: CustomEvent<{ dark: boolean }>) => {
+        zoomLevel.style.color = event.detail?.dark ? '#94a3b8' : '#64748b';
+    }) as EventListener;
+    document.addEventListener('theme-change', zoomLevelThemeHandler, listenerOptions);
+    documentListeners.push({ type: 'theme-change', handler: zoomLevelThemeHandler });
 
     const zoomInBtn = createToolbarButton({
         label: '+',

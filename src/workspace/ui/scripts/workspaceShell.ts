@@ -107,19 +107,34 @@ export function getWorkspaceShellScriptFragment(): string {
                 return;
             }
 
+            // Node navigation keys belong to the graph. Only take Tab when focus
+            // is on the graph itself, and leave Enter/arrows alone while a
+            // toolbar button, tab, or menu item has focus; otherwise keyboard
+            // users could never reach the page controls.
+            const graphContainer = document.getElementById('graph-container');
+            const focusInGraph = !!(graphContainer && activeEl && (activeEl === graphContainer || graphContainer.contains(activeEl)));
+            const focusOnPage = !activeEl || activeEl === document.body || activeEl === document.documentElement;
+
             // Tab: Cycle through nodes in visual left-to-right, top-to-bottom order
             if (e.key === 'Tab') {
-                e.preventDefault();
+                if (!focusInGraph) return;
                 const allNodes = getNodesSortedByPosition();
                 if (allNodes.length === 0) return;
                 const currentIdx = selectedNodeId
                     ? allNodes.findIndex(function(n) { return n.getAttribute('data-id') === selectedNodeId; })
                     : -1;
-                const nextIdx = e.shiftKey
-                    ? (currentIdx <= 0 ? allNodes.length - 1 : currentIdx - 1)
-                    : (currentIdx + 1) % allNodes.length;
+                // Let focus leave the graph after the last node (or before the first).
+                if ((!e.shiftKey && currentIdx === allNodes.length - 1) || (e.shiftKey && currentIdx <= 0)) {
+                    return;
+                }
+                e.preventDefault();
+                const nextIdx = e.shiftKey ? currentIdx - 1 : currentIdx + 1;
                 updateSelectionPanel(allNodes[nextIdx]);
                 scrollNodeIntoView(allNodes[nextIdx]);
+                return;
+            }
+
+            if (!focusInGraph && !focusOnPage) {
                 return;
             }
 

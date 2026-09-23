@@ -6,6 +6,7 @@ import type { LayoutType } from '../types';
 import { getComponentUiColors } from '../constants';
 import { ICONS } from '../../shared/icons';
 import { MONO_FONT_STACK } from '../../shared/themeTokens';
+import { attachMenuKeyboardNavigation } from './menuKeyboard';
 
 export interface LayoutPickerCallbacks {
     onLayoutChange: (layout: LayoutType) => void;
@@ -106,6 +107,13 @@ export function createLayoutPicker(
 
     // Append dropdown to body so it escapes overflow:hidden clipping
     document.body.appendChild(dropdown);
+    attachMenuKeyboardNavigation({
+        trigger: btn,
+        menu: dropdown,
+        isOpen: () => isOpen,
+        close: closePicker,
+        popupRole: 'listbox',
+    });
 
     // Listen for theme changes
     document.addEventListener('theme-change', ((e: CustomEvent) => {
@@ -175,6 +183,7 @@ function renderLayoutItems(dropdown: HTMLElement, callbacks: LayoutPickerCallbac
         const item = document.createElement('div');
         item.setAttribute('role', 'option');
         item.setAttribute('aria-selected', String(isActive));
+        item.setAttribute('tabindex', '-1');
         item.style.cssText = `
             padding: 8px 12px;
             cursor: pointer;

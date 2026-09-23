@@ -468,7 +468,9 @@ export function createGraphAreaHtml(options: GraphAreaHtmlOptions): string {
     const filesActive = currentGraphMode === 'files';
 
     return `
-        <div id="graph-container" style="width: 100%; height: 100%; position: relative;">
+        <div id="graph-container" style="width: 100%; height: 100%; position: relative;"
+             tabindex="0" role="group"
+             aria-label="Dependency graph. Tab or arrow keys select nodes, Enter opens the selected node.">
             ${graph.nodes.length > 0 ? `
                 ${renderGraph(graph)}
                 <div class="graph-empty-overlay is-hidden" id="graph-empty-overlay" aria-hidden="true">

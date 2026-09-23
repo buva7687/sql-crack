@@ -111,7 +111,11 @@ export function registerDocumentKeyboardListeners(
         }
         matrixChordKeys.add(normalized);
         if (!isMatrixChordActive()) {
-            return 'captured';
+            // Only swallow keys once the chord is clearly in progress (two of
+            // S/Q/L held), so a single Shift+S / Shift+Q / Shift+L still reaches
+            // the SQL preview, stats, and legend shortcuts.
+            const heldLetters = ['s', 'q', 'l'].filter(key => matrixChordKeys.has(key)).length;
+            return heldLetters >= 2 ? 'captured' : 'none';
         }
         const now = Date.now();
         if (now - matrixLastTriggeredAt < 800) {

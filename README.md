@@ -39,7 +39,7 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 | **Multi-Query Support** | Visualize multiple statements with tab navigation (Q1, Q2, Q3...) |
 | **Column Lineage** | Click any output column to trace its transformation path through JOINs, aggregations, and calculations |
 | **Legend Bar (Default On)** | Bottom legend is visible on first open, dismissable, and remembers your preference |
-| **Command Palette** | Press `Cmd/Ctrl + Shift + P` inside the webview for quick action search |
+| **Command Palette** | Press `Alt + P` (`Option + P` on macOS) inside the webview for quick action search |
 | **CTE & Subquery Expansion** | Double-click to expand CTEs/subqueries in floating cloud panels with independent pan/zoom |
 | **Undo / Redo Layout History** | Revert or re-apply drag, zoom, layout, and focus-mode changes with toolbar controls or keyboard shortcuts |
 | **Query Compare Mode** | Compare baseline vs current query side-by-side with added/removed/changed node highlights and stats deltas |
@@ -204,10 +204,10 @@ Analyze cross-file dependencies:
 | Shortcut | Action |
 |----------|--------|
 | `Cmd/Ctrl + Shift + L` | Open visualization |
-| `Cmd/Ctrl + Shift + P` | Open command palette |
+| `Alt + P` | Open SQL Crack quick actions |
 | `Cmd/Ctrl + F` or `/` | Search nodes |
-| `Enter` / `↓` | Next search result |
-| `↑` | Previous search result |
+| `Enter` | Next search result |
+| `Shift + Enter` | Previous search result |
 | `Escape` | Clear selection and fit to screen |
 | `C` | Toggle column lineage |
 | `L` | Toggle legend |

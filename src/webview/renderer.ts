@@ -293,6 +293,40 @@ const cloudViewStates: Map<string, CloudViewState> = new Map();
 const documentListeners: Array<{ type: string; handler: EventListener }> = [];
 let spinnerStyleElement: HTMLStyleElement | null = null;
 let reducedMotionStyleElement: HTMLStyleElement | null = null;
+let focusRingStyleElement: HTMLStyleElement | null = null;
+
+/**
+ * Keyboard focus rings, regenerated on theme change so the ring keeps 3:1
+ * contrast against the current background. `!important` beats inline
+ * `outline: none` on the search box, command bar, dialect select, and canvas.
+ */
+function applyFocusRingStyles(dark: boolean): void {
+    const focusRingColor = dark ? '#93c5fd' : '#1d4ed8';
+    const focusRingBackground = dark ? 'rgba(147, 197, 253, 0.16)' : 'rgba(29, 78, 216, 0.1)';
+    if (!focusRingStyleElement) {
+        focusRingStyleElement = document.createElement('style');
+        focusRingStyleElement.id = 'sql-crack-focus-ring-styles';
+        document.head.appendChild(focusRingStyleElement);
+    }
+    focusRingStyleElement.textContent = `
+        #sql-crack-skip-to-graph:focus-visible,
+        #root button:focus-visible,
+        #root input:focus-visible,
+        #root select:focus-visible,
+        #root [role="button"]:focus-visible,
+        #sql-crack-command-bar input:focus-visible,
+        #node-context-menu:focus-visible,
+        .ctx-menu-item:focus-visible,
+        [role="menu"] [tabindex="-1"]:focus-visible,
+        [role="listbox"] [tabindex="-1"]:focus-visible,
+        svg[tabindex="0"]:focus-visible,
+        .node[tabindex="0"]:focus-visible {
+            outline: 2px solid ${focusRingColor} !important;
+            outline-offset: 2px;
+            box-shadow: 0 0 0 3px ${focusRingBackground};
+        }
+    `;
+}
 let zeroGravityModeActive = false;
 let zeroGravityAnimationFrameId: number | null = null;
 let zeroGravityLastFrameAt = 0;
@@ -1150,8 +1184,7 @@ export function initRenderer(container: HTMLElement): void {
     // Accessibility: reduced motion and high contrast support
     reducedMotionStyleElement?.remove();
     reducedMotionStyleElement = document.createElement('style');
-    const focusRingColor = state.isDarkTheme ? '#93c5fd' : '#1d4ed8';
-    const focusRingBackground = state.isDarkTheme ? 'rgba(147, 197, 253, 0.16)' : 'rgba(29, 78, 216, 0.1)';
+    applyFocusRingStyles(state.isDarkTheme);
     const hcStyles = state.isHighContrast ? `
         /* VS Code High Contrast mode overrides */
         .node-rect { stroke-width: 2px !important; }
@@ -1169,19 +1202,6 @@ export function initRenderer(container: HTMLElement): void {
         text { font-weight: 600 !important; }
     ` : '';
     reducedMotionStyleElement.textContent = `
-        #sql-crack-skip-to-graph:focus-visible,
-        #sql-crack-toolbar button:focus-visible,
-        #sql-crack-toolbar input:focus-visible,
-        #sql-crack-toolbar select:focus-visible,
-        #sql-crack-command-bar input:focus-visible,
-        #node-context-menu:focus-visible,
-        .ctx-menu-item:focus-visible,
-        svg[tabindex="0"]:focus-visible,
-        .node[tabindex="0"]:focus-visible {
-            outline: 2px solid ${focusRingColor};
-            outline-offset: 2px;
-            box-shadow: 0 0 0 3px ${focusRingBackground};
-        }
         @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after {
                 animation-duration: 0.01ms !important;
@@ -3473,6 +3493,8 @@ export function isDarkTheme(): boolean {
 
 function applyTheme(dark: boolean): void {
     if (!svg) {return;}
+
+    applyFocusRingStyles(dark);
 
     const colors = dark ? {
         bg: UI_COLORS.background,
