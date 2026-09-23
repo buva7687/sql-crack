@@ -120,12 +120,76 @@ function scanSqlStatements(
         return false;
     };
 
+    const isLineCommentAt = (offset: number): boolean =>
+        sql.startsWith('--', offset)
+        || (hashStartsComment && sql[offset] === '#'
+            && !isPostgresJsonPathOperatorAt(sql, offset)
+            && !isHashTempTableIdentifierAt(sql, offset));
+
+    /**
+     * `SELECT 1; -- note` attaches `-- note` to the next statement. When a
+     * statement starts on the same line as earlier source text, skip comments
+     * that trail that text so the statement (and its line range) begins on its
+     * own line instead of overlapping the previous statement.
+     */
+    const skipCommentsTrailingPreviousStatement = (start: number, end: number): number => {
+        const lineStart = sql.lastIndexOf('\n', start - 1) + 1;
+        if (!sql.slice(lineStart, start).trim()) {
+            return start;
+        }
+        let position = start;
+        while (position < end) {
+            if (isLineCommentAt(position)) {
+                const newline = sql.indexOf('\n', position);
+                if (newline === -1 || newline >= end) {
+                    return start;
+                }
+                position = newline + 1;
+                while (position < end && /\s/.test(sql[position])) {
+                    position++;
+                }
+                return position;
+            }
+            if (sql.startsWith('/*', position)) {
+                let depth = 1;
+                position += 2;
+                while (position < end && depth > 0) {
+                    if (sql.startsWith('/*', position)) {
+                        depth++;
+                        position += 2;
+                    } else if (sql.startsWith('*/', position)) {
+                        depth--;
+                        position += 2;
+                    } else {
+                        position++;
+                    }
+                }
+                while (position < end && (sql[position] === ' ' || sql[position] === '\t')) {
+                    position++;
+                }
+                if (sql[position] === '\r' || sql[position] === '\n') {
+                    while (position < end && /\s/.test(sql[position])) {
+                        position++;
+                    }
+                    return position;
+                }
+                continue;
+            }
+            // Code shares the line with the previous statement; keep it.
+            return start;
+        }
+        return start;
+    };
+
     const flushStatement = (): void => {
         const trimmed = current.trim();
         if (trimmed) {
             const withoutComments = stripLeadingComments(trimmed).trim();
             if (withoutComments) {
-                onStatement(trimmed, currentStart + (current.length - current.trimStart().length));
+                const rawStart = currentStart + (current.length - current.trimStart().length);
+                const rawEnd = rawStart + trimmed.length;
+                const start = skipCommentsTrailingPreviousStatement(rawStart, rawEnd);
+                onStatement(start === rawStart ? trimmed : sql.slice(start, rawEnd), start);
             }
         }
     };

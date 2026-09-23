@@ -163,6 +163,11 @@ export interface StripSqlCommentsOptions {
      * (see `dialectSupportsBackslashEscapes`). Defaults to true.
      */
     backslashEscapes?: boolean;
+    /**
+     * Set false for dialects where `#` is an operator rather than a line
+     * comment (see `dialectSupportsHashComments`). Defaults to true.
+     */
+    hashComments?: boolean;
 }
 
 const DOLLAR_QUOTE_DELIMITER_PATTERN = /^\$(?:[_\p{L}][_\p{L}\p{M}\p{N}]*)?\$/u;
@@ -310,7 +315,7 @@ export function maskSqlCommentsPreservingPositions(
             continue;
         }
 
-        if (ch === '#' && !isPostgresJsonPathOperatorAt(sql, i)) {
+        if (ch === '#' && options.hashComments !== false && !isPostgresJsonPathOperatorAt(sql, i)) {
             const preserveTempIdentifier = options.preserveHashTempIdentifiers !== false
                 && isHashTempTableIdentifierAt(sql, i);
             if (!preserveTempIdentifier) {

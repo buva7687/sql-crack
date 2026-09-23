@@ -1230,10 +1230,40 @@ WHERE amount_1 > 0
       ].join('\n'));
 
       expect(tableLines(result)).toEqual([['t1@1'], ['t2@2'], ['t3@3'], ['t4@4']]);
-      expect(result.queryLineRanges?.slice(2)).toEqual([
+      expect(result.queryLineRanges).toEqual([
+        { startLine: 1, endLine: 1 },
+        { startLine: 2, endLine: 2 },
         { startLine: 3, endLine: 3 },
         { startLine: 4, endLine: 4 },
       ]);
+    });
+
+    it('detaches comments trailing the previous statement but keeps own-line header comments', () => {
+      const cases: Array<[string, Array<{ startLine: number; endLine: number }>]> = [
+        ['SELECT a FROM t1; -- first\nSELECT b FROM t2;', [{ startLine: 1, endLine: 1 }, { startLine: 2, endLine: 2 }]],
+        ['SELECT a FROM t1; /* x */\nSELECT b FROM t2;', [{ startLine: 1, endLine: 1 }, { startLine: 2, endLine: 2 }]],
+        ['SELECT a FROM t1; # note\nSELECT b FROM t2;', [{ startLine: 1, endLine: 1 }, { startLine: 2, endLine: 2 }]],
+        ['SELECT a FROM t1; -- first\n\n-- header\nSELECT b FROM t2;', [{ startLine: 1, endLine: 1 }, { startLine: 3, endLine: 4 }]],
+        ['SELECT a FROM t1; /* x */ SELECT b FROM t2;', [{ startLine: 1, endLine: 1 }, { startLine: 1, endLine: 1 }]],
+      ];
+      for (const [sql, ranges] of cases) {
+        expect(parseSqlBatch(sql).queryLineRanges).toEqual(ranges);
+      }
+      expect(splitSqlStatements('SELECT a FROM t1; -- first\nSELECT b FROM t2;')).toEqual([
+        'SELECT a FROM t1',
+        'SELECT b FROM t2',
+      ]);
+    });
+
+    it('keeps deferred re-parse offsets consistent with batch node lines', () => {
+      const sql = 'SELECT a FROM t1; -- first\n\n-- header\nSELECT b\nFROM t2;';
+      const batch = parseSqlBatch(sql);
+      const range = batch.queryLineRanges![1];
+      // Deferred hydration re-parses query.sql and offsets by range.startLine - 1.
+      const reparsed = parseSqlBatch(batch.queries[1].sql).queries[0];
+      const offsetLines = reparsed.nodes.map(node => `${node.label}@${(node.startLine ?? 0) + range.startLine - 1}`);
+      expect(offsetLines).toEqual(batch.queries[1].nodes.map(node => `${node.label}@${node.startLine}`));
+      expect(batch.queries[1].nodes.find(node => node.label === 't2')?.startLine).toBe(5);
     });
 
     it('keeps later statement lines exact when two statements share a line', () => {

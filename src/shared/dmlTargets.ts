@@ -17,24 +17,29 @@ function lowerString(value: unknown): string | null {
     return typeof value === 'string' && value.trim() ? value.trim().toLowerCase() : null;
 }
 
-function getSetQualifiers(setClauses: unknown): Set<string> {
+function getSetQualifiers(setClauses: unknown): { qualifiers: Set<string>; hasUnqualified: boolean } {
     const qualifiers = new Set<string>();
+    let hasUnqualified = false;
     if (!Array.isArray(setClauses)) {
-        return qualifiers;
+        return { qualifiers, hasUnqualified };
     }
     for (const clause of setClauses) {
         const qualifier = lowerString((clause as { table?: unknown } | null)?.table);
         if (qualifier) {
             qualifiers.add(qualifier);
+        } else {
+            hasUnqualified = true;
         }
     }
-    return qualifiers;
+    return { qualifiers, hasUnqualified };
 }
 
 /**
  * Pick the written tables of an UPDATE whose `stmt.table` lists more than one
- * table. Prefers tables whose alias or name is used as a `SET` qualifier, then
- * falls back to the non-joined tables; with a single entry it is the target.
+ * table. Tables whose alias or name qualifies a `SET` column are written. An
+ * unqualified `SET col = ...` resolves to whichever table owns the column,
+ * which cannot be known without a schema, so it keeps the primary (non-joined)
+ * tables as targets rather than silently dropping that write.
  */
 export function selectMultiTableUpdateTargets<T extends UpdateTableEntry>(
     tables: readonly T[],
@@ -45,18 +50,21 @@ export function selectMultiTableUpdateTargets<T extends UpdateTableEntry>(
         return [...tables];
     }
 
-    const qualifiers = getSetQualifiers(setClauses);
-    if (qualifiers.size > 0) {
-        const qualified = tables.filter(entry => {
-            const alias = lowerString(entry.as);
-            const name = lowerString(getTableName(entry));
-            return (alias !== null && qualifiers.has(alias)) || (name !== null && qualifiers.has(name));
-        });
-        if (qualified.length > 0) {
-            return qualified;
-        }
-    }
-
     const unjoined = tables.filter(entry => !entry.join);
-    return unjoined.length > 0 ? unjoined : [tables[0]];
+    const primaryTargets = unjoined.length > 0 ? unjoined : [tables[0]];
+    const { qualifiers, hasUnqualified } = getSetQualifiers(setClauses);
+    const qualified = tables.filter(entry => {
+        const alias = lowerString(entry.as);
+        const name = lowerString(getTableName(entry));
+        return (alias !== null && qualifiers.has(alias)) || (name !== null && qualifiers.has(name));
+    });
+
+    if (qualified.length === 0) {
+        return primaryTargets;
+    }
+    if (!hasUnqualified) {
+        return qualified;
+    }
+    // Keep source order so callers render targets deterministically.
+    return tables.filter(entry => qualified.includes(entry) || primaryTargets.includes(entry));
 }

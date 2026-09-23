@@ -52,6 +52,12 @@ describe('MySQL multi-table UPDATE targets', () => {
         expect(result.hints.some(hint => /Cartesian/i.test(hint.message))).toBe(false);
     });
 
+    it('keeps the primary table as a target when a SET column is unqualified', () => {
+        // `val` may belong to tgt; MySQL resolves unqualified columns by ownership.
+        expect(describeNodes('UPDATE tgt t JOIN src s ON t.id = s.id SET val = 1, s.flag = 2')
+            .filter(entry => entry.endsWith(':write')).sort()).toEqual(['src:write', 'tgt:write']);
+    });
+
     it('handles the comma form and unaliased JOIN form', () => {
         expect(describeNodes('UPDATE tgt t, src s SET t.val = s.val WHERE t.id = s.id'))
             .toEqual(expect.arrayContaining(['src:read', 'tgt:write']));

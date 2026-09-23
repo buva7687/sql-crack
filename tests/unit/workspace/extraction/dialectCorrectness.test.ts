@@ -73,12 +73,42 @@ describe('backslash escapes follow the dialect', () => {
     });
 });
 
+describe('# is only a comment in MySQL-family dialects', () => {
+    it('keeps PostgreSQL references and statement boundaries after the # operator', () => {
+        expect(refs('SELECT a # b FROM t1;\nSELECT * FROM t2;', 'PostgreSQL')).toEqual(['t1:select', 't2:select']);
+        expect(refs('SELECT a # b FROM t1; SELECT * FROM t2;', 'PostgreSQL')).toEqual(['t1:select', 't2:select']);
+    });
+
+    it('keeps PostgreSQL definitions after the # operator on the same line', () => {
+        const definitions = new SchemaExtractor().extractDefinitions(
+            'CREATE VIEW v1 AS SELECT a # b AS x FROM t1; CREATE TABLE t9 (id INT);',
+            'schema.sql',
+            'PostgreSQL'
+        );
+        expect(definitions.map(definition => `${definition.name}:${definition.sql}`).sort()).toEqual([
+            't9:CREATE TABLE t9 (id INT)',
+            'v1:CREATE VIEW v1 AS SELECT a # b AS x FROM t1',
+        ]);
+    });
+
+    it('still masks MySQL # comments', () => {
+        expect(refs('SELECT 1 FROM t1; # FROM ghost_table\nSELECT * FROM t2;', 'MySQL')).toEqual(['t1:select', 't2:select']);
+    });
+});
+
 describe('multi-table UPDATE / DELETE write targets', () => {
     it('writes only the SET-qualified table in MySQL UPDATE ... JOIN', () => {
         expect(refs('UPDATE tgt t JOIN src s ON t.id = s.id SET t.val = s.val;', 'MySQL'))
             .toEqual(['tgt:update', 'src:join']);
         expect(refs('UPDATE tgt t, src s SET t.val = s.val WHERE t.id = s.id;', 'MySQL'))
             .toEqual(['tgt:update', 'src:select']);
+    });
+
+    it('keeps the primary table written when a SET column is unqualified', () => {
+        expect(refs('UPDATE tgt t JOIN src s ON t.id = s.id SET val = 1, s.flag = 2;', 'MySQL'))
+            .toEqual(['tgt:update', 'src:update']);
+        expect(refs('UPDATE tgt t JOIN src s ON t.id = s.id SET val = s.val;', 'MySQL'))
+            .toEqual(['tgt:update', 'src:join']);
     });
 
     it('deletes only from the listed targets in DELETE ... JOIN', () => {

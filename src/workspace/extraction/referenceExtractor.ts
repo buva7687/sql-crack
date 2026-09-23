@@ -17,7 +17,7 @@ import {
 } from './types';
 import { ColumnExtractor } from './columnExtractor';
 import { TransformExtractor } from './transformExtractor';
-import { countStartsAtOrBefore, dialectSupportsBackslashEscapes, escapeRegex, getDollarQuoteDelimiterAt, maskSqlCommentsPreservingPositions, quotedStringAllowsBackslashEscapes, TextOffsetIndex, unwrapIdentifierValue } from '../../shared';
+import { countStartsAtOrBefore, dialectSupportsBackslashEscapes, dialectSupportsHashComments, escapeRegex, getDollarQuoteDelimiterAt, maskSqlCommentsPreservingPositions, quotedStringAllowsBackslashEscapes, TextOffsetIndex, unwrapIdentifierValue } from '../../shared';
 import type { StripSqlCommentsOptions } from '../../shared';
 import { selectMultiTableUpdateTargets } from '../../shared/dmlTargets';
 import { preprocessSqlForWorkspaceParsing } from '../parserConfig';
@@ -1897,7 +1897,12 @@ export class ReferenceExtractor {
     }
 
     private getCommentMaskOptions(): StripSqlCommentsOptions {
-        return { backslashEscapes: this.supportsBackslashEscapes() };
+        return {
+            backslashEscapes: this.supportsBackslashEscapes(),
+            // In PostgreSQL `#` is XOR; masking it as a comment hid the rest of
+            // the line, including table names and the statement's `;`.
+            hashComments: dialectSupportsHashComments(this._activeDialect),
+        };
     }
 
     /** Mask value literals while retaining delimited identifiers and offsets. */
