@@ -10,7 +10,12 @@ import {
 } from '../types';
 import { ColumnInfo, QueryAnalysis } from '../extraction/types';
 import { getColumnKey, getDisplayName, getQualifiedKey, parseQualifiedKey } from '../identifiers';
-import { getDollarQuotedTokenEnd } from '../../shared/stringUtils';
+import {
+    dialectSupportsBackslashEscapes,
+    dialectSupportsHashComments,
+    getDollarQuotedTokenEnd,
+    quotedStringAllowsBackslashEscapes,
+} from '../../shared/stringUtils';
 import { buildSegmentStarts, countStartsAtOrBefore } from '../../shared/textOffsets';
 import {
     LineageNode,
@@ -36,13 +41,38 @@ function getReferenceKey(reference: TableReference): string {
     return getQualifiedKey(reference.tableName, reference.schema, reference);
 }
 
-function skipQuotedSqlToken(sql: string, startIndex: number): number {
+/**
+ * Dialect lexing rules for the lineage builder's SQL scanning. Without a
+ * dialect both default to true, matching MySQL-style lexing.
+ */
+interface SqlLexRules {
+    /** `#` starts a line comment (MySQL, MariaDB, BigQuery); elsewhere it is an operator. */
+    hashComments: boolean;
+    /** `\` escapes inside quoted strings (MySQL-family, Snowflake, Hive, Redshift). */
+    backslashEscapes: boolean;
+}
+
+const DEFAULT_SQL_LEX_RULES: SqlLexRules = { hashComments: true, backslashEscapes: true };
+
+function getSqlLexRules(dialect: string | undefined): SqlLexRules {
+    if (!dialect) {
+        return DEFAULT_SQL_LEX_RULES;
+    }
+    return {
+        hashComments: dialectSupportsHashComments(dialect),
+        backslashEscapes: dialectSupportsBackslashEscapes(dialect),
+    };
+}
+
+function skipQuotedSqlToken(sql: string, startIndex: number, rules: SqlLexRules = DEFAULT_SQL_LEX_RULES): number {
     const quote = sql[startIndex];
     const closingQuote = quote === '[' ? ']' : quote;
+    const escapesAllowed = quote !== '['
+        && quotedStringAllowsBackslashEscapes(sql, startIndex, rules.backslashEscapes);
     let index = startIndex + 1;
 
     while (index < sql.length) {
-        if (sql[index] === '\\' && quote !== '[' && index + 1 < sql.length) {
+        if (escapesAllowed && sql[index] === '\\' && index + 1 < sql.length) {
             index += 2;
             continue;
         }
@@ -70,7 +100,7 @@ function skipDollarQuotedSqlToken(sql: string, startIndex: number): number | nul
  * Replace comment contents with spaces while retaining every newline and string
  * index. Regex consumers can then safely map matches back to the original SQL.
  */
-function maskSqlCommentsPreservingPositions(sql: string): string {
+function maskSqlCommentsPreservingPositions(sql: string, rules: SqlLexRules = DEFAULT_SQL_LEX_RULES): string {
     const masked = sql.split('');
     let index = 0;
 
@@ -95,7 +125,7 @@ function maskSqlCommentsPreservingPositions(sql: string): string {
 
         if (char === "'" || char === '"' || char === '`' || char === '[') {
             const tokenStart = index;
-            index = skipQuotedSqlToken(sql, index);
+            index = skipQuotedSqlToken(sql, index, rules);
             maskRange(tokenStart, index);
             continue;
         }
@@ -135,7 +165,9 @@ function maskSqlCommentsPreservingPositions(sql: string): string {
             /[a-zA-Z0-9_]/.test(sql[index + 1] || '') ||
             (sql[index + 1] === '#' && /[a-zA-Z0-9_]/.test(sql[index + 2] || ''))
         );
-        if (char === '#' && !isTempTableIdentifier && sql[index + 1] !== '>') {
+        // In PostgreSQL `#` is XOR; masking it as a comment hid the rest of
+        // the line, including later CTE declarations and the `;`.
+        if (char === '#' && rules.hashComments && !isTempTableIdentifier && sql[index + 1] !== '>') {
             const commentStart = index;
             while (index < sql.length && sql[index] !== '\n' && sql[index] !== '\r') {
                 index++;
@@ -272,6 +304,17 @@ function getNodeSqlParserCtor(): NodeSqlParserCtor | null {
     return cachedSqlParserCtor;
 }
 
+export interface LineageBuilderOptions {
+    includeExternal: boolean;
+    includeColumns: boolean;
+    /**
+     * Workspace SQL dialect. Selects whether `#` starts a comment and whether
+     * `\` escapes inside strings when scanning file SQL for CTEs. Omitted means
+     * MySQL-style lexing.
+     */
+    dialect?: string;
+}
+
 /**
  * Builds lineage graph from workspace index
  */
@@ -284,10 +327,12 @@ export class LineageBuilder implements LineageGraph {
     private incomingEdgesByNodeId: Map<string, LineageEdge[]> = new Map();
     private outgoingEdgesByNodeId: Map<string, LineageEdge[]> = new Map();
     private columnNodesByParentId: Map<string, LineageNode[]> = new Map();
-    private options: { includeExternal: boolean; includeColumns: boolean };
+    private options: LineageBuilderOptions;
+    private readonly sqlLexRules: SqlLexRules;
 
-    constructor(options = { includeExternal: true, includeColumns: true }) {
+    constructor(options: LineageBuilderOptions = { includeExternal: true, includeColumns: true }) {
         this.options = options;
+        this.sqlLexRules = getSqlLexRules(options.dialect);
     }
 
     async buildFromIndexAsync(index: WorkspaceIndex): Promise<LineageGraph> {
@@ -934,7 +979,7 @@ export class LineageBuilder implements LineageGraph {
 
         // 7. Fallback: Check for SELECT INTO or INSERT patterns in SQL
         if (query.sql) {
-            const sql = maskSqlCommentsPreservingPositions(query.sql);
+            const sql = maskSqlCommentsPreservingPositions(query.sql, this.sqlLexRules);
             const identitySource = analysis.definitions.find(def => def.identifierCaseFolding)
                 || analysis.references.find(ref => ref.identifierCaseFolding);
             const identifierSemantics = {
@@ -1279,7 +1324,7 @@ export class LineageBuilder implements LineageGraph {
         filePath: string,
         cteNames: Map<string, { name: string; filePath: string; lineNumber: number }>
     ): void {
-        const maskedSql = maskSqlCommentsPreservingPositions(sql);
+        const maskedSql = maskSqlCommentsPreservingPositions(sql, this.sqlLexRules);
         const declarations = findCteDeclarations(sql, maskedSql);
         const lineStarts = buildSegmentStarts(sql, '\n');
         const ParserCtor = getNodeSqlParserCtor();
@@ -1370,7 +1415,7 @@ export class LineageBuilder implements LineageGraph {
         sql: string,
         filePath: string,
         cteNames: Map<string, { name: string; filePath: string; lineNumber: number }>,
-        declarations = findCteDeclarations(sql),
+        declarations = findCteDeclarations(sql, maskSqlCommentsPreservingPositions(sql, this.sqlLexRules)),
         lineStarts = buildSegmentStarts(sql, '\n')
     ): void {
         for (const declaration of declarations) {

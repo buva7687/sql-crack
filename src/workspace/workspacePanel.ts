@@ -710,7 +710,7 @@ export class WorkspacePanel {
                 const currentIndex = this._indexManager.getIndex();
                 if (!currentIndex) {return;}
 
-                const builder = new LineageBuilder({ includeExternal: true, includeColumns: true });
+                const builder = new LineageBuilder({ includeExternal: true, includeColumns: true, dialect: this._dialect });
                 const graph = await builder.buildFromIndexAsync(currentIndex);
 
                 // If graph state was invalidated while building, discard stale results.
