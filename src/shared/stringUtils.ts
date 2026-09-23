@@ -442,7 +442,7 @@ export function stripSqlComments(sql: string, options: StripSqlCommentsOptions =
 
         // Hash line comment: # (but not a contextual #identifier/##identifier
         // temp table, or a PostgreSQL #> / #>> JSON path operator)
-        if (ch === '#' && !isPostgresJsonPathOperatorAt(sql, i)) {
+        if (ch === '#' && options.hashComments !== false && !isPostgresJsonPathOperatorAt(sql, i)) {
             const preserveTempIdentifier = options.preserveHashTempIdentifiers !== false
                 && isHashTempTableIdentifierAt(sql, i);
             if (!preserveTempIdentifier) {

@@ -143,3 +143,18 @@ describe('multi-table UPDATE / DELETE write targets', () => {
         expect(mysql.columnEdges.length).toBeGreaterThan(0);
     });
 });
+
+describe('Teradata CTAS regex fallback', () => {
+    it('does not parse a parenthesized CTAS query as column definitions', () => {
+        const result = new SchemaExtractor().extractDefinitionsWithStatus([
+            'CREATE TABLE customer_summary AS (SELECT customer_id, COUNT(*) AS n FROM orders GROUP BY customer_id)',
+            'WITH DATA PRIMARY INDEX (customer_id);',
+            'COLLECT STATISTICS ON orders COLUMN (order_id);',
+            'CREATE TABLE plain_t (id INTEGER, name VARCHAR(10));',
+        ].join('\n'), 'td.sql', 'Teradata');
+
+        expect(result.warnings).toHaveLength(1);
+        expect(result.definitions.map(definition => [definition.name, definition.columns.map(column => column.name)]))
+            .toEqual([['customer_summary', []], ['plain_t', ['id', 'name']]]);
+    });
+});

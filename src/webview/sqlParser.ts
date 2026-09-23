@@ -475,9 +475,7 @@ function parseSqlBatchInternal(
         const absoluteStartLine = pendingSessionCommands[0].startLine;
         const absoluteEndLine = pendingSessionCommands[pendingSessionCommands.length - 1].endLine;
 
-        // Note: Node line numbers are already set relative to the combined SQL in createMergedSessionResult
-        // Don't override them here
-
+        anchorMergedResultLines(mergedResult, absoluteStartLine, absoluteEndLine);
         queries.push(mergedResult);
         queryLineRanges.push({ startLine: absoluteStartLine, endLine: absoluteEndLine });
 
@@ -497,10 +495,27 @@ function parseSqlBatchInternal(
         const absoluteStartLine = pendingDdlCommands[0].startLine;
         const absoluteEndLine = pendingDdlCommands[pendingDdlCommands.length - 1].endLine;
 
+        anchorMergedResultLines(mergedResult, absoluteStartLine, absoluteEndLine);
         queries.push(mergedResult);
         queryLineRanges.push({ startLine: absoluteStartLine, endLine: absoluteEndLine });
 
         pendingDdlCommands = [];
+    };
+
+    /**
+     * Merged session/DDL results number their node from the combined SQL text.
+     * Anchor it to the file lines the merged commands occupy so click-to-source
+     * and cursor-follow land on the commands instead of line 1.
+     */
+    const anchorMergedResultLines = (result: ParseResult, startLine: number, endLine: number): void => {
+        for (const node of result.nodes) {
+            if (node.startLine) {
+                node.startLine += startLine - 1;
+            }
+            if (node.endLine) {
+                node.endLine = Math.max(node.startLine ?? startLine, endLine);
+            }
+        }
     };
 
     const countLines = (text: string): number => {
@@ -1716,14 +1731,31 @@ function processStatement(context: ParserContext, stmt: any, nodes: FlowNode[], 
                                 : undefined;
             const accessMode: 'write' = 'write';
 
+            // RENAME TABLE reports each target as an [old, new] pair; String()
+            // on the pair rendered "[object Object],[object Object]".
+            const getTargetLabel = (target: any): string => {
+                if (Array.isArray(target)) {
+                    return target.map(getTargetLabel).filter(Boolean).join(' → ');
+                }
+                if (typeof target === 'string') {
+                    return target;
+                }
+                return getTableName(target)
+                    || (typeof target?.table === 'string' ? target.table : '')
+                    || (typeof target?.name === 'string' ? target.name : '');
+            };
+
             for (const t of tables) {
+                const tableName = getTargetLabel(t);
+                if (!tableName) {
+                    continue;
+                }
                 context.stats.tables++;
                 const tableId = genId(context, 'table');
-                const tableName = typeof t === 'string' ? t : (t.table || t.name || t);
                 nodes.push({
                     id: tableId,
                     type: 'table',
-                    label: String(tableName),
+                    label: tableName,
                     description: 'Target table',
                     accessMode: accessMode,
                     operationType: opType,

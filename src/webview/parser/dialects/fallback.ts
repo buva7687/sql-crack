@@ -8,7 +8,7 @@ import type {
 } from '../../types';
 import { findMatchingParen, maskStringsAndComments } from './preprocessing';
 import { extractMergeOnCondition } from '../mergeCondition';
-import { stripSqlComments } from '../../../shared';
+import { dialectSupportsBackslashEscapes, dialectSupportsHashComments, quotedStringAllowsBackslashEscapes, stripSqlComments } from '../../../shared';
 
 interface RoutineDdlInfo {
     action: 'CREATE' | 'ALTER' | 'DROP';
@@ -73,6 +73,37 @@ function extractRoutineDdlInfo(sql: string): RoutineDdlInfo | null {
     };
 }
 
+/** Replace single-quoted string literals (quotes included) with spaces, keeping offsets. */
+function maskSingleQuotedLiterals(sql: string, backslashEscapes: boolean): string {
+    const chars = sql.split('');
+    for (let index = 0; index < chars.length; index++) {
+        if (sql[index] !== "'") {
+            continue;
+        }
+        const escapesAllowed = quotedStringAllowsBackslashEscapes(sql, index, backslashEscapes);
+        let end = index + 1;
+        while (end < sql.length) {
+            if (escapesAllowed && sql[end] === '\\' && end + 1 < sql.length) {
+                end += 2;
+            } else if (sql[end] === "'" && sql[end + 1] === "'") {
+                end += 2;
+            } else if (sql[end] === "'") {
+                end++;
+                break;
+            } else {
+                end++;
+            }
+        }
+        for (let position = index; position < end; position++) {
+            if (chars[position] !== '\n' && chars[position] !== '\r') {
+                chars[position] = ' ';
+            }
+        }
+        index = end - 1;
+    }
+    return chars.join('');
+}
+
 /**
  * Regex-based fallback parser for when AST parsing fails.
  * Extracts basic structure (tables, columns, JOINs) to show best-effort visualization.
@@ -92,8 +123,14 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
     };
     const commentStripped = stripSqlComments(sql, {
         preserveHashTempIdentifiers: dialect === 'TransactSQL',
+        hashComments: dialectSupportsHashComments(dialect),
     });
     const structureMasked = maskStringsAndComments(commentStripped);
+    // Comments are already gone (dialect-aware), so blank only single-quoted
+    // literals: table patterns must not match text such as
+    // 'Copied from staging_backup'. Offsets stay aligned with commentStripped.
+    const literalMasked = maskSingleQuotedLiterals(commentStripped, dialectSupportsBackslashEscapes(dialect));
+    const isInsideStringLiteral = (offset: number): boolean => literalMasked[offset] !== commentStripped[offset];
     const routineDdl = extractRoutineDdlInfo(commentStripped);
 
     const cteNames = new Set<string>();
@@ -177,7 +214,9 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
         new RegExp(`\\bFROM\\s+(${qualifiedIdentifier})`, 'giu'),
         new RegExp(`\\bJOIN\\s+(${qualifiedIdentifier})`, 'giu'),
         new RegExp(`\\bINTO\\s+(${qualifiedIdentifier})`, 'giu'),
-        new RegExp(`\\bUPDATE\\s+(?!SET\\b)(${qualifiedIdentifier})`, 'giu'),
+        // FOR UPDATE, ON DUPLICATE KEY UPDATE, and ON UPDATE CASCADE are not
+        // table references.
+        new RegExp(`(?<!\\b(?:FOR|KEY|ON)\\s+)\\bUPDATE\\s+(?!SET\\b)(${qualifiedIdentifier})`, 'giu'),
         new RegExp(`\\bMERGE\\s+INTO\\s+(${qualifiedIdentifier})`, 'giu'),
         new RegExp(`\\bUSING\\s+(${qualifiedIdentifier})`, 'giu'),
     ];
@@ -185,6 +224,9 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
     for (const pattern of tablePatterns) {
         let match;
         while ((match = pattern.exec(commentStripped)) !== null) {
+            if (isInsideStringLiteral(match.index)) {
+                continue;
+            }
             if (/^FROM\b/i.test(match[0]) && isFunctionFromDelimiter(structureMasked, match.index)) {
                 continue;
             }
@@ -218,6 +260,9 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
 
     while ((refMatch = tableRefPattern.exec(commentStripped)) !== null) {
         const keyword = refMatch[1].toUpperCase();
+        if (isInsideStringLiteral(refMatch.index)) {
+            continue;
+        }
         if (keyword === 'FROM' && isFunctionFromDelimiter(structureMasked, refMatch.index)) {
             continue;
         }

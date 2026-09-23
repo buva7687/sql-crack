@@ -8,6 +8,7 @@ import {
     SqlCrackCodeActionProvider,
 } from '../../src/diagnostics';
 import { BatchParseResult, OptimizationHint, ParseResult } from '../../src/webview/types';
+import { parseSqlBatch } from '../../src/webview/sqlParser';
 
 jest.mock('vscode');
 
@@ -28,7 +29,7 @@ function createMockDocument(text: string): vscode.TextDocument {
     } as unknown as vscode.TextDocument;
 }
 
-function createParseResult(hints: OptimizationHint[]): ParseResult {
+function createParseResult(hints: OptimizationHint[], nodeStartLine = 2): ParseResult {
     return {
         nodes: [
             {
@@ -39,7 +40,7 @@ function createParseResult(hints: OptimizationHint[]): ParseResult {
                 y: 0,
                 width: 100,
                 height: 40,
-                startLine: 2,
+                startLine: nodeStartLine,
             },
         ],
         edges: [],
@@ -84,7 +85,7 @@ describe('diagnostics mapping', () => {
         })).toBe(vscode.DiagnosticSeverity.Information);
     });
 
-    it('creates diagnostic ranges using query offsets and node line numbers', () => {
+    it('places node hints on the node file line (batch node lines are already absolute)', () => {
         const document = createMockDocument([
             '-- header',
             'SELECT 1;',
@@ -101,12 +102,28 @@ describe('diagnostics mapping', () => {
             severity: 'medium',
             nodeId: 'orders-node',
         };
-        const query = createParseResult([hint]);
+        // The query starts on line 3; parseSqlBatch reports the node on file line 4.
+        const query = createParseResult([hint], 4);
         const diagnostic = createDiagnosticFromHint(document, hint, query, 3);
 
         expect(diagnostic.range.start.line).toBe(3);
         expect(diagnostic.severity).toBe(vscode.DiagnosticSeverity.Warning);
         expect(diagnostic.source).toBe(SQL_CRACK_DIAGNOSTIC_SOURCE);
+    });
+
+    it('anchors real parseSqlBatch node hints in later statements to their own line', () => {
+        const sql = [
+            'SELECT id FROM customers;',
+            '', '', '', '', '',
+            'WITH unused_cte AS (',
+            '  SELECT 1 AS x',
+            ')',
+            'SELECT id FROM orders;',
+        ].join('\n');
+        const diagnostics = createDiagnosticsFromBatch(createMockDocument(sql), parseSqlBatch(sql));
+        const unusedCte = diagnostics.find(diagnostic => /Unused CTE/.test(diagnostic.message));
+
+        expect(unusedCte?.range.start.line).toBe(6);
     });
 
     it('creates diagnostics for parse hints and returns none when no hints exist', () => {

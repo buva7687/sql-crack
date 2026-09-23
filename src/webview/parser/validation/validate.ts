@@ -1,5 +1,5 @@
 import type { SqlDialect, ValidationError, ValidationLimits } from '../../types';
-import { countSqlStatements } from './splitting';
+import { countSqlStatements, splitTransactSqlBatches } from './splitting';
 
 /**
  * Default validation limits for SQL parsing.
@@ -67,7 +67,13 @@ export function validateSql(
 }
 
 function countStatements(sql: string, dialect: SqlDialect): number {
-    return countSqlStatements(sql, dialect);
+    if (dialect !== 'TransactSQL') {
+        return countSqlStatements(sql, dialect);
+    }
+    // Parsing splits SQL Server scripts on GO batches before semicolons, so
+    // the limit must count the same way or GO-only scripts bypass it.
+    return splitTransactSqlBatches(sql)
+        .reduce((count, batch) => count + countSqlStatements(batch, dialect), 0);
 }
 
 export function formatBytes(bytes: number): string {

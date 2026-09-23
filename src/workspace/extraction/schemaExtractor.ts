@@ -764,7 +764,13 @@ export class SchemaExtractor {
             );
             const parenStart = afterHeader.indexOf('(');
             const asQueryIndex = /\bAS\s*(?:\(\s*)?(?:WITH|SELECT)\b/i.exec(afterHeader)?.index ?? -1;
+            // Teradata preprocessing rewrites `CREATE TABLE x AS (SELECT ...)
+            // WITH DATA` to `CREATE TABLE x (SELECT ...)`; that parenthesis
+            // holds a query, not column definitions.
+            const parenHoldsQuery = parenStart !== -1
+                && /^\(\s*(?:WITH|SELECT)\b/i.test(afterHeader.slice(parenStart));
             const hasColumnBody = parenStart !== -1
+                && !parenHoldsQuery
                 && (asQueryIndex === -1 || parenStart < asQueryIndex);
 
             if (hasColumnBody) {

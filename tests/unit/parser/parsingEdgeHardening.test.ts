@@ -2,10 +2,11 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 describe('parsing edge hardening guards', () => {
-    it('uses splitSqlStatements for validation statement counts', () => {
+    it('uses the statement splitter (including SQL Server GO batches) for validation counts', () => {
         const source = readFileSync(join(__dirname, '../../../src/webview/parser/validation/validate.ts'), 'utf8');
-        expect(source).toContain("import { countSqlStatements } from './splitting';");
+        expect(source).toContain("import { countSqlStatements, splitTransactSqlBatches } from './splitting';");
         expect(source).toContain('return countSqlStatements(sql, dialect);');
+        expect(source).toContain('return splitTransactSqlBatches(sql)');
     });
 
     it('uses TextEncoder byte counting for validation size limits', () => {

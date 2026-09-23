@@ -283,6 +283,19 @@ SELECT * FROM t3;`;
       expect(result.queries[2].tableUsage.has('second_table')).toBe(true);
       expect(result.errorCount).toBe(0);
     });
+
+    it('applies maxStatements to GO-separated batches the same way parsing splits them', () => {
+      const sql = Array.from({ length: 10 }, (_, index) => `SELECT c FROM t${index}\nGO`).join('\n');
+      const limits = { maxSqlSizeBytes: 1024 * 1024, maxQueryCount: 5 };
+
+      expect(validateSql(sql, limits, 'TransactSQL')).toEqual(expect.objectContaining({
+        type: 'query_count_limit',
+        details: expect.objectContaining({ actual: 10, limit: 5 }),
+      }));
+      const result = parseSqlBatch(sql, 'TransactSQL', limits);
+      expect(result.queries).toHaveLength(5);
+      expect(result.queries[0].hints.some(hint => hint.message === 'Too many statements - showing first batch')).toBe(true);
+    });
   });
   describe('Basic SELECT', () => {
     it('parses simple SELECT with single table', () => {
@@ -1253,6 +1266,21 @@ WHERE amount_1 > 0
         'SELECT a FROM t1',
         'SELECT b FROM t2',
       ]);
+    });
+
+    it('anchors merged Session Setup and Schema Changes nodes to their file lines', () => {
+      const sql = [
+        'SELECT a FROM t1;', '', '', '', '',
+        'USE analytics;',
+        'SET x = 1;', '', '',
+        'CREATE TABLE foo (id int);',
+        'CREATE TABLE bar (id int);',
+      ].join('\n');
+      const result = parseSqlBatch(sql, 'MySQL', undefined, { combineDdlStatements: true });
+      const merged = result.queries.slice(1).map(query => query.nodes.map(node => `${node.label}@${node.startLine}-${node.endLine}`));
+
+      expect(result.queryLineRanges?.slice(1)).toEqual([{ startLine: 6, endLine: 7 }, { startLine: 10, endLine: 11 }]);
+      expect(merged).toEqual([['Session Setup@6-7'], ['Schema Changes@10-11']]);
     });
 
     it('keeps deferred re-parse offsets consistent with batch node lines', () => {

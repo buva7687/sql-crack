@@ -5,6 +5,8 @@
  */
 
 import { detectDialect, parseSql, parseSqlBatch, splitSqlStatements } from '../../../src/webview/sqlParser';
+import { regexFallbackParse } from '../../../src/webview/parser/dialects/fallback';
+import type { SqlDialect } from '../../../src/webview/types';
 
 const replacer = (_key: string, value: unknown) => value instanceof Map ? [...value.entries()] : value;
 
@@ -95,5 +97,40 @@ describe('column flows through JOINs', () => {
 
         expect(paths.id?.[0]).toBe('orders.id:source');
         expect(paths.name?.[0]).toBe('customers.name:source');
+    });
+});
+
+describe('regex fallback table detection', () => {
+    const tableLabels = (sql: string, dialect: SqlDialect) => regexFallbackParse(sql, dialect).nodes
+        .filter(node => node.type === 'table')
+        .map(node => node.label);
+
+    it('ignores table keywords inside string literals and FOR UPDATE', () => {
+        const result = parseSql(
+            "SELECT e.id, 'Copied from staging_backup' AS note FROM events e WHERE e.x = 1 FOR UPDATE SKIP LOCKED",
+            'PostgreSQL'
+        );
+        expect(result.nodes.filter(node => node.type === 'table').map(node => node.label)).toEqual(['events']);
+        expect(tableLabels("SELECT 'join ghost' AS j FROM real_t FOR UPDATE OF real_t", 'PostgreSQL')).toEqual(['real_t']);
+    });
+
+    it('ignores ON DUPLICATE KEY UPDATE and ON UPDATE CASCADE', () => {
+        expect(tableLabels('INSERT INTO t1 (a) VALUES (1) ON DUPLICATE KEY UPDATE a = 2', 'MySQL')).toEqual(['t1']);
+        expect(tableLabels('CREATE TABLE c (id int REFERENCES p(id) ON UPDATE CASCADE); UPDATE real_upd SET a = 1', 'MySQL'))
+            .toEqual(['real_upd']);
+    });
+
+    it('keeps tables after a PostgreSQL # operator and still strips MySQL # comments', () => {
+        expect(tableLabels('SELECT a # b FROM pg_t JOIN other_t ON 1=1', 'PostgreSQL')).toEqual(['pg_t', 'other_t']);
+        expect(tableLabels('SELECT 1 FROM my_t # FROM ghost\nJOIN j2 ON 1=1', 'MySQL')).toEqual(['my_t', 'j2']);
+    });
+});
+
+describe('RENAME TABLE targets', () => {
+    it('labels each renamed table as old → new instead of [object Object]', () => {
+        const result = parseSql('RENAME TABLE a TO b, old_customers TO customers_archive', 'MySQL');
+        expect(result.nodes.filter(node => node.type === 'table').map(node => node.label))
+            .toEqual(['a → b', 'old_customers → customers_archive']);
+        expect(JSON.stringify(result.nodes)).not.toContain('[object Object]');
     });
 });

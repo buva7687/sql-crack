@@ -44,7 +44,9 @@ function resolveHintLine(
     if (hint.nodeId) {
         const node = query.nodes.find(n => n.id === hint.nodeId);
         if (node?.startLine && node.startLine > 0) {
-            return clampLine((queryStartLine - 1) + (node.startLine - 1), document.lineCount);
+            // parseSqlBatch already offsets node lines to file lines; adding
+            // the query start again placed node hints past their statement.
+            return clampLine(node.startLine - 1, document.lineCount);
         }
     }
 
