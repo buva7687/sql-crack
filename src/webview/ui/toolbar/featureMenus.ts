@@ -293,6 +293,24 @@ export function createFocusModeSelector(
     document.addEventListener('theme-change', focusThemeChangeHandler, listenerOptions);
     context.documentListeners.push({ type: 'theme-change', handler: focusThemeChangeHandler });
 
+    // U/D/A and the command bar change the focus direction without the menu;
+    // mirror a click on the matching item (button icon and ✓) when it changes.
+    let lastFocusMode = callbacks.getFocusMode();
+    const focusModeStateHandler = (() => {
+        const mode = callbacks.getFocusMode();
+        if (mode === lastFocusMode) {
+            return;
+        }
+        lastFocusMode = mode;
+        const selected = modes.find(candidate => candidate.id === mode);
+        if (selected) {
+            btn.innerHTML = selected.icon;
+        }
+        applyFocusModeDropdownTheme(dropdown, mode, callbacks.isDarkTheme());
+    }) as EventListener;
+    document.addEventListener('layout-state-changed', focusModeStateHandler, listenerOptions);
+    context.documentListeners.push({ type: 'layout-state-changed', handler: focusModeStateHandler });
+
     applyFocusModeDropdownTheme(dropdown, callbacks.getFocusMode(), dark);
     container.appendChild(btn);
     document.body.appendChild(dropdown);

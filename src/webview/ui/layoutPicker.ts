@@ -126,6 +126,15 @@ export function createLayoutPicker(
         dropdown.style.boxShadow = nextTheme.shadow;
     }) as EventListener, { signal: layoutPickerAbortController.signal });
 
+    // Layout keys (1-5, H), the command bar, undo, and restored state change
+    // the layout without clicking the picker; keep its icon and list current.
+    document.addEventListener('layout-state-changed', () => {
+        btn.innerHTML = getLayoutIcon(callbacks.getCurrentLayout());
+        if (isOpen) {
+            renderLayoutItems(dropdown, callbacks);
+        }
+    }, { signal: layoutPickerAbortController.signal });
+
     return container;
 }
 

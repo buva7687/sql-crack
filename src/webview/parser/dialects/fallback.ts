@@ -73,21 +73,31 @@ function extractRoutineDdlInfo(sql: string): RoutineDdlInfo | null {
     };
 }
 
-/** Replace single-quoted string literals (quotes included) with spaces, keeping offsets. */
-function maskSingleQuotedLiterals(sql: string, backslashEscapes: boolean): string {
+/**
+ * Replace quoted tokens (quotes included) with spaces, keeping offsets: single-
+ * and double-quoted text, backtick identifiers, and bracket identifiers where
+ * the dialect has them. A keyword inside any of these is not SQL structure,
+ * whether the token is a MySQL "string" or a PostgreSQL "identifier".
+ */
+function maskQuotedTokens(sql: string, backslashEscapes: boolean, bracketIdentifiers: boolean): string {
     const chars = sql.split('');
     for (let index = 0; index < chars.length; index++) {
-        if (sql[index] !== "'") {
+        const open = sql[index];
+        const isQuote = open === "'" || open === '"' || open === '`' || (bracketIdentifiers && open === '[');
+        if (!isQuote) {
             continue;
         }
-        const escapesAllowed = quotedStringAllowsBackslashEscapes(sql, index, backslashEscapes);
+        const close = open === '[' ? ']' : open;
+        // Backslash escapes apply to string literals ('...' and MySQL-style "...").
+        const escapesAllowed = (open === "'" || open === '"')
+            && quotedStringAllowsBackslashEscapes(sql, index, backslashEscapes);
         let end = index + 1;
         while (end < sql.length) {
             if (escapesAllowed && sql[end] === '\\' && end + 1 < sql.length) {
                 end += 2;
-            } else if (sql[end] === "'" && sql[end + 1] === "'") {
+            } else if (sql[end] === close && sql[end + 1] === close) {
                 end += 2;
-            } else if (sql[end] === "'") {
+            } else if (sql[end] === close) {
                 end++;
                 break;
             } else {
@@ -126,11 +136,16 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
         hashComments: dialectSupportsHashComments(dialect),
     });
     const structureMasked = maskStringsAndComments(commentStripped);
-    // Comments are already gone (dialect-aware), so blank only single-quoted
-    // literals: table patterns must not match text such as
-    // 'Copied from staging_backup'. Offsets stay aligned with commentStripped.
-    const literalMasked = maskSingleQuotedLiterals(commentStripped, dialectSupportsBackslashEscapes(dialect));
-    const isInsideStringLiteral = (offset: number): boolean => literalMasked[offset] !== commentStripped[offset];
+    // Comments are already gone (dialect-aware), so blank only quoted tokens:
+    // table patterns must not match keywords inside text such as
+    // 'Copied from staging_backup' or "Copied from ghost_table". Offsets stay
+    // aligned with commentStripped.
+    const quotedMasked = maskQuotedTokens(
+        commentStripped,
+        dialectSupportsBackslashEscapes(dialect),
+        dialect === 'TransactSQL' || dialect === 'SQLite'
+    );
+    const isInsideQuotedToken = (offset: number): boolean => quotedMasked[offset] !== commentStripped[offset];
     const routineDdl = extractRoutineDdlInfo(commentStripped);
 
     const cteNames = new Set<string>();
@@ -224,7 +239,7 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
     for (const pattern of tablePatterns) {
         let match;
         while ((match = pattern.exec(commentStripped)) !== null) {
-            if (isInsideStringLiteral(match.index)) {
+            if (isInsideQuotedToken(match.index)) {
                 continue;
             }
             if (/^FROM\b/i.test(match[0]) && isFunctionFromDelimiter(structureMasked, match.index)) {
@@ -260,7 +275,7 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
 
     while ((refMatch = tableRefPattern.exec(commentStripped)) !== null) {
         const keyword = refMatch[1].toUpperCase();
-        if (isInsideStringLiteral(refMatch.index)) {
+        if (isInsideQuotedToken(refMatch.index)) {
             continue;
         }
         if (keyword === 'FROM' && isFunctionFromDelimiter(structureMasked, refMatch.index)) {

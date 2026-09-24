@@ -1,4 +1,6 @@
 import { createFocusModeSelector, createPinnedTabsButton, createViewLocationButton } from '../../../src/webview/ui/toolbar/featureMenus';
+import { createLayoutPicker, disposeLayoutPicker } from '../../../src/webview/ui/layoutPicker';
+import type { LayoutType } from '../../../src/webview/types';
 import { getComponentUiColors } from '../../../src/webview/constants';
 import type { FocusMode } from '../../../src/webview/types';
 
@@ -280,6 +282,62 @@ describe('featureMenus toolbar ui', () => {
         expect(onFocusModeChange).toHaveBeenCalledWith('upstream' as FocusMode);
         expect(btn.innerHTML).toBe('↑');
         expect(dropdown?.style.display).toBe('none');
+    });
+
+    it('updates the Focus Direction icon and check mark when U/D/A change the mode', () => {
+        const { body, emitDocument } = setupDomHarness();
+        const docListeners: Array<{ type: string; handler: EventListener }> = [];
+        let mode: FocusMode = 'all';
+        const element = createFocusModeSelector({
+            isDarkTheme: () => true,
+            onFocusModeChange: jest.fn(),
+            getFocusMode: () => mode,
+            onChangeViewLocation: jest.fn(),
+            onOpenPinnedTab: jest.fn(),
+            onUnpinTab: jest.fn(),
+        }, {
+            documentListeners: docListeners,
+            getListenerOptions: () => undefined,
+            getBtnStyle: () => 'background: transparent;',
+        }) as unknown as FakeElement;
+        const btn = element.children[0];
+        const dropdown = body.children.find((child) => child.id === 'focus-mode-dropdown');
+        const initialIcon = btn.innerHTML;
+
+        // Unrelated renderer state changes leave the button alone.
+        emitDocument('layout-state-changed');
+        expect(btn.innerHTML).toBe(initialIcon);
+
+        // Pressing D sets the downstream direction in the renderer.
+        mode = 'downstream';
+        emitDocument('layout-state-changed');
+        expect(btn.innerHTML).toBe('↓');
+        const downstreamItem = dropdown?.children.find((child) => child.dataset.mode === 'downstream');
+        expect(downstreamItem?.getAttribute('aria-checked')).toBe('true');
+    });
+
+    it('updates the layout picker icon when layout keys change the layout', () => {
+        const { emitDocument } = setupDomHarness();
+        let layout: LayoutType = 'vertical';
+        const container = createLayoutPicker({
+            onLayoutChange: jest.fn(),
+            getCurrentLayout: () => layout,
+            isDarkTheme: () => true,
+        } as any, []) as unknown as FakeElement;
+        try {
+            const btn = container.children[0];
+            const verticalIcon = btn.innerHTML;
+
+            layout = 'horizontal';
+            emitDocument('layout-state-changed');
+            expect(btn.innerHTML).not.toBe(verticalIcon);
+
+            layout = 'vertical';
+            emitDocument('layout-state-changed');
+            expect(btn.innerHTML).toBe(verticalIcon);
+        } finally {
+            disposeLayoutPicker();
+        }
     });
 
     it('opens pinned tabs, launches a pin, and removes a pin on delete', () => {

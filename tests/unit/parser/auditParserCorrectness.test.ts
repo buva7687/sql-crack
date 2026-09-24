@@ -115,6 +115,17 @@ describe('regex fallback table detection', () => {
         expect(tableLabels("SELECT 'join ghost' AS j FROM real_t FOR UPDATE OF real_t", 'PostgreSQL')).toEqual(['real_t']);
     });
 
+    it('ignores table keywords inside double-quoted and backtick tokens in every dialect', () => {
+        const sql = 'SELECT "Copied from ghost_table" AS note FROM real_table FOR UPDATE SKIP LOCKED';
+        for (const dialect of ['MySQL', 'MariaDB', 'BigQuery', 'PostgreSQL', 'Snowflake'] as SqlDialect[]) {
+            expect(tableLabels(sql, dialect)).toEqual(['real_table']);
+        }
+        expect(tableLabels('SELECT `join ghost` AS j FROM real_t FOR UPDATE', 'MySQL')).toEqual(['real_t']);
+        // Quoted table names themselves are still found.
+        expect(tableLabels('SELECT 1 FROM "my table" JOIN [other] ON 1=1 FOR UPDATE', 'TransactSQL'))
+            .toEqual(['my table', 'other']);
+    });
+
     it('ignores ON DUPLICATE KEY UPDATE and ON UPDATE CASCADE', () => {
         expect(tableLabels('INSERT INTO t1 (a) VALUES (1) ON DUPLICATE KEY UPDATE a = 2', 'MySQL')).toEqual(['t1']);
         expect(tableLabels('CREATE TABLE c (id int REFERENCES p(id) ON UPDATE CASCADE); UPDATE real_upd SET a = 1', 'MySQL'))
