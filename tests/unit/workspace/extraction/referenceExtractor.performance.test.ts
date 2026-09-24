@@ -56,4 +56,26 @@ describe('ReferenceExtractor table line lookup performance', () => {
         // Previously ~10 s at this size (quadratic line lookups); now linear.
         expect(elapsed).toBeLessThan(5000);
     });
+
+    it('builds the statement alias map once instead of once per FROM item', () => {
+        const extractor = new ReferenceExtractor();
+        const buildAliasMap = jest.spyOn((extractor as any).columnExtractor, 'buildAliasMap');
+        const sql = `SELECT * FROM ${Array.from({ length: 200 }, (_, index) => `t${index}`).join(', ')};`;
+
+        expect(extractor.extractReferences(sql, 'wide.sql', 'MySQL')).toHaveLength(200);
+        // One map for column attribution plus the query-analysis map.
+        expect(buildAliasMap.mock.calls.length).toBeLessThan(5);
+    });
+
+    it('handles very wide FROM lists without quadratic alias rebuilds', () => {
+        const sql = `SELECT * FROM ${Array.from({ length: 10000 }, (_, index) => `t${index}`).join(', ')};`;
+        const start = Date.now();
+        const refs = new ReferenceExtractor().extractReferences(sql, 'wide.sql', 'MySQL');
+        const elapsed = Date.now() - start;
+
+        expect(refs).toHaveLength(10000);
+        // Previously ~5 s at this size; now ~1 s.
+        expect(elapsed).toBeLessThan(4000);
+    });
 });
+

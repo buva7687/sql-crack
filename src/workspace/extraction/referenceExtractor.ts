@@ -70,6 +70,12 @@ export class ReferenceExtractor {
     private locationStatementBoundaries: number[] = [];
     /** Per-extraction line lookup; cleared after each call so file text is not retained. */
     private readonly offsets = new TextOffsetIndex();
+    /**
+     * Statement alias maps, built once per statement AST instead of once per
+     * FROM/JOIN item (which made wide FROM lists quadratic). Keyed weakly by the
+     * AST node so maps are released with it.
+     */
+    private statementAliasMaps = new WeakMap<object, Map<string, string>>();
 
     constructor(options: Partial<ExtractionOptions> = {}) {
         this.parser = new Parser();
@@ -2385,15 +2391,39 @@ export class ReferenceExtractor {
 
         const tableName = this.getTableNameFromItem(tableItem);
         const tableAlias = typeof tableItem.as === 'string' ? tableItem.as : undefined;
-        const columns: ColumnReference[] = [];
 
-        // Build alias map from the statement
-        const tableAliases = this.columnExtractor.buildAliasMap(stmt);
-
-        // Add this table's alias
-        if (tableAlias && tableName) {
-            tableAliases.set(tableAlias, tableName);
+        let tableAliases = this.statementAliasMaps.get(stmt);
+        if (!tableAliases) {
+            tableAliases = this.columnExtractor.buildAliasMap(stmt);
+            this.statementAliasMaps.set(stmt, tableAliases);
         }
+
+        // Apply this table's alias only for this call, then restore, so each
+        // FROM item sees exactly the map a fresh buildAliasMap() + set() gave it.
+        if (!tableAlias || !tableName) {
+            return this.collectColumnsForTable(stmt, tableName, tableAlias, tableAliases);
+        }
+        const hadAlias = tableAliases.has(tableAlias);
+        const previousTarget = tableAliases.get(tableAlias);
+        tableAliases.set(tableAlias, tableName);
+        try {
+            return this.collectColumnsForTable(stmt, tableName, tableAlias, tableAliases);
+        } finally {
+            if (hadAlias) {
+                tableAliases.set(tableAlias, previousTarget as string);
+            } else {
+                tableAliases.delete(tableAlias);
+            }
+        }
+    }
+
+    private collectColumnsForTable(
+        stmt: AstStatement,
+        tableName: string | undefined,
+        tableAlias: string | undefined,
+        tableAliases: Map<string, string>
+    ): ColumnReference[] {
+        const columns: ColumnReference[] = [];
 
         // Extract columns from SELECT clause
         if (stmt.columns && Array.isArray(stmt.columns)) {
