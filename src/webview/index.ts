@@ -1223,10 +1223,13 @@ function init(): void {
     document.addEventListener('keydown', (e) => {
         // Don't trigger when typing in input fields
         const activeElement = document.activeElement as HTMLElement | null;
+        const isMenuFocused = typeof activeElement?.closest === 'function'
+            && activeElement.closest('[role="menu"], [role="listbox"]') !== null;
         const isInputFocused = activeElement?.tagName === 'INPUT'
             || activeElement?.tagName === 'TEXTAREA'
             || activeElement?.tagName === 'SELECT'
-            || activeElement?.isContentEditable === true;
+            || activeElement?.isContentEditable === true
+            || isMenuFocused;
         if (isInputFocused) { return; }
 
         // Skip if modifier keys are pressed (except for these shortcuts)

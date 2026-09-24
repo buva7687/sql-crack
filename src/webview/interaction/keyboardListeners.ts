@@ -132,10 +132,15 @@ export function registerDocumentKeyboardListeners(
         }
 
         const activeElement = document.activeElement as HTMLElement | null;
+        // Keyboard focus inside a toolbar menu belongs to that menu (it handles
+        // arrows, Enter, and Escape); letters must not toggle graph features.
+        const isMenuFocused = typeof activeElement?.closest === 'function'
+            && activeElement.closest('[role="menu"], [role="listbox"]') !== null;
         const isInputFocused = activeElement?.tagName === 'INPUT'
             || activeElement?.tagName === 'TEXTAREA'
             || activeElement?.tagName === 'SELECT'
-            || activeElement?.isContentEditable === true;
+            || activeElement?.isContentEditable === true
+            || isMenuFocused;
 
         if (!isInputFocused && (e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'z' || e.key === 'Z')) {
             e.preventDefault();

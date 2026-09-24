@@ -1,5 +1,5 @@
 import type { SqlDialect } from '../../types';
-import { getDollarQuoteDelimiterAt, isPostgresJsonPathOperatorAt } from '../../../shared';
+import { dialectSupportsHashComments, getDollarQuoteDelimiterAt, isPostgresJsonPathOperatorAt } from '../../../shared';
 import { preprocessJinjaTemplates } from './jinjaPreprocessor';
 
 interface TextRewrite {
@@ -1444,9 +1444,33 @@ function isBoundaryChar(ch: string | undefined): boolean {
 }
 
 /**
+ * Whether `#` starts a line comment when a masker call does not say. Parsing
+ * and preprocessing run synchronously, so `withSqlDialectLexing()` scopes this
+ * to the dialect being parsed (PostgreSQL `#` is XOR, not a comment) without
+ * threading the dialect through every helper. Dialect-agnostic callers such as
+ * detection keep the permissive default.
+ */
+let defaultHashComments = true;
+
+/** Run `fn` with `#`-comment masking set for `dialect`, restoring the previous rule. */
+export function withSqlDialectLexing<T>(dialect: SqlDialect, fn: () => T): T {
+    const previous = defaultHashComments;
+    defaultHashComments = dialectSupportsHashComments(dialect);
+    try {
+        return fn();
+    } finally {
+        defaultHashComments = previous;
+    }
+}
+
+/**
  * Replace string literals and comments with spaces (preserving length/positions).
  */
-export function maskStringsAndComments(sql: string): string {
+export function maskStringsAndComments(
+    sql: string,
+    options: { hashComments?: boolean } = {}
+): string {
+    const hashComments = options.hashComments ?? defaultHashComments;
     const chars = sql.split('');
     let i = 0;
     while (i < chars.length) {
@@ -1482,7 +1506,7 @@ export function maskStringsAndComments(sql: string): string {
             }
             continue;
         }
-        if (chars[i] === '#' && !isPostgresJsonPathOperatorAt(sql, i)) {
+        if (chars[i] === '#' && hashComments && !isPostgresJsonPathOperatorAt(sql, i)) {
             const next = i + 1 < chars.length ? chars[i + 1] : '';
             const afterDoubleHash = i + 2 < chars.length ? chars[i + 2] : '';
             const isTempIdentifier =
@@ -2654,6 +2678,10 @@ function findStatementTerminatorAtDepth0(masked: string, pos: number): number {
 }
 
 export function preprocessForParsing(sql: string, dialect: SqlDialect): { sql: string; hadJinja: boolean } {
+    return withSqlDialectLexing(dialect, () => preprocessForParsingForDialect(sql, dialect));
+}
+
+function preprocessForParsingForDialect(sql: string, dialect: SqlDialect): { sql: string; hadJinja: boolean } {
     const { rewritten, hadJinja } = preprocessJinjaTemplates(sql);
     let result = rewritten;
 

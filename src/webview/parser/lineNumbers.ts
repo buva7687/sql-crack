@@ -91,6 +91,11 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
     const sqlLines = sql.split('\n');
     const commentStrippedLines = stripCommentsPreserveLineNumbers(sql).split('\n');
     const clauseRegex = /\b(from|join|into|using|update|delete)\b/i;
+    // DDL and utility statements (CREATE, DROP, ALTER, RENAME, TRUNCATE, ...)
+    // have no SELECT/DML anchor; their nodes fall back to the statement's
+    // first code line so click-to-source still works.
+    const firstCodeLineIndex = commentStrippedLines.findIndex(line => line.trim() !== '');
+    const firstCodeLine = firstCodeLineIndex >= 0 ? firstCodeLineIndex + 1 : undefined;
 
     // Track used lines per keyword type so each node gets the next unused occurrence
     const usedLines = new Map<string, number[]>();
@@ -114,7 +119,8 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
     for (const node of nodes) {
         switch (node.type) {
             case 'table': {
-                const tableName = node.label.toLowerCase().trim();
+                // RENAME targets are labeled "old → new"; locate the old name.
+                const tableName = node.label.split(' → ')[0].toLowerCase().trim();
                 const fromLines = keywordLines.get('FROM') || [];
                 const joinLines = [
                     ...(keywordLines.get('JOIN') || []),
@@ -155,7 +161,7 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
                     }
                 }
 
-                node.startLine = foundLine || (fromLines.length > 0 ? fromLines[0] : undefined);
+                node.startLine = foundLine || (fromLines.length > 0 ? fromLines[0] : firstCodeLine);
                 break;
             }
             case 'join': {
@@ -222,9 +228,9 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
                     ...updateLines,
                     ...deleteLines,
                 ];
-                if (candidateLines.length > 0) {
-                    node.startLine = Math.min(...candidateLines);
-                }
+                node.startLine = candidateLines.length > 0
+                    ? Math.min(...candidateLines)
+                    : firstCodeLine;
                 break;
             }
         }

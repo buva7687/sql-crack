@@ -2143,6 +2143,53 @@ export class ReferenceExtractor {
             `(${REFERENCE_SQL_IDENTIFIER_PATTERN})`
                 + `(?:\\s*\\.\\s*(${REFERENCE_SQL_IDENTIFIER_PATTERN}))?`
                 + `(?:\\s*\\.\\s*(${REFERENCE_SQL_IDENTIFIER_PATTERN}))?`;
+        /**
+         * Record one table match. `baseIndex` is added to `match.index` when the
+         * pattern ran over a slice of sqlNoComments (e.g. a DELETE ... USING list).
+         */
+        const pushTableMatch = (
+            match: RegExpExecArray,
+            baseIndex: number,
+            referenceType: ReferenceType,
+            context: string,
+            hasAlias: boolean
+        ): void => {
+            const matchIndex = baseIndex + match.index;
+            const rawCatalog = match[3] ? match[1] : undefined;
+            const rawSchema = match[3] ? match[2] : (match[2] ? match[1] : undefined);
+            const rawName = match[3] || match[2] || match[1];
+            const tableName = this.unquoteIdentifier(rawName);
+            const nameQuoted = this.isQuotedIdentifier(rawName);
+            if (this.isReservedWord(tableName) && !nameQuoted) {
+                return;
+            }
+            const schema = rawSchema ? this.unquoteIdentifier(rawSchema) : undefined;
+            const catalog = rawCatalog ? this.unquoteIdentifier(rawCatalog) : undefined;
+            const statementIndex = getStatementIndex(matchIndex);
+            // The fallback regex runs against a position-preserving mask, so the
+            // captured identifier already provides its exact source location.
+            // Re-searching the complete SQL for every match made this path O(n²).
+            const aliasOffset = hasAlias && match[4]
+                ? match[0].lastIndexOf(match[4])
+                : match[0].length;
+            const tableOffset = match[0].lastIndexOf(rawName, Math.max(0, aliasOffset - 1));
+            const tableIndex = matchIndex + Math.max(0, tableOffset);
+            references.push({
+                tableName,
+                alias: hasAlias ? match[4] : undefined,
+                schema,
+                catalog,
+                nameQuoted,
+                schemaQuoted: this.isQuotedIdentifier(rawSchema),
+                catalogQuoted: this.isQuotedIdentifier(rawCatalog),
+                referenceType,
+                filePath,
+                lineNumber: getLineNumber(tableIndex),
+                context,
+                statementIndex,
+            });
+        };
+
         const appendMatches = (
             pattern: RegExp,
             referenceType: ReferenceType,
@@ -2158,44 +2205,13 @@ export class ReferenceExtractor {
                 if (referenceType === 'update' && hasPriorTopLevelStatementVerb(match.index)) {
                     continue;
                 }
-                const rawCatalog = match[3] ? match[1] : undefined;
-                const rawSchema = match[3] ? match[2] : (match[2] ? match[1] : undefined);
-                const rawName = match[3] || match[2] || match[1];
-                const tableName = this.unquoteIdentifier(rawName);
-                const nameQuoted = this.isQuotedIdentifier(rawName);
-                if (this.isReservedWord(tableName) && !nameQuoted) {
-                    continue;
-                }
-                const schema = rawSchema ? this.unquoteIdentifier(rawSchema) : undefined;
-                const catalog = rawCatalog ? this.unquoteIdentifier(rawCatalog) : undefined;
-                const statementIndex = getStatementIndex(match.index);
-                // The fallback regex runs against a position-preserving mask, so the
-                // captured identifier already provides its exact source location.
-                // Re-searching the complete SQL for every match made this path O(n²).
-                const aliasOffset = hasAlias && match[4]
-                    ? match[0].lastIndexOf(match[4])
-                    : match[0].length;
-                const tableOffset = match[0].lastIndexOf(rawName, Math.max(0, aliasOffset - 1));
-                const tableIndex = match.index + Math.max(0, tableOffset);
-                references.push({
-                    tableName,
-                    alias: hasAlias ? match[4] : undefined,
-                    schema,
-                    catalog,
-                    nameQuoted,
-                    schemaQuoted: this.isQuotedIdentifier(rawSchema),
-                    catalogQuoted: this.isQuotedIdentifier(rawCatalog),
-                    referenceType,
-                    filePath,
-                    lineNumber: getLineNumber(tableIndex),
-                    context,
-                    statementIndex,
-                });
+                pushTableMatch(match, 0, referenceType, context, hasAlias);
             }
         };
 
         appendMatches(
-            new RegExp(`\\bFROM\\s+${qualifiedTablePattern}(?:\\s+(?:AS\\s+)?([A-Za-z_][\\w$#@]*))?`, 'gi'),
+            // `DELETE FROM t` is the delete target (recorded below), not a read.
+            new RegExp(`(?<!\\bDELETE\\s+)\\bFROM\\s+${qualifiedTablePattern}(?:\\s+(?:AS\\s+)?([A-Za-z_][\\w$#@]*))?`, 'gi'),
             'select',
             'FROM',
             true,
@@ -2210,6 +2226,29 @@ export class ReferenceExtractor {
         appendMatches(new RegExp(`\\bINSERT\\s+INTO\\s+${qualifiedTablePattern}`, 'gi'), 'insert', 'INSERT INTO', false);
         appendMatches(new RegExp(`\\bUPDATE\\s+${qualifiedTablePattern}`, 'gi'), 'update', 'UPDATE', false);
         appendMatches(new RegExp(`\\bDELETE\\s+FROM\\s+${qualifiedTablePattern}`, 'gi'), 'delete', 'DELETE FROM', false);
+
+        // PostgreSQL `DELETE FROM t USING a, b WHERE ...`: every USING entry
+        // is a read source. The AST parser rejects this form, so without this
+        // the fallback dropped the source tables entirely.
+        const deleteUsingPattern = new RegExp(
+            `\\bDELETE\\s+FROM\\s+${qualifiedTablePattern}(?:\\s+(?:AS\\s+)?[A-Za-z_][\\w$#@]*)?\\s+USING\\s+`,
+            'gi'
+        );
+        let usingMatch: RegExpExecArray | null;
+        while ((usingMatch = deleteUsingPattern.exec(sqlNoComments)) !== null) {
+            const listStart = usingMatch.index + usingMatch[0].length;
+            const remainder = sqlNoComments.slice(listStart);
+            const clauseEnd = /\b(?:WHERE|RETURNING)\b|;/i.exec(remainder);
+            const listText = remainder.slice(0, clauseEnd ? clauseEnd.index : remainder.length);
+            const itemPattern = new RegExp(
+                `(?:^|,)\\s*${qualifiedTablePattern}(?:\\s+(?:AS\\s+)?([A-Za-z_][\\w$#@]*))?`,
+                'gi'
+            );
+            let itemMatch: RegExpExecArray | null;
+            while ((itemMatch = itemPattern.exec(listText)) !== null) {
+                pushTableMatch(itemMatch, listStart, 'select', 'USING', true);
+            }
+        }
 
         return references;
     }

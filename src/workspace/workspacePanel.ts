@@ -184,6 +184,11 @@ export class WorkspacePanel {
         }
 
         await this.buildLineageGraph();
+        // The panel may have been closed while lineage was building; there is
+        // nothing to show, and warning "not ready" would be misleading.
+        if (this._isDisposed) {
+            return false;
+        }
 
         this._currentView = 'lineage';
         this._lineageDetailDirection = 'both';

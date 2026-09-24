@@ -23,7 +23,8 @@ import {
     rewriteGroupingSets,
     maskStringsAndComments,
     stripSqlComments,
-    stripFilterClauses
+    stripFilterClauses,
+    withSqlDialectLexing,
 } from './parser/dialects/preprocessing';
 import { preprocessJinjaTemplates } from './parser/dialects/jinjaPreprocessor';
 import { detectDialectSpecificSyntax } from './parser/dialects/warnings';
@@ -1260,6 +1261,12 @@ function applyParserCompatibilityPreprocessing(
 }
 
 export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: ParseOptions = {}): ParseResult {
+    // Masking helpers used throughout parsing (DML/MERGE statement handlers,
+    // hints, regex fallback) apply this dialect's `#` comment rule.
+    return withSqlDialectLexing(dialect, () => parseSqlForDialect(sql, dialect, options));
+}
+
+function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOptions): ParseResult {
     // Keep the source text as the public result payload. Compatibility rewrites
     // below are parser implementation details and must never replace the SQL
     // shown, copied, pinned, or compared by the webview.
@@ -1733,24 +1740,28 @@ function processStatement(context: ParserContext, stmt: any, nodes: FlowNode[], 
 
             // RENAME TABLE reports each target as an [old, new] pair; String()
             // on the pair rendered "[object Object],[object Object]".
-            const getTargetLabel = (target: any): string => {
+            const getTargetNames = (target: any): string[] => {
                 if (Array.isArray(target)) {
-                    return target.map(getTargetLabel).filter(Boolean).join(' → ');
+                    return target.flatMap(getTargetNames);
                 }
-                if (typeof target === 'string') {
-                    return target;
-                }
-                return getTableName(target)
-                    || (typeof target?.table === 'string' ? target.table : '')
-                    || (typeof target?.name === 'string' ? target.name : '');
+                const name = typeof target === 'string'
+                    ? target
+                    : getTableName(target)
+                        || (typeof target?.table === 'string' ? target.table : '')
+                        || (typeof target?.name === 'string' ? target.name : '');
+                return name ? [name] : [];
             };
 
             for (const t of tables) {
-                const tableName = getTargetLabel(t);
+                const targetNames = getTargetNames(t);
+                const tableName = targetNames.join(' → ');
                 if (!tableName) {
                     continue;
                 }
-                context.stats.tables++;
+                // stats.tables is recomputed from tableUsageMap once the
+                // statement is processed, so record targets there; counting
+                // stats.tables directly left simple UPDATE/DELETE/INSERT at 0.
+                targetNames.forEach(name => trackTableUsage(context, name));
                 const tableId = genId(context, 'table');
                 nodes.push({
                     id: tableId,

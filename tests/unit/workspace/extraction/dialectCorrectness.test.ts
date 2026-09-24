@@ -158,3 +158,12 @@ describe('Teradata CTAS regex fallback', () => {
             .toEqual([['customer_summary', []], ['plain_t', ['id', 'name']]]);
     });
 });
+
+describe('PostgreSQL DELETE ... USING regex fallback', () => {
+    it('records USING tables as reads and the target only as the delete', () => {
+        expect(refs('DELETE FROM tgt USING src WHERE tgt.id = src.id;', 'PostgreSQL'))
+            .toEqual(['tgt:delete', 'src:select']);
+        expect(refs('DELETE FROM public.tgt t USING src s, other o WHERE t.id = s.id AND o.x = 1 RETURNING t.id;', 'PostgreSQL'))
+            .toEqual(['tgt:delete', 'src:select', 'other:select']);
+    });
+});

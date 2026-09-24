@@ -266,6 +266,23 @@ describe('keyboardListeners', () => {
         expect(callbacks.resetView).not.toHaveBeenCalled();
     });
 
+    it('does not fire graph shortcuts while a toolbar menu item has focus', () => {
+        const callbacks = createCallbacks();
+        const keydown = registerDocumentHandler(callbacks);
+        (global.document as any).activeElement = {
+            tagName: 'DIV',
+            closest: (selector: string) => (selector.includes('[role="menu"]') ? {} : null),
+        };
+
+        keydown(keyEvent('t'));
+        keydown(keyEvent('f'));
+        keydown(keyEvent('r'));
+
+        expect(callbacks.toggleTheme).not.toHaveBeenCalled();
+        expect(callbacks.toggleFullscreen).not.toHaveBeenCalled();
+        expect(callbacks.refreshVisualization).not.toHaveBeenCalled();
+    });
+
     it('lets SVG Escape exit fullscreen before clearing graph state', () => {
         const svg = createKeyboardTarget();
         const callbacks = createCallbacks();

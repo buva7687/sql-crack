@@ -6,6 +6,7 @@
 
 import { detectDialect, parseSql, parseSqlBatch, splitSqlStatements } from '../../../src/webview/sqlParser';
 import { regexFallbackParse } from '../../../src/webview/parser/dialects/fallback';
+import { maskStringsAndComments, withSqlDialectLexing } from '../../../src/webview/parser/dialects/preprocessing';
 import type { SqlDialect } from '../../../src/webview/types';
 
 const replacer = (_key: string, value: unknown) => value instanceof Map ? [...value.entries()] : value;
@@ -132,5 +133,61 @@ describe('RENAME TABLE targets', () => {
         expect(result.nodes.filter(node => node.type === 'table').map(node => node.label))
             .toEqual(['a → b', 'old_customers → customers_archive']);
         expect(JSON.stringify(result.nodes)).not.toContain('[object Object]');
+    });
+});
+
+describe('DDL and single-table DML nodes', () => {
+    it('gives DDL and RENAME nodes the statement line for click-to-source', () => {
+        const batch = parseSqlBatch([
+            'SELECT 1;',
+            '',
+            'CREATE TABLE foo (id int);',
+            'DROP TABLE bar;',
+            '-- note',
+            'ALTER TABLE baz ADD c int;',
+        ].join('\n'), 'MySQL');
+        const lines = batch.queries.slice(1).map(query => query.nodes.map(node => `${node.label}@${node.startLine}`));
+
+        expect(lines[0]).toEqual(['TABLE foo@3']);
+        expect(lines[1]).toEqual(expect.arrayContaining(['DROP TABLE bar@4']));
+        expect(lines[2]).toEqual(expect.arrayContaining(['ALTER TABLE baz@6']));
+
+        const rename = parseSql('RENAME TABLE a TO b', 'MySQL');
+        expect(rename.nodes.every(node => node.startLine === 1)).toBe(true);
+    });
+
+    it('counts the target table of simple UPDATE, DELETE, INSERT, and RENAME statements', () => {
+        const tables = (sql: string) => parseSql(sql, 'MySQL').stats.tables;
+        expect(tables('UPDATE t SET a = 1 WHERE id = 2')).toBe(1);
+        expect(tables('DELETE FROM t WHERE id = 1')).toBe(1);
+        expect(tables('INSERT INTO t (a) VALUES (1)')).toBe(1);
+        expect(tables('RENAME TABLE a TO b')).toBe(2);
+        expect(tables('INSERT INTO t SELECT * FROM s')).toBe(2);
+    });
+});
+
+describe('unqualified column lineage', () => {
+    const firstStep = (sql: string, column: string) => parseSql(sql, 'MySQL').columnFlows
+        ?.find(flow => flow.outputColumn === column)?.lineagePath[0];
+
+    it('traces plain columns of a single-table query to that table', () => {
+        expect(firstStep('SELECT id FROM orders', 'id')).toEqual(expect.objectContaining({ nodeName: 'orders', columnName: 'id', transformation: 'source' }));
+        expect(firstStep('SELECT id, name FROM orders WHERE x > 1', 'name')).toEqual(expect.objectContaining({ nodeName: 'orders', transformation: 'source' }));
+        expect(firstStep('SELECT COUNT(id) AS n FROM orders', 'n')).toEqual(expect.objectContaining({ nodeName: 'orders', columnName: 'id' }));
+    });
+
+    it('does not invent a source for ambiguous or computed columns', () => {
+        expect(firstStep('SELECT id FROM orders o JOIN customers c ON o.cid = c.id', 'id')?.nodeType).not.toBe('table');
+        expect(firstStep('SELECT a + b AS total FROM orders', 'total')?.nodeType).not.toBe('table');
+    });
+});
+
+describe('dialect-scoped # masking', () => {
+    it('keeps PostgreSQL # as an operator inside dialect-scoped work and restores the default', () => {
+        const sql = 'SELECT a # b AS x FROM t1';
+        expect(withSqlDialectLexing('PostgreSQL', () => maskStringsAndComments(sql))).toBe(sql);
+        expect(withSqlDialectLexing('MySQL', () => maskStringsAndComments(sql))).not.toContain('FROM t1');
+        expect(maskStringsAndComments(sql)).not.toContain('FROM t1');
+        expect(maskStringsAndComments(sql, { hashComments: false })).toBe(sql);
     });
 });

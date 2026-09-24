@@ -50,6 +50,22 @@ describe('WorkspacePanel lineage guards and config defaults', () => {
         expect((builders[0] as any).sqlLexRules).toEqual({ hashComments: false, backslashEscapes: false });
     });
 
+    it('does not warn that lineage is not ready when the panel closed during the build', async () => {
+        const warning = jest.spyOn(vscode.window, 'showWarningMessage');
+        const context: any = {
+            _isDisposed: false,
+            _lineageGraph: null,
+            buildLineageGraph: jest.fn(async () => { context._isDisposed = true; }),
+            renderCurrentView: jest.fn(),
+        };
+
+        const traced = await (WorkspacePanel.prototype as any).traceTableInLineage.call(context, 'orders');
+
+        expect(traced).toBe(false);
+        expect(warning).not.toHaveBeenCalled();
+        expect(context.renderCurrentView).not.toHaveBeenCalled();
+    });
+
     it('reuses a single in-flight lineage build promise across concurrent callers', async () => {
         const mockGraph = {
             nodes: new Map(),
