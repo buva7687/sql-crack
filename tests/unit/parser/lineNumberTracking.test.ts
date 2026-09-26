@@ -5,9 +5,13 @@
  *   #3  All union nodes assigned the same source line number
  *   #6  All same-type nodes share the first line (WHERE, GROUP BY, ORDER BY, etc.)
  *   #10 lineNumbers.ts doesn't assign lines for subquery, window, or case nodes
+ * and outer-query nodes claiming keyword lines inside CTE bodies, derived
+ * tables, or OVER (...) specs.
  */
 
 import { assignLineNumbers, extractKeywordLineNumbers } from '../../../src/webview/parser/lineNumbers';
+import { parseSql } from '../../../src/webview/sqlParser';
+import type { SqlDialect } from '../../../src/webview/types/parser';
 import type { FlowNode } from '../../../src/webview/types';
 
 describe('extractKeywordLineNumbers', () => {
@@ -245,5 +249,144 @@ describe('Audit regression: #10 — subquery, window, case nodes get startLine',
 
         assignLineNumbers(nodes, sql);
         expect(nodes[0].startLine).toBeDefined();
+    });
+});
+
+describe('Outer-query nodes skip keywords nested in CTEs, subqueries, and OVER (...)', () => {
+    const lineOf = (nodes: FlowNode[], type: FlowNode['type'], label?: string): number | undefined =>
+        nodes.find(n => n.type === type && (label === undefined || n.label === label))?.startLine;
+
+    it('maps every outer node of a CTE + window query to its own clause', () => {
+        const sql = [
+            'WITH recent AS (',                                                     // 1
+            '    SELECT customer_id, SUM(amount) AS total',                         // 2
+            '    FROM orders',                                                      // 3
+            "    WHERE order_date >= '2026-01-01'",                                 // 4
+            '    GROUP BY customer_id',                                             // 5
+            ')',                                                                    // 6
+            'SELECT',                                                               // 7
+            '    c.name,',                                                          // 8
+            '    c.region,',                                                        // 9
+            '    r.total,',                                                         // 10
+            '    RANK() OVER (PARTITION BY c.region ORDER BY r.total DESC) AS rnk', // 11
+            'FROM customers c',                                                     // 12
+            'JOIN recent r ON c.id = r.customer_id',                                // 13
+            'WHERE r.total > 1000',                                                 // 14
+            'ORDER BY rnk;',                                                        // 15
+        ].join('\n');
+
+        const { nodes } = parseSql(sql, 'PostgreSQL' as SqlDialect);
+
+        expect(lineOf(nodes, 'cte', 'WITH recent')).toBe(1);
+        expect(lineOf(nodes, 'select')).toBe(7);
+        expect(lineOf(nodes, 'window')).toBe(11);
+        expect(lineOf(nodes, 'table', 'customers')).toBe(12);
+        expect(lineOf(nodes, 'table', 'recent')).toBe(13);
+        expect(lineOf(nodes, 'join')).toBe(13);
+        expect(lineOf(nodes, 'filter', 'WHERE')).toBe(14);
+        expect(lineOf(nodes, 'sort')).toBe(15);
+        expect(lineOf(nodes, 'result')).toBe(7);
+    });
+
+    it('locates each CTE definition and outer tables shared with CTE bodies', () => {
+        const sql = [
+            'WITH a AS (',                       // 1
+            '  SELECT id FROM orders',           // 2
+            '),',                                // 3
+            'b AS (',                            // 4
+            '  SELECT id FROM orders',           // 5
+            '  WHERE x > 1',                     // 6
+            ')',                                 // 7
+            'SELECT *',                          // 8
+            'FROM a',                            // 9
+            'JOIN b ON a.id = b.id',             // 10
+            'JOIN orders o ON o.id = a.id',      // 11
+        ].join('\n');
+
+        const { nodes } = parseSql(sql, 'PostgreSQL' as SqlDialect);
+
+        expect(lineOf(nodes, 'cte', 'WITH a')).toBe(1);
+        expect(lineOf(nodes, 'cte', 'WITH b')).toBe(4);
+        expect(lineOf(nodes, 'table', 'b')).toBe(10);
+        expect(lineOf(nodes, 'table', 'orders')).toBe(11);
+        expect(nodes.filter(n => n.type === 'join').map(n => n.startLine)).toEqual([10, 11]);
+        expect(lineOf(nodes, 'select')).toBe(8);
+    });
+
+    it('keeps derived-table clauses for the subquery node', () => {
+        const sql = [
+            'SELECT s.id',        // 1
+            'FROM (',             // 2
+            '  SELECT id FROM t', // 3
+            '  WHERE x = 1',      // 4
+            '  ORDER BY id',      // 5
+            ') s',                // 6
+            'WHERE s.id > 3',     // 7
+            'ORDER BY s.id',      // 8
+        ].join('\n');
+
+        const { nodes } = parseSql(sql, 'PostgreSQL' as SqlDialect);
+
+        expect(lineOf(nodes, 'subquery', 's')).toBe(3);
+        expect(lineOf(nodes, 'select')).toBe(1);
+        expect(lineOf(nodes, 'filter', 'WHERE')).toBe(7);
+        expect(lineOf(nodes, 'sort')).toBe(8);
+    });
+
+    it('anchors tables, CASE, and WHERE past scalar subqueries in the select list', () => {
+        const sql = [
+            'SELECT id,',                                          // 1
+            '  (SELECT MAX(v) FROM w WHERE w.id = u.id) mx,',      // 2
+            "  CASE WHEN a = 1 THEN 'x' END c",                    // 3
+            'FROM u',                                              // 4
+            'WHERE id IN (SELECT id FROM z WHERE q = 1)',          // 5
+        ].join('\n');
+
+        const { nodes } = parseSql(sql, 'PostgreSQL' as SqlDialect);
+
+        expect(lineOf(nodes, 'table', 'u')).toBe(4);
+        expect(lineOf(nodes, 'table', 'w')).toBe(2);
+        expect(lineOf(nodes, 'case')).toBe(3);
+        expect(lineOf(nodes, 'filter', 'WHERE')).toBe(5);
+        expect(lineOf(nodes, 'select')).toBe(1);
+    });
+
+    it('treats parenthesized set-operation branches as outer-query scope', () => {
+        const sql = [
+            '(SELECT a FROM t WHERE x = 1)', // 1
+            'UNION',                         // 2
+            'SELECT b FROM u WHERE y = 2',   // 3
+        ].join('\n');
+
+        const nodes: FlowNode[] = [
+            { id: 'w1', type: 'filter', label: 'WHERE', x: 0, y: 0, width: 100, height: 32 },
+            { id: 'w2', type: 'filter', label: 'WHERE', x: 0, y: 0, width: 100, height: 32 },
+            { id: 'u1', type: 'union', label: 'UNION', x: 0, y: 0, width: 100, height: 32 },
+        ];
+
+        assignLineNumbers(nodes, sql);
+
+        expect(nodes.map(n => n.startLine)).toEqual([1, 3, 2]);
+    });
+
+    it('ignores parentheses inside string literals and comments', () => {
+        const sql = [
+            'WITH x AS (',                          // 1
+            "  SELECT id FROM t WHERE note = ')('", // 2
+            ')',                                    // 3
+            'SELECT id -- (',                       // 4
+            'FROM x',                               // 5
+            'WHERE id > 0',                         // 6
+        ].join('\n');
+
+        const nodes: FlowNode[] = [
+            { id: 'w', type: 'filter', label: 'WHERE', x: 0, y: 0, width: 100, height: 32 },
+            { id: 's', type: 'select', label: 'SELECT', x: 0, y: 0, width: 100, height: 32 },
+        ];
+
+        assignLineNumbers(nodes, sql);
+
+        expect(nodes[0].startLine).toBe(6);
+        expect(nodes[1].startLine).toBe(4);
     });
 });
