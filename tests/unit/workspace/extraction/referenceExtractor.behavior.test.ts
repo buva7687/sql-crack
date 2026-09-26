@@ -7,6 +7,36 @@ describe('ReferenceExtractor behavioral coverage', () => {
         extractor = new ReferenceExtractor();
     });
 
+    it('anchors INSERT and UPDATE targets before later joins to the same table', () => {
+        const insertSql = 'INSERT INTO audit (id)\nSELECT e.id\nFROM events e\nJOIN audit a ON a.id = e.id';
+        const updateSql = 'UPDATE audit\nSET id = a.id\nFROM events e\nJOIN audit a ON a.id = e.id';
+        for (const [sql, targetType] of [
+            [insertSql, 'insert'], [updateSql, 'update'],
+        ] as const) {
+            const refs = extractor.extractReferences(sql, 'query.sql', 'PostgreSQL');
+            expect(refs.find(ref => ref.tableName === 'audit' && ref.referenceType === targetType)?.lineNumber).toBe(1);
+            expect(refs.find(ref => ref.tableName === 'audit' && ref.referenceType === 'join')?.lineNumber).toBe(4);
+        }
+    });
+
+    it('keeps CTE and outer uses of the same table on their own lines', () => {
+        const sql = [
+            'WITH recent AS (',
+            '  SELECT id FROM orders',
+            ')',
+            'SELECT r.id',
+            'FROM recent r',
+            'JOIN orders o ON o.id = r.id',
+        ].join('\n');
+        const refs = extractor.extractReferences(sql, 'query.sql', 'PostgreSQL');
+        expect(refs.filter(ref => ref.tableName === 'orders').map(ref => ref.lineNumber)).toEqual([2, 6]);
+    });
+
+    it('locates comma-listed tables after FROM instead of matching SELECT columns', () => {
+        const refs = extractor.extractReferences('SELECT b.id\nFROM a, b', 'query.sql', 'PostgreSQL');
+        expect(refs.filter(ref => ref.tableName === 'b').map(ref => ref.lineNumber)).toEqual([2]);
+    });
+
     it('extracts base FROM and JOIN table references with aliases', () => {
         const refs = extractor.extractReferences(
             'SELECT u.id, o.total FROM users u JOIN orders o ON u.id = o.user_id',

@@ -35,7 +35,8 @@ import type {
 
 interface TableLineLookup {
     sql: string;
-    contextLineByTable: Map<string, Map<number, number>>;
+    contextLineByTable: Map<string, Map<number, Map<ReferenceType, Array<{ offset: number; line: number }>>>>;
+    nextContextIndex: Map<string, number>;
     fallbackLineByTable: Map<string, Map<number, number>>;
 }
 
@@ -952,31 +953,6 @@ export class ReferenceExtractor {
         depth: number,
         statementIndex: number = 0
     ): void {
-        // Process CTEs first - add to alias map to exclude from references
-        if (stmt.with) {
-            for (const cte of this.getWithClauses(stmt)) {
-                const cteName = this.getCTENameString(cte.name);
-                if (cteName) {
-                    this.addCTEName(aliasMap.cteNames, cte.name);
-                }
-
-                // Extract references from CTE definition
-                const cteStmt = this.getCteStatement(cte);
-                if (cteStmt) {
-                    const cteAliasMap = this.createCteDefinitionAliasMap(aliasMap, cte.name);
-                    this.extractFromStatement(
-                        cteStmt,
-                        filePath,
-                        sql,
-                        references,
-                        cteAliasMap,
-                        depth + 1,
-                        statementIndex
-                    );
-                }
-            }
-        }
-
         // FROM clause
         if (stmt.from) {
             const fromItems = Array.isArray(stmt.from) ? stmt.from : [stmt.from];
@@ -1075,31 +1051,6 @@ export class ReferenceExtractor {
         depth: number,
         statementIndex: number = 0
     ): void {
-        // Process WITH clause first if present (for UPDATE ... WITH ... UPDATE)
-        if (stmt.with) {
-            for (const cte of this.getWithClauses(stmt)) {
-                const cteName = this.getCTENameString(cte.name);
-                if (cteName) {
-                    this.addCTEName(aliasMap.cteNames, cte.name);
-                }
-
-                // Extract references from CTE definition
-                const cteStmt = this.getCteStatement(cte);
-                if (cteStmt) {
-                    const cteAliasMap = this.createCteDefinitionAliasMap(aliasMap, cte.name);
-                    this.extractFromStatement(
-                        cteStmt,
-                        filePath,
-                        sql,
-                        references,
-                        cteAliasMap,
-                        depth + 1,
-                        statementIndex
-                    );
-                }
-            }
-        }
-
         // Target table
         if (stmt.table) {
             const fromAliases = this.collectFromAliases(stmt.from);
@@ -1230,31 +1181,6 @@ export class ReferenceExtractor {
         depth: number,
         statementIndex: number = 0
     ): void {
-        // Process WITH clause first if present (for DELETE ... WITH ... DELETE FROM)
-        if (stmt.with) {
-            for (const cte of this.getWithClauses(stmt)) {
-                const cteName = this.getCTENameString(cte.name);
-                if (cteName) {
-                    this.addCTEName(aliasMap.cteNames, cte.name);
-                }
-
-                // Extract references from CTE definition
-                const cteStmt = this.getCteStatement(cte);
-                if (cteStmt) {
-                    const cteAliasMap = this.createCteDefinitionAliasMap(aliasMap, cte.name);
-                    this.extractFromStatement(
-                        cteStmt,
-                        filePath,
-                        sql,
-                        references,
-                        cteAliasMap,
-                        depth + 1,
-                        statementIndex
-                    );
-                }
-            }
-        }
-
         // Target table
         const tableSource = stmt.from || stmt.table;
         if (tableSource) {
@@ -1428,7 +1354,6 @@ export class ReferenceExtractor {
         if (!tableName) {return null;}
         const catalog = item.schema ? item.db || undefined : undefined;
         const schema = item.schema || item.db || undefined;
-        const fallbackLineNumber = this.findTableLine(sql, tableName, statementIndex);
         const searchContext = refType === 'join'
             ? 'JOIN'
             : refType === 'insert'
@@ -1460,7 +1385,9 @@ export class ReferenceExtractor {
             catalogQuoted: location?.catalogQuoted ?? false,
             referenceType: refType,
             filePath,
-            lineNumber: location?.lineNumber ?? fallbackLineNumber,
+            lineNumber: this.findTableLine(
+                sql, tableName, statementIndex, refType, schema, catalog, location?.lineNumber
+            ),
             context,
             statementIndex
         };
@@ -1637,6 +1564,30 @@ export class ReferenceExtractor {
         return finalPart.replace(/^["'`]+|["'`]+$/g, '').toLowerCase();
     }
 
+    private qualifiedLineLookupKey(tableName: string, schema?: string, catalog?: string): string {
+        return [catalog, schema, tableName]
+            .filter((part): part is string => Boolean(part))
+            .map(part => this.unquoteIdentifier(part).toLowerCase())
+            .join('.');
+    }
+
+    private addContextLine(
+        map: TableLineLookup['contextLineByTable'],
+        key: string,
+        statementIndex: number,
+        kind: ReferenceType,
+        offset: number,
+        line: number
+    ): void {
+        const byStatement = map.get(key) || new Map();
+        const byKind = byStatement.get(statementIndex) || new Map();
+        const occurrences = byKind.get(kind) || [];
+        occurrences.push({ offset, line });
+        byKind.set(kind, occurrences);
+        byStatement.set(statementIndex, byKind);
+        map.set(key, byStatement);
+    }
+
     private addTableLine(
         map: Map<string, Map<number, number>>,
         tableName: string | undefined,
@@ -1728,7 +1679,7 @@ export class ReferenceExtractor {
     }
 
     private buildTableLineLookup(sql: string): TableLineLookup {
-        const contextLineByTable = new Map<string, Map<number, number>>();
+        const contextLineByTable: TableLineLookup['contextLineByTable'] = new Map();
         const fallbackLineByTable = new Map<string, Map<number, number>>();
         const cacheHit = this.locationSearchSource === sql;
         const searchableSql = cacheHit
@@ -1737,31 +1688,93 @@ export class ReferenceExtractor {
         const statementBoundaries = cacheHit
             ? this.locationStatementBoundaries
             : this.getStatementBoundaries(searchableSql);
-        const identifier = '["\'`]?([#A-Za-z_][#A-Za-z0-9_$]*)["\'`]?';
-        const qualifiedIdentifier = `(?:["'\`]?[#A-Za-z_][#A-Za-z0-9_$]*["'\`]?\\.)?${identifier}`;
-        const contextPatterns = [
-            new RegExp(`\\bFROM\\s+${qualifiedIdentifier}\\b`, 'gi'),
-            new RegExp(`\\b(?:INNER|LEFT|RIGHT|FULL|CROSS|OUTER)?\\s*JOIN\\s+${qualifiedIdentifier}\\b`, 'gi'),
-            new RegExp(`\\bINSERT\\s+INTO\\s+${qualifiedIdentifier}\\b`, 'gi'),
-            new RegExp(`\\bUPDATE\\s+${qualifiedIdentifier}\\b`, 'gi'),
-            new RegExp(`\\bDELETE\\s+FROM\\s+${qualifiedIdentifier}\\b`, 'gi'),
+        const identifier = REFERENCE_SQL_IDENTIFIER_PATTERN;
+        const qualifiedIdentifier = `${identifier}(?:\\s*\\.\\s*${identifier}){0,2}`;
+        const contextPatterns: Array<{ kind: ReferenceType; pattern: RegExp }> = [
+            { kind: 'select', pattern: new RegExp(`\\bFROM\\s+(${qualifiedIdentifier})(?![\\w$#@])`, 'gi') },
+            { kind: 'join', pattern: new RegExp(`\\b(?:INNER|LEFT|RIGHT|FULL|CROSS|OUTER)?\\s*JOIN\\s+(${qualifiedIdentifier})(?![\\w$#@])`, 'gi') },
+            { kind: 'insert', pattern: new RegExp(`\\bINSERT\\s+INTO\\s+(${qualifiedIdentifier})(?![\\w$#@])`, 'gi') },
+            { kind: 'update', pattern: new RegExp(`\\bUPDATE\\s+(${qualifiedIdentifier})(?![\\w$#@])`, 'gi') },
+            { kind: 'delete', pattern: new RegExp(`\\bDELETE\\s+FROM\\s+(${qualifiedIdentifier})(?![\\w$#@])`, 'gi') },
         ];
         const fallbackPattern = /["'`]?([#A-Za-z_][#A-Za-z0-9_$]*)["'`]?/g;
+        const identifierParts = new RegExp(identifier, 'g');
 
-        for (const pattern of contextPatterns) {
+        const record = (rawQualified: string, kind: ReferenceType, offset: number): void => {
+            const parts = rawQualified.match(identifierParts);
+            if (!parts?.length) { return; }
+            const key = parts.map(part => this.unquoteIdentifier(part).toLowerCase()).join('.');
+            this.addContextLine(
+                contextLineByTable, key,
+                this.getStatementIndex(statementBoundaries, offset), kind,
+                offset, this.getLineNumberAtIndex(searchableSql, offset)
+            );
+        };
+
+        for (const { kind, pattern } of contextPatterns) {
             pattern.lastIndex = 0;
             let match: RegExpExecArray | null;
             while ((match = pattern.exec(searchableSql)) !== null) {
-                const tableOffset = match[1]
-                    ? match[0].toLowerCase().lastIndexOf(match[1].toLowerCase())
-                    : 0;
-                const tableIndex = match.index + Math.max(0, tableOffset);
-                this.addTableLine(
-                    contextLineByTable,
-                    match[1],
-                    this.getStatementIndex(statementBoundaries, tableIndex),
-                    this.getLineNumberAtIndex(searchableSql, tableIndex)
-                );
+                const rawQualified = match[1];
+                const tableIndex = match.index + match[0].lastIndexOf(rawQualified)
+                    + rawQualified.lastIndexOf(rawQualified.match(identifierParts)?.slice(-1)[0] || rawQualified);
+                record(rawQualified, kind, tableIndex);
+            }
+        }
+
+        // Commas in SELECT lists and function calls are not table references.
+        // Track FROM-list state at each parenthesis level in one pass so wide
+        // comma lists remain linear to index.
+        const fromList = [false];
+        const commaTable = new RegExp(`\\s*(${qualifiedIdentifier})(?![\\w$#@])`, 'y');
+        for (let index = 0; index < searchableSql.length;) {
+            const ch = searchableSql[index];
+            if (ch === '"' || ch === '`' || ch === '[') {
+                const close = ch === '[' ? ']' : ch;
+                index++;
+                while (index < searchableSql.length) {
+                    if (searchableSql[index] === close) {
+                        if (searchableSql[index + 1] === close) { index += 2; continue; }
+                        index++;
+                        break;
+                    }
+                    index++;
+                }
+                continue;
+            }
+            if (ch === '(') { fromList.push(false); index++; continue; }
+            if (ch === ')') { if (fromList.length > 1) { fromList.pop(); } index++; continue; }
+            if (ch === ';') { fromList.length = 1; fromList[0] = false; index++; continue; }
+            if (/[A-Za-z_]/.test(ch)) {
+                const start = index++;
+                while (index < searchableSql.length && /[\w$#@]/.test(searchableSql[index])) { index++; }
+                const word = searchableSql.slice(start, index).toUpperCase();
+                if (word === 'FROM' || word === 'USING') {
+                    fromList[fromList.length - 1] = true;
+                } else if (/^(?:SELECT|WHERE|GROUP|HAVING|ORDER|LIMIT|QUALIFY|UNION|INTERSECT|EXCEPT|MINUS|RETURNING|VALUES|SET)$/.test(word)) {
+                    fromList[fromList.length - 1] = false;
+                }
+                continue;
+            }
+            if (ch === ',' && fromList[fromList.length - 1]) {
+                commaTable.lastIndex = index + 1;
+                const match = commaTable.exec(searchableSql);
+                if (match) {
+                    const rawQualified = match[1];
+                    const lastPart = rawQualified.match(identifierParts)?.slice(-1)[0] || rawQualified;
+                    const tableIndex = match.index + match[0].lastIndexOf(rawQualified)
+                        + rawQualified.lastIndexOf(lastPart);
+                    record(rawQualified, 'select', tableIndex);
+                }
+            }
+            index++;
+        }
+
+        for (const byStatement of contextLineByTable.values()) {
+            for (const byKind of byStatement.values()) {
+                for (const occurrences of byKind.values()) {
+                    occurrences.sort((a, b) => a.offset - b.offset);
+                }
             }
         }
 
@@ -1776,7 +1789,7 @@ export class ReferenceExtractor {
             );
         }
 
-        return { sql, contextLineByTable, fallbackLineByTable };
+        return { sql, contextLineByTable, nextContextIndex: new Map(), fallbackLineByTable };
     }
 
     /**
@@ -1797,14 +1810,27 @@ export class ReferenceExtractor {
      * @param tableName The table name to find
      * @returns Line number (1-based) where the table is referenced, or 1 if not found
      */
-    private findTableLine(sql: string, tableName: string, statementIndex: number): number {
-        const key = this.normalizeTableLineLookupKey(tableName);
+    private findTableLine(
+        sql: string,
+        tableName: string,
+        statementIndex: number,
+        refType: ReferenceType,
+        schema?: string,
+        catalog?: string,
+        locatedLine?: number
+    ): number {
+        const key = this.qualifiedLineLookupKey(tableName, schema, catalog);
         const lookup = this.getTableLineLookup(sql);
-        const contextLines = lookup.contextLineByTable.get(key);
-        const fallbackLines = lookup.fallbackLineByTable.get(key);
-        return contextLines?.get(statementIndex)
+        const contextLines = lookup.contextLineByTable.get(key)?.get(statementIndex)?.get(refType);
+        const cursorKey = `${key}|${statementIndex}|${refType}`;
+        const nextIndex = lookup.nextContextIndex.get(cursorKey) || 0;
+        if (contextLines && nextIndex < contextLines.length) {
+            lookup.nextContextIndex.set(cursorKey, nextIndex + 1);
+            return contextLines[nextIndex].line;
+        }
+        const fallbackLines = lookup.fallbackLineByTable.get(this.normalizeTableLineLookupKey(tableName));
+        return locatedLine
             ?? fallbackLines?.get(statementIndex)
-            ?? contextLines?.values().next().value
             ?? fallbackLines?.values().next().value
             ?? 1;
     }
