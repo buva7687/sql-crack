@@ -1024,7 +1024,7 @@ function tryParseMergeCompatibility(sql: string, dialect: SqlDialect): ParseResu
         return null;
     }
     layoutGraph(result.nodes, result.edges);
-    assignLineNumbers(result.nodes, sql);
+    assignLineNumbers(result.nodes, sql, result.edges);
     return result;
 }
 
@@ -1270,7 +1270,7 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
     });
     if (bulkResult) {
         layoutGraph(bulkResult.nodes, bulkResult.edges);
-        assignLineNumbers(bulkResult.nodes, sql);
+        assignLineNumbers(bulkResult.nodes, sql, bulkResult.edges);
         return bulkResult;
     }
 
@@ -1282,7 +1282,7 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
     });
     if (warehouseDdlResult) {
         layoutGraph(warehouseDdlResult.nodes, warehouseDdlResult.edges);
-        assignLineNumbers(warehouseDdlResult.nodes, sql);
+        assignLineNumbers(warehouseDdlResult.nodes, sql, warehouseDdlResult.edges);
         return warehouseDdlResult;
     }
 
@@ -1306,7 +1306,7 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
     });
     if (deleteCompatibilityResult) {
         layoutGraph(deleteCompatibilityResult.nodes, deleteCompatibilityResult.edges);
-        assignLineNumbers(deleteCompatibilityResult.nodes, sql);
+        assignLineNumbers(deleteCompatibilityResult.nodes, sql, deleteCompatibilityResult.edges);
         return deleteCompatibilityResult;
     }
 
@@ -1318,7 +1318,7 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
     });
     if (updateCompatibilityResult) {
         layoutGraph(updateCompatibilityResult.nodes, updateCompatibilityResult.edges);
-        assignLineNumbers(updateCompatibilityResult.nodes, sql);
+        assignLineNumbers(updateCompatibilityResult.nodes, sql, updateCompatibilityResult.edges);
         return updateCompatibilityResult;
     }
 
@@ -1330,7 +1330,7 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
     });
     if (oracleInsertCompatibilityResult) {
         layoutGraph(oracleInsertCompatibilityResult.nodes, oracleInsertCompatibilityResult.edges);
-        assignLineNumbers(oracleInsertCompatibilityResult.nodes, sql);
+        assignLineNumbers(oracleInsertCompatibilityResult.nodes, sql, oracleInsertCompatibilityResult.edges);
         return oracleInsertCompatibilityResult;
     }
 
@@ -1417,7 +1417,7 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
             fallbackResult.sql = originalSql;
             fallbackResult.hints.unshift(timeoutHint);
             layoutGraph(fallbackResult.nodes, fallbackResult.edges);
-            assignLineNumbers(fallbackResult.nodes, originalSql);
+            assignLineNumbers(fallbackResult.nodes, originalSql, fallbackResult.edges);
             return fallbackResult;
         }
 
@@ -1504,7 +1504,7 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
         layoutGraph(nodes, edges);
 
         // Assign line numbers to nodes for editor sync
-        assignLineNumbers(nodes, originalSql);
+        assignLineNumbers(nodes, originalSql, edges);
 
         // Extract column lineage
         const columnLineage = extractColumnLineage(innerSelectStmt, nodes);
@@ -1633,7 +1633,7 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
         fallbackResult.hints.push(...context.hints);
 
         layoutGraph(fallbackResult.nodes, fallbackResult.edges);
-        assignLineNumbers(fallbackResult.nodes, originalSql);
+        assignLineNumbers(fallbackResult.nodes, originalSql, fallbackResult.edges);
         return fallbackResult;
     }
 }

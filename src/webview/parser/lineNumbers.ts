@@ -1,6 +1,6 @@
 // Line number extraction and assignment for nodes
 
-import { FlowNode } from '../types';
+import { FlowEdge, FlowNode } from '../types';
 import {
     escapeRegex,
     getDollarQuotedTokenEnd,
@@ -128,7 +128,7 @@ type OccurrencePredicate<T extends SqlOccurrence> = (occurrence: T) => boolean;
 const OCCURRENCE_KEYWORDS: ReadonlyArray<[string, RegExp]> = [
     'SELECT', 'WHERE', 'HAVING', 'GROUP BY', 'ORDER BY', 'LIMIT', 'JOIN', 'WITH',
     'UNION', 'INTERSECT', 'EXCEPT', 'MINUS', 'MERGE', 'INSERT', 'UPDATE', 'DELETE',
-    'OVER', 'CASE',
+    'OVER', 'CASE', 'ON',
 ].map(keyword => [keyword, new RegExp(`\\b${keyword.replace(' ', '\\s+')}\\b`, 'gi')]);
 
 const TRANSPARENT_PAREN_BODY = /^\s*(?:SELECT|WITH|VALUES|\()/i;
@@ -245,7 +245,20 @@ function analyzeNesting(sql: string): NestingInfo {
     return { depth, group, closingParen, inCteBody, inQuotes };
 }
 
-export function assignLineNumbers(nodes: FlowNode[], sql: string, childScope = false): void {
+export function assignLineNumbers(nodes: FlowNode[], sql: string, edges: FlowEdge[] = []): void {
+    const onLineByJoin = assignScopedLineNumbers(nodes, sql, false);
+    const nodesById = new Map(nodes.map(node => [node.id, node]));
+    for (const edge of edges) {
+        if (edge.startLine === undefined
+            && (edge.clauseType === 'join' || edge.clauseType === 'on' || edge.clauseType === 'where')) {
+            edge.startLine = edge.clauseType === 'on'
+                ? (onLineByJoin.get(edge.target) ?? nodesById.get(edge.target)?.startLine)
+                : nodesById.get(edge.target)?.startLine;
+        }
+    }
+}
+
+function assignScopedLineNumbers(nodes: FlowNode[], sql: string, childScope: boolean): Map<string, number> {
     const keywordLines = extractKeywordLineNumbers(sql);
     const sqlLines = sql.split('\n');
     const commentStripped = stripCommentsPreserveLineNumbers(sql);
@@ -420,6 +433,7 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string, childScope = f
     }
 
     const childBodies = new Map<FlowNode, number>();
+    const onLineByJoin = new Map<string, number>();
     for (const node of nodes) {
         targetDepth = childScope ? Math.max(0, (node.depth ?? 1) - 1) : 0;
         switch (node.type) {
@@ -477,12 +491,18 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string, childScope = f
             }
             case 'join': {
                 const typeMatches = matchesJoinType(node.label);
-                node.startLine = claimNextLine(
-                    ['JOIN'],
+                const selected = pick(occurrencesOf('JOIN'), [
                     o => isOuter(o) && typeMatches(o),
                     isOuter,
                     typeMatches
-                );
+                ], true);
+                node.startLine = selected?.line;
+                if (selected) {
+                    const nextJoin = occurrencesOf('JOIN').find(o => o.offset > selected.offset && isOuter(o));
+                    const on = occurrencesOf('ON').find(o =>
+                        o.offset > selected.offset && o.offset < (nextJoin?.offset ?? Infinity) && isOuter(o));
+                    if (on) { onLineByJoin.set(node.id, on.line); }
+                }
                 break;
             }
             case 'filter': {
@@ -559,7 +579,7 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string, childScope = f
         if (!node.children?.length || close === undefined) { continue; }
         node.endLine = lineAt(close);
         const bodySql = sql.slice(open + 1, close);
-        assignLineNumbers(node.children, bodySql, true);
+        assignScopedLineNumbers(node.children, bodySql, true);
         const lineOffset = lineAt(open + 1) - 1;
         const offsetChildren = (children: FlowNode[]): void => {
             for (const child of children) {
@@ -570,4 +590,5 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string, childScope = f
         };
         offsetChildren(node.children);
     }
+    return onLineByJoin;
 }

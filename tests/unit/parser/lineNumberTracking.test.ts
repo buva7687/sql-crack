@@ -478,3 +478,41 @@ describe('Expanded query child navigation', () => {
         expect(selects?.map(child => child.startLine)).toEqual([3, 2]);
     });
 });
+
+describe('SELECT edge source navigation', () => {
+    it('anchors JOIN, ON, and WHERE edges to their original clauses', () => {
+        const sql = [
+            'SELECT a.id',
+            'FROM a',
+            'JOIN b',
+            '  ON a.id = b.id',
+            'WHERE a.id > 1',
+        ].join('\n');
+        const { edges } = parseSql(sql, 'PostgreSQL' as SqlDialect);
+        const lineOf = (clauseType: string): number | undefined =>
+            edges.find(edge => edge.clauseType === clauseType)?.startLine;
+        expect(lineOf('join')).toBe(3);
+        expect(lineOf('on')).toBe(4);
+        expect(lineOf('where')).toBe(5);
+    });
+
+    it('offsets edge lines in a later statement to file coordinates', () => {
+        const sql = 'SELECT 1;\n\nSELECT a.id\nFROM a\nJOIN b ON a.id = b.id\nWHERE a.id > 1';
+        const batch = parseSqlBatch(sql, 'PostgreSQL' as SqlDialect);
+        const edges = batch.queries[1].edges;
+        expect(edges.find(edge => edge.clauseType === 'on')?.startLine).toBe(5);
+        expect(edges.find(edge => edge.clauseType === 'where')?.startLine).toBe(6);
+    });
+
+    it('keeps ON edges paired with their own JOIN', () => {
+        const sql = [
+            'SELECT a.id FROM a',
+            'JOIN b ON a.id = b.id',
+            'LEFT JOIN c',
+            '  ON b.id = c.id',
+        ].join('\n');
+        const { edges } = parseSql(sql, 'PostgreSQL' as SqlDialect);
+        expect(edges.filter(edge => edge.clauseType === 'join').map(edge => edge.startLine)).toEqual([2, 3]);
+        expect(edges.filter(edge => edge.clauseType === 'on').map(edge => edge.startLine)).toEqual([2, 4]);
+    });
+});

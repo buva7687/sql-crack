@@ -336,7 +336,6 @@ function processSelect(
                         target: joinId,
                         sqlClause: joinConditionSql, // SQL clause for edge click display
                         clauseType: 'join',         // Type of clause for styling
-                        startLine: fromItem.on?.location?.start?.line // Line number for navigation
                     });
                 }
 
@@ -348,7 +347,6 @@ function processSelect(
                         target: joinId,
                         sqlClause: joinConditionSql, // SQL clause for edge click display
                         clauseType: 'on',           // Type of clause for styling
-                        startLine: fromItem.on?.location?.start?.line // Line number for navigation
                     });
                 }
 
@@ -441,7 +439,6 @@ function processSelect(
                 target: whereId,
                 sqlClause: whereClauseSql, // SQL clause for edge click display
                 clauseType: 'where',      // Type of clause for styling
-                startLine: stmt.where?.location?.start?.line // Line number for navigation
             });
         }
         previousId = whereId;
