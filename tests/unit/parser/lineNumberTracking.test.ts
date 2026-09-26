@@ -381,6 +381,32 @@ describe('Outer-query nodes skip keywords nested in CTEs, subqueries, and OVER (
         expect(lineOf(nodes, 'table', 'b')).toBe(2);
     });
 
+    it('anchors each implicit CROSS JOIN to its comma-listed table', () => {
+        const sql = [
+            'SELECT *',
+            'FROM a,',
+            '  b,',
+            '  c',
+        ].join('\n');
+
+        const { nodes } = parseSql(sql, 'PostgreSQL' as SqlDialect);
+        const implicitJoins = nodes.filter(node => node.type === 'join' && node.description?.startsWith('Implicit join with '));
+        expect(implicitJoins.map(node => node.startLine)).toEqual([3, 4]);
+    });
+
+    it('does not assign an explicit JOIN line to an implicit CROSS JOIN', () => {
+        const sql = [
+            'SELECT *',
+            'FROM a',
+            ', b',
+            'JOIN c ON b.id = c.id',
+        ].join('\n');
+
+        const { nodes } = parseSql(sql, 'PostgreSQL' as SqlDialect);
+        expect(nodes.find(node => node.type === 'join' && node.description?.startsWith('Implicit join with '))?.startLine).toBe(3);
+        expect(nodes.find(node => node.type === 'join' && !node.description?.startsWith('Implicit join with '))?.startLine).toBe(4);
+    });
+
     it('keeps quoted and unquoted references to one table in source order', () => {
         const sql = [
             'SELECT a.id',                  // 1

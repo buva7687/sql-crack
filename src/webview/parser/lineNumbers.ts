@@ -248,6 +248,18 @@ function analyzeNesting(sql: string): NestingInfo {
 export function assignLineNumbers(nodes: FlowNode[], sql: string, edges: FlowEdge[] = []): void {
     const onLineByJoin = assignScopedLineNumbers(nodes, sql, false);
     const nodesById = new Map(nodes.map(node => [node.id, node]));
+    const lastSourceByJoin = new Map<string, string>();
+    for (const edge of edges) {
+        if (nodesById.get(edge.target)?.type === 'join') {
+            lastSourceByJoin.set(edge.target, edge.source);
+        }
+    }
+    for (const node of nodes) {
+        if (node.type === 'join' && node.description?.startsWith('Implicit join with ')) {
+            // The parser's last incoming edge comes from the comma-listed table.
+            node.startLine = nodesById.get(lastSourceByJoin.get(node.id) ?? '')?.startLine;
+        }
+    }
     for (const edge of edges) {
         if (edge.startLine === undefined
             && (edge.clauseType === 'join' || edge.clauseType === 'on' || edge.clauseType === 'where')) {
@@ -490,6 +502,7 @@ function assignScopedLineNumbers(nodes: FlowNode[], sql: string, childScope: boo
                 break;
             }
             case 'join': {
+                if (node.description?.startsWith('Implicit join with ')) { break; }
                 const typeMatches = matchesJoinType(node.label);
                 const selected = pick(occurrencesOf('JOIN'), [
                     o => isOuter(o) && typeMatches(o),
