@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { BatchParseResult, OptimizationHint, ParseResult } from './webview/types';
+import { BatchParseResult, FlowNode, OptimizationHint, ParseResult } from './webview/types';
 
 export const SQL_CRACK_DIAGNOSTIC_SOURCE = 'SQL Crack';
 
@@ -35,6 +35,15 @@ function createLineRange(document: vscode.TextDocument, lineZeroBased: number): 
     );
 }
 
+function findNodeById(nodes: FlowNode[], id: string): FlowNode | undefined {
+    for (const node of nodes) {
+        if (node.id === id) { return node; }
+        const child = node.children && findNodeById(node.children, id);
+        if (child) { return child; }
+    }
+    return undefined;
+}
+
 function resolveHintLine(
     hint: OptimizationHint,
     query: ParseResult,
@@ -42,7 +51,7 @@ function resolveHintLine(
     document: vscode.TextDocument
 ): number {
     if (hint.nodeId) {
-        const node = query.nodes.find(n => n.id === hint.nodeId);
+        const node = findNodeById(query.nodes, hint.nodeId);
         if (node?.startLine && node.startLine > 0) {
             // parseSqlBatch already offsets node lines to file lines; adding
             // the query start again placed node hints past their statement.

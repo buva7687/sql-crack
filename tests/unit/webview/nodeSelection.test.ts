@@ -238,7 +238,7 @@ describe('nodeSelection', () => {
         expect(otherMatchRect.removeAttribute).not.toHaveBeenCalledWith('stroke');
     });
 
-    it('finds nested nodes for navigation and falls back to SQL line lookup for tables', () => {
+    it('navigates to an assigned child line', () => {
         const postMessage = jest.fn();
         (global as { window?: unknown }).window = {
             vscodeApi: { postMessage },
@@ -262,6 +262,7 @@ describe('nodeSelection', () => {
                             id: 'child_table',
                             type: 'table',
                             label: 'orders',
+                            startLine: 3,
                             x: 0,
                             y: 0,
                             width: 120,
@@ -277,5 +278,21 @@ describe('nodeSelection', () => {
         });
 
         expect(postMessage).toHaveBeenCalledWith({ command: 'goToLine', line: 3 });
+    });
+
+    it('does not guess a file line from query text when a node has no line', () => {
+        const postMessage = jest.fn();
+        (global as { window?: unknown }).window = { vscodeApi: { postMessage } };
+        selectNodeFeature({
+            nodeId: 'table',
+            state: createState(),
+            mainGroup: null,
+            currentNodes: [{ id: 'table', type: 'table', label: 'orders', x: 0, y: 0, width: 100, height: 40 }],
+            currentSql: '-- orders pipeline\nSELECT * FROM orders',
+            highlightConnectedEdges: jest.fn(),
+            onUpdateDetailsPanel: jest.fn(),
+            onUpdateBreadcrumb: jest.fn(),
+        });
+        expect(postMessage).not.toHaveBeenCalled();
     });
 });

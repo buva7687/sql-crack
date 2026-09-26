@@ -1,6 +1,5 @@
 import { EDGE_COLORS, UI_COLORS, getComponentUiColors } from '../constants';
 import { FlowNode, ViewState } from '../types';
-import { escapeRegex } from '../../shared';
 import { restoreNodeBorderState } from '../nodeBorderState';
 
 /** Recursively search for a node by ID, including inside children of cloud/CTE nodes. */
@@ -38,7 +37,6 @@ export function selectNodeFeature(options: SelectNodeFeatureOptions): void {
         state,
         mainGroup,
         currentNodes,
-        currentSql,
         highlightConnectedEdges,
         onUpdateDetailsPanel,
         onUpdateBreadcrumb,
@@ -91,23 +89,8 @@ export function selectNodeFeature(options: SelectNodeFeatureOptions): void {
         if (node) {
             const vscodeApi = (window as { vscodeApi?: { postMessage?: (message: unknown) => void } }).vscodeApi;
             if (vscodeApi?.postMessage) {
-                let lineNumber = node.startLine;
-
-                if (!lineNumber && node.type === 'table' && currentSql) {
-                    const tableName = node.label.toLowerCase();
-                    const escapedTableName = escapeRegex(tableName);
-                    const tableRegex = new RegExp(`\\b${escapedTableName}\\b`);
-                    const sqlLines = currentSql.split('\n');
-                    for (let i = 0; i < sqlLines.length; i++) {
-                        if (tableRegex.test(sqlLines[i].toLowerCase())) {
-                            lineNumber = i + 1;
-                            break;
-                        }
-                    }
-                }
-
-                if (lineNumber) {
-                    vscodeApi.postMessage({ command: 'goToLine', line: lineNumber });
+                if (node.startLine) {
+                    vscodeApi.postMessage({ command: 'goToLine', line: node.startLine });
                 }
             }
         }

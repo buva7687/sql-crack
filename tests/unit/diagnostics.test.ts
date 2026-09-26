@@ -111,6 +111,21 @@ describe('diagnostics mapping', () => {
         expect(diagnostic.source).toBe(SQL_CRACK_DIAGNOSTIC_SOURCE);
     });
 
+    it('places hints attached to a CTE child on that child line', () => {
+        const document = createMockDocument('WITH c AS (\n SELECT id FROM orders\n WHERE id > 1\n) SELECT id FROM c');
+        const hint: OptimizationHint = { type: 'info', message: 'Child hint', nodeId: 'child-filter' };
+        const query = createParseResult([hint]);
+        query.nodes = [{
+            id: 'cte', type: 'cte', label: 'WITH c', x: 0, y: 0, width: 100, height: 40,
+            startLine: 1,
+            children: [{
+                id: 'child-filter', type: 'filter', label: 'WHERE', x: 0, y: 0, width: 100, height: 40,
+                startLine: 3,
+            }],
+        }];
+        expect(createDiagnosticFromHint(document, hint, query, 1).range.start.line).toBe(2);
+    });
+
     it('anchors real parseSqlBatch node hints in later statements to their own line', () => {
         const sql = [
             'SELECT id FROM customers;',

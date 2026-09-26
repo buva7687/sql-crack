@@ -105,6 +105,7 @@ export function extractKeywordLineNumbers(sql: string): Map<string, number[]> {
 interface NestingInfo {
     depth: Int32Array;
     group: Int32Array;
+    closingParen: Map<number, number>;
     inCteBody: Uint8Array;
     inQuotes: Uint8Array;
 }
@@ -148,6 +149,7 @@ function analyzeNesting(sql: string): NestingInfo {
     const inCteBody = new Uint8Array(code.length);
     const inQuotes = new Uint8Array(code.length);
     const group = new Int32Array(code.length);
+    const closingParen = new Map<number, number>();
     // `withSeen` tracks a WITH clause per paren level, so CTE bodies nested
     // in a derived table (`FROM (WITH c AS (...) SELECT ...) s`) are found too.
     const topLevel = { withSeen: false };
@@ -223,6 +225,7 @@ function analyzeNesting(sql: string): NestingInfo {
 
         if (ch === ')') {
             const open = stack.pop();
+            if (open) { closingParen.set(open.open, i); }
             if (open?.counts) { currentDepth--; }
             if (open?.cteBody) { openCteBodies--; }
             fill(i, i + 1, false);
@@ -239,10 +242,10 @@ function analyzeNesting(sql: string): NestingInfo {
         i++;
     }
 
-    return { depth, group, inCteBody, inQuotes };
+    return { depth, group, closingParen, inCteBody, inQuotes };
 }
 
-export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
+export function assignLineNumbers(nodes: FlowNode[], sql: string, childScope = false): void {
     const keywordLines = extractKeywordLineNumbers(sql);
     const sqlLines = sql.split('\n');
     const commentStripped = stripCommentsPreserveLineNumbers(sql);
@@ -291,8 +294,11 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
         .flatMap(keyword => occurrencesByKeyword.get(keyword) || [])
         .sort((a, b) => a.offset - b.offset);
 
-    /** In the outer query: not inside a CTE body, subquery, OVER (...), or literal. */
-    const isOuter = (occurrence: SqlOccurrence): boolean => occurrence.depth === 0 && !occurrence.inQuotes;
+    // Child nodes carry their depth relative to their CTE or derived-table
+    // container. The sliced body starts one level inside that container.
+    let targetDepth = 0;
+    const isOuter = (occurrence: SqlOccurrence): boolean =>
+        occurrence.depth === targetDepth && !occurrence.inQuotes;
     const textBefore = (offset: number, length = 64): string =>
         commentStripped.slice(Math.max(0, offset - length), offset);
 
@@ -387,17 +393,20 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
         return (pick(inClause, predicates, true) ?? pick(inClause, predicates, false))?.line;
     }
 
-    function findCteDefinitionLine(cteName: string): number | undefined {
+    function findCteDefinition(cteName: string): { line: number; open: number } | undefined {
         const pattern = new RegExp(
             `(?<![\\w$#])["\`[]?${escapeRegex(cteName)}["\`\\]]?\\s*(?:\\([^()]*\\)\\s*)?AS\\s*(?:NOT\\s+)?(?:MATERIALIZED\\s*)?\\(`,
             'gi'
         );
-        const candidates: SqlOccurrence[] = [];
+        const candidates: Array<SqlOccurrence & { open: number }> = [];
         let match: RegExpExecArray | null;
         while ((match = pattern.exec(commentStripped)) !== null) {
-            candidates.push(occurrenceAt(`cte@${match.index}`, match.index));
+            candidates.push({
+                ...occurrenceAt(`cte@${match.index}`, match.index),
+                open: match.index + match[0].length - 1,
+            });
         }
-        return pick(candidates, [isOuter], false)?.line;
+        return pick(candidates, [isOuter], false);
     }
 
     function matchesJoinType(label: string): OccurrencePredicate<KeywordOccurrence> {
@@ -410,7 +419,9 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
         };
     }
 
+    const childBodies = new Map<FlowNode, number>();
     for (const node of nodes) {
+        targetDepth = childScope ? Math.max(0, (node.depth ?? 1) - 1) : 0;
         switch (node.type) {
             case 'table': {
                 // RENAME targets are labeled "old → new"; locate the old name.
@@ -483,7 +494,8 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
                 break;
             }
             case 'aggregate': {
-                node.startLine = claimNextLine(['GROUP BY']);
+                node.startLine = claimNextLine(['GROUP BY'])
+                    ?? (node.label === 'AGGREGATE' ? peekLine(['SELECT']) : undefined);
                 break;
             }
             case 'sort': {
@@ -500,8 +512,9 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
             }
             case 'cte': {
                 const cteName = node.label.replace(/^WITH\s+(?:RECURSIVE\s+)?/i, '').trim();
-                node.startLine = (cteName ? findCteDefinitionLine(cteName) : undefined)
-                    ?? claimNextLine(['WITH']);
+                const definition = cteName ? findCteDefinition(cteName) : undefined;
+                node.startLine = definition?.line ?? claimNextLine(['WITH']);
+                if (definition) { childBodies.set(node, definition.open); }
                 break;
             }
             case 'union': {
@@ -517,11 +530,12 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
             case 'subquery': {
                 // A derived table's own SELECT: nested, but not a CTE body.
                 const nested = (o: KeywordOccurrence): boolean => o.depth > 0 && !o.inCteBody && !o.inQuotes;
-                node.startLine = claimNextLine(
-                    ['SELECT'],
+                const selected = pick(occurrencesOf('SELECT'), [
                     o => nested(o) && /\(\s*$/.test(textBefore(o.offset)),
                     nested
-                );
+                ], true);
+                node.startLine = selected?.line;
+                if (selected) { childBodies.set(node, nesting.group[selected.offset]); }
                 break;
             }
             case 'window': {
@@ -538,5 +552,22 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
                 break;
             }
         }
+    }
+
+    for (const [node, open] of childBodies) {
+        const close = nesting.closingParen.get(open);
+        if (!node.children?.length || close === undefined) { continue; }
+        node.endLine = lineAt(close);
+        const bodySql = sql.slice(open + 1, close);
+        assignLineNumbers(node.children, bodySql, true);
+        const lineOffset = lineAt(open + 1) - 1;
+        const offsetChildren = (children: FlowNode[]): void => {
+            for (const child of children) {
+                if (child.startLine !== undefined) { child.startLine += lineOffset; }
+                if (child.endLine !== undefined) { child.endLine += lineOffset; }
+                if (child.children) { offsetChildren(child.children); }
+            }
+        };
+        offsetChildren(node.children);
     }
 }

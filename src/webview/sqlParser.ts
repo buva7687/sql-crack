@@ -38,6 +38,7 @@ import { buildSegmentStarts, countStartsAtOrBefore } from '../shared/textOffsets
 import { createFreshContext, type ParserContext } from './parser/context';
 import { layoutGraph } from './parser/layout';
 import { assignLineNumbers } from './parser/lineNumbers';
+import { applyLineOffsetToResult } from './state/lineOffsets';
 import {
     calculateColumnPositions,
     extractColumnLineage,
@@ -509,10 +510,8 @@ function parseSqlBatchInternal(
      * and cursor-follow land on the commands instead of line 1.
      */
     const anchorMergedResultLines = (result: ParseResult, startLine: number, endLine: number): void => {
+        applyLineOffsetToResult(result, startLine - 1);
         for (const node of result.nodes) {
-            if (node.startLine) {
-                node.startLine += startLine - 1;
-            }
             if (node.endLine) {
                 node.endLine = Math.max(node.startLine ?? startLine, endLine);
             }
@@ -599,23 +598,7 @@ function parseSqlBatchInternal(
                 if (result.error) {
                     result.error = offsetErrorLineNumber(result.error, lineOffset);
                 }
-                for (const node of result.nodes) {
-                    if (node.startLine) {
-                        node.startLine += lineOffset;
-                    }
-                    if (node.endLine) {
-                        node.endLine += lineOffset;
-                    }
-                }
-                // Also adjust line numbers for edges
-                for (const edge of result.edges) {
-                    if (edge.startLine) {
-                        edge.startLine += lineOffset;
-                    }
-                    if (edge.endLine) {
-                        edge.endLine += lineOffset;
-                    }
-                }
+                applyLineOffsetToResult(result, lineOffset);
 
                 queries.push(result);
                 queryLineRanges.push({ startLine: stmtStartLine, endLine: stmtEndLine });

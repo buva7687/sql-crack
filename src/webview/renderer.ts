@@ -210,6 +210,7 @@ import {
 import { setupEventListeners as setupRendererEventListeners } from './interaction/eventListeners';
 import { pulseNodeFeature, pulseNodeInCloudFeature } from './interaction/nodePulse';
 import { selectNodeFeature } from './interaction/nodeSelection';
+import { findNodeAtLine } from './interaction/lineNodeLookup';
 import { restoreNodeBorderState } from './nodeBorderState';
 import type { RendererContext } from './types/rendererContext';
 import {
@@ -3995,7 +3996,7 @@ export function highlightNodeAtLine(line: number): void {
     }
 
     // Find node that contains this line
-    const node = findNodeAtLine(line);
+    const node = findNodeAtLine(currentNodes, line);
     if (!node) {return;}
 
     // Highlight the node
@@ -4012,35 +4013,6 @@ export function highlightNodeAtLine(line: number): void {
         // Optionally zoom to the node
         // zoomToNode(node);
     }
-}
-
-function findNodeAtLine(line: number): FlowNode | null {
-    // Find node whose line range contains the cursor line
-    for (const node of currentNodes) {
-        if (node.startLine && node.endLine) {
-            if (line >= node.startLine && line <= node.endLine) {
-                return node;
-            }
-        } else if (node.startLine && line === node.startLine) {
-            return node;
-        }
-    }
-
-    // Fallback: find closest node by start line
-    let closest: FlowNode | null = null;
-    let minDist = Infinity;
-
-    for (const node of currentNodes) {
-        if (node.startLine) {
-            const dist = Math.abs(node.startLine - line);
-            if (dist < minDist) {
-                minDist = dist;
-                closest = node;
-            }
-        }
-    }
-
-    return minDist <= 5 ? closest : null;
 }
 
 // ============================================================

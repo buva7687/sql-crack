@@ -10,7 +10,7 @@
  */
 
 import { assignLineNumbers, extractKeywordLineNumbers } from '../../../src/webview/parser/lineNumbers';
-import { parseSql } from '../../../src/webview/sqlParser';
+import { parseSql, parseSqlBatch } from '../../../src/webview/sqlParser';
 import type { SqlDialect } from '../../../src/webview/types/parser';
 import type { FlowNode } from '../../../src/webview/types';
 
@@ -426,5 +426,55 @@ describe('Outer-query nodes skip keywords nested in CTEs, subqueries, and OVER (
 
         expect(nodes[0].startLine).toBe(6);
         expect(nodes[1].startLine).toBe(4);
+    });
+});
+
+describe('Expanded query child navigation', () => {
+    it('assigns children their own clause lines and bounds the CTE body', () => {
+        const sql = [
+            'WITH c AS (',
+            '  SELECT id FROM orders',
+            '  WHERE id > 1',
+            '  GROUP BY id',
+            ')',
+            'SELECT id FROM c',
+        ].join('\n');
+        const { nodes } = parseSql(sql, 'PostgreSQL' as SqlDialect);
+        const cte = nodes.find(node => node.type === 'cte');
+        expect(cte?.endLine).toBe(5);
+        expect(cte?.children?.map(child => [child.type, child.startLine])).toEqual([
+            ['table', 2], ['filter', 3], ['aggregate', 4], ['select', 2],
+        ]);
+    });
+
+    it('offsets child lines to file lines in a later statement', () => {
+        const sql = 'SELECT 1;\n\n-- orders pipeline\nWITH x AS (\n SELECT id FROM orders\n) SELECT * FROM x';
+        const batch = parseSqlBatch(sql, 'PostgreSQL' as SqlDialect);
+        const cte = batch.queries[1].nodes.find(node => node.type === 'cte');
+        expect(cte?.startLine).toBe(4);
+        expect(cte?.children?.find(child => child.type === 'table')?.startLine).toBe(5);
+    });
+
+    it('assigns derived table children within their parenthesized source', () => {
+        const sql = 'SELECT *\nFROM (\n SELECT id FROM orders\n WHERE id > 1\n) s';
+        const { nodes } = parseSql(sql, 'PostgreSQL' as SqlDialect);
+        const derived = nodes.find(node => node.type === 'subquery');
+        expect(derived?.endLine).toBe(5);
+        expect(derived?.children?.find(child => child.type === 'filter')?.startLine).toBe(4);
+    });
+
+    it('keeps nested and enclosing SELECT children at their own depths', () => {
+        const sql = [
+            'WITH c AS (',
+            ' SELECT * FROM (',
+            '  SELECT id FROM orders',
+            '  WHERE id > 1',
+            ' ) s',
+            ') SELECT * FROM c',
+        ].join('\n');
+        const { nodes } = parseSql(sql, 'PostgreSQL' as SqlDialect);
+        const selects = nodes.find(node => node.type === 'cte')?.children
+            ?.filter(child => child.type === 'select');
+        expect(selects?.map(child => child.startLine)).toEqual([3, 2]);
     });
 });
