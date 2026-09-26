@@ -99,10 +99,12 @@ export function extractKeywordLineNumbers(sql: string): Map<string, number[]> {
  * query or set-operation branch (`(SELECT ...) UNION (SELECT ...)`,
  * `CREATE VIEW v AS (SELECT ...)`), so every branch of the outer query is at
  * depth 0 while CTE bodies, derived tables, scalar subqueries, and `OVER (...)`
- * specs are deeper.
+ * specs are deeper. `group` is the offset of the innermost enclosing paren
+ * (-1 outside all parens), so siblings in one list share a group.
  */
 interface NestingInfo {
     depth: Int32Array;
+    group: Int32Array;
     inCteBody: Uint8Array;
     inQuotes: Uint8Array;
 }
@@ -135,6 +137,9 @@ const JOIN_MODIFIER_BEFORE = /\b(?:LEFT|RIGHT|FULL|CROSS|NATURAL|OUTER|SEMI|ANTI
 const TABLE_KEYWORD_CONTEXT = /\b(?:FROM|JOIN|INTO|USING|UPDATE|TABLE|ONLY|DELETE|MERGE|VIEW|EXISTS)\s+(?:(?:[\w$#]+|"[^"]*"|`[^`]*`|\[[^\]]*\])\s*\.\s*)*["`[]?$/i;
 const CTE_DEFINITION_AFTER = /^["`\]]?\s*(?:\([^()]*\)\s*)?AS\s*(?:NOT\s+)?(?:MATERIALIZED\s*)?\(/i;
 const TABLE_COMMA_CONTEXT = /,\s*(?:(?:[\w$#]+|"[^"]*"|`[^`]*`|\[[^\]]*\])\s*\.\s*)*["`[]?$/i;
+const CLAUSE_KEYWORD = /\b(?:SELECT|FROM|WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|LIMIT|QUALIFY|WINDOW|ON|USING|JOIN|SET|VALUES|RETURNING|UPDATE|DELETE|INTO|UNION|INTERSECT|EXCEPT|MINUS)\b/gi;
+/** Clauses whose comma-separated items are table references. */
+const TABLE_LIST_CLAUSES: ReadonlySet<string> = new Set(['FROM', 'JOIN', 'ON', 'USING', 'UPDATE', 'DELETE']);
 
 function analyzeNesting(sql: string): NestingInfo {
     // Comments are masked string-aware so parens and quotes inside them are ignored.
@@ -142,15 +147,21 @@ function analyzeNesting(sql: string): NestingInfo {
     const depth = new Int32Array(code.length);
     const inCteBody = new Uint8Array(code.length);
     const inQuotes = new Uint8Array(code.length);
-    const stack: Array<{ counts: boolean; cteBody: boolean }> = [];
+    const group = new Int32Array(code.length);
+    // `withSeen` tracks a WITH clause per paren level, so CTE bodies nested
+    // in a derived table (`FROM (WITH c AS (...) SELECT ...) s`) are found too.
+    const topLevel = { withSeen: false };
+    const stack: Array<{ counts: boolean; cteBody: boolean; open: number; withSeen: boolean }> = [];
     const firstCodeOffset = code.search(/\S/);
     let currentDepth = 0;
     let openCteBodies = 0;
-    let topLevelWithSeen = false;
+    const currentLevel = (): { withSeen: boolean } => stack[stack.length - 1] ?? topLevel;
 
     const fill = (start: number, end: number, quoted: boolean): void => {
+        const enclosing = stack.length > 0 ? stack[stack.length - 1].open : -1;
         for (let p = start; p < end && p < code.length; p++) {
             depth[p] = currentDepth;
+            group[p] = enclosing;
             inCteBody[p] = openCteBodies > 0 ? 1 : 0;
             inQuotes[p] = quoted ? 1 : 0;
         }
@@ -199,11 +210,11 @@ function analyzeNesting(sql: string): NestingInfo {
                 || /;\s*$/.test(before)
                 || SET_OPERATOR_BEFORE.test(before)
                 || (/\(\s*$/.test(before) && stack.length > 0 && !stack[stack.length - 1].counts)
-                || (currentDepth === 0 && !topLevelWithSeen && /\bAS\s*$/i.test(before))
+                || (currentDepth === 0 && !currentLevel().withSeen && /\bAS\s*$/i.test(before))
             );
-            const cteBody = !wrapsQuery && currentDepth === 0 && topLevelWithSeen && CTE_BODY_BEFORE.test(before);
+            const cteBody = !wrapsQuery && currentLevel().withSeen && CTE_BODY_BEFORE.test(before);
             fill(i, i + 1, false);
-            stack.push({ counts: !wrapsQuery, cteBody });
+            stack.push({ counts: !wrapsQuery, cteBody, open: i, withSeen: false });
             if (!wrapsQuery) { currentDepth++; }
             if (cteBody) { openCteBodies++; }
             i++;
@@ -219,16 +230,16 @@ function analyzeNesting(sql: string): NestingInfo {
             continue;
         }
 
-        if (currentDepth === 0 && (ch === 'W' || ch === 'w')
+        if ((ch === 'W' || ch === 'w')
             && !/[\w$#]/.test(code[i - 1] || '') && /^WITH\b/i.test(code.slice(i, i + 5))) {
-            topLevelWithSeen = true;
+            currentLevel().withSeen = true;
         }
 
         fill(i, i + 1, false);
         i++;
     }
 
-    return { depth, inCteBody, inQuotes };
+    return { depth, group, inCteBody, inQuotes };
 }
 
 export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
@@ -285,6 +296,25 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
     const textBefore = (offset: number, length = 64): string =>
         commentStripped.slice(Math.max(0, offset - length), offset);
 
+    const clauses: Array<{ offset: number; keyword: string }> = [];
+    CLAUSE_KEYWORD.lastIndex = 0;
+    let clauseMatch: RegExpExecArray | null;
+    while ((clauseMatch = CLAUSE_KEYWORD.exec(commentStripped)) !== null) {
+        if (nesting.inQuotes[clauseMatch.index] !== 1) {
+            clauses.push({ offset: clauseMatch.index, keyword: clauseMatch[0].split(/\s/)[0].toUpperCase() });
+        }
+    }
+    /** Whether the nearest clause before `offset` in its paren group lists tables. */
+    const inTableList = (offset: number): boolean => {
+        const offsetGroup = nesting.group[offset];
+        for (let c = clauses.length - 1; c >= 0; c--) {
+            if (clauses[c].offset < offset && nesting.group[clauses[c].offset] === offsetGroup) {
+                return TABLE_LIST_CLAUSES.has(clauses[c].keyword);
+            }
+        }
+        return false;
+    };
+
     // Occurrences already attributed to a node, so same-type nodes (one per
     // UNION branch, say) each get their own clause.
     const used = new Set<string>();
@@ -329,10 +359,19 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
                 continue;
             }
             const before = textBefore(match.index, 160);
+            const occurrence = occurrenceAt(`table:${tableName.toLowerCase()}@${match.index}`, match.index);
+            // A whole quoted identifier ("orders", `orders`, [orders]) is a
+            // reference, not quoted text.
+            const opener = commentStripped[match.index - 1];
+            const closer = commentStripped[match.index + match[0].length];
+            if ((opener === '"' || opener === '`' || opener === '[')
+                && closer === (opener === '[' ? ']' : opener)) {
+                occurrence.inQuotes = false;
+            }
             candidates.push({
-                ...occurrenceAt(`table:${tableName.toLowerCase()}@${match.index}`, match.index),
+                ...occurrence,
                 keywordContext: TABLE_KEYWORD_CONTEXT.test(before),
-                commaContext: TABLE_COMMA_CONTEXT.test(before),
+                commaContext: TABLE_COMMA_CONTEXT.test(before) && inTableList(match.index),
             });
         }
         const predicates: OccurrencePredicate<typeof candidates[number]>[] = [

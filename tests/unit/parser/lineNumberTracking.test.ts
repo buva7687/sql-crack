@@ -369,6 +369,44 @@ describe('Outer-query nodes skip keywords nested in CTEs, subqueries, and OVER (
         expect(nodes.map(n => n.startLine)).toEqual([1, 3, 2]);
     });
 
+    it('does not treat a SELECT-list column as a comma-listed table', () => {
+        const sql = [
+            'SELECT a, b', // 1
+            'FROM t, b',   // 2
+        ].join('\n');
+
+        const { nodes } = parseSql(sql, 'PostgreSQL' as SqlDialect);
+
+        expect(lineOf(nodes, 'table', 't')).toBe(2);
+        expect(lineOf(nodes, 'table', 'b')).toBe(2);
+    });
+
+    it('keeps quoted and unquoted references to one table in source order', () => {
+        const sql = [
+            'SELECT a.id',                  // 1
+            'FROM "orders" a',              // 2
+            'JOIN orders b ON a.id = b.id', // 3
+        ].join('\n');
+
+        const { nodes } = parseSql(sql, 'PostgreSQL' as SqlDialect);
+
+        expect(nodes.filter(n => n.type === 'table' && n.label === 'orders').map(n => n.startLine))
+            .toEqual([2, 3]);
+    });
+
+    it('points a derived table with its own WITH at its SELECT, not the CTE body', () => {
+        const sql = [
+            'SELECT s.x',                        // 1
+            'FROM (WITH c AS (SELECT 1 AS x)',   // 2
+            '  SELECT x FROM c) s',              // 3
+        ].join('\n');
+
+        const { nodes } = parseSql(sql, 'PostgreSQL' as SqlDialect);
+
+        expect(lineOf(nodes, 'subquery', 's')).toBe(3);
+        expect(lineOf(nodes, 'select')).toBe(1);
+    });
+
     it('ignores parentheses inside string literals and comments', () => {
         const sql = [
             'WITH x AS (',                          // 1
