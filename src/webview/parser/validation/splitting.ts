@@ -67,6 +67,27 @@ function scanSqlStatements(
     // so each emitted statement can report its exact source offset.
     let current = '';
     let currentStart = 0;
+    // `current` always equals sql.slice(currentStart, i) at the top of the
+    // loop. The DELIMITER check only needs to know whether it is still blank;
+    // scanning `sql` forward from the last checked offset keeps that linear,
+    // where trimming `current` on every character made long statements
+    // quadratic (reading `current` would also re-flatten the growing string).
+    let blankScanEnd = 0;
+    let currentHasText = false;
+    const currentIsBlank = (end: number): boolean => {
+        while (!currentHasText && blankScanEnd < end) {
+            if (!/\s/.test(sql[blankScanEnd])) {
+                currentHasText = true;
+            }
+            blankScanEnd++;
+        }
+        return !currentHasText;
+    };
+    const startCurrentAt = (offset: number): void => {
+        currentStart = offset;
+        blankScanEnd = offset;
+        currentHasText = false;
+    };
     let inString = false;
     let stringChar = '';
     let stringAllowsBackslashEscapes = false;
@@ -242,7 +263,7 @@ function scanSqlStatements(
             flushStatement();
             current = '';
             i += customDelimiter.length - 1;
-            currentStart = i + 1;
+            startCurrentAt(i + 1);
             continue;
         }
 
@@ -292,8 +313,7 @@ function scanSqlStatements(
         }
 
         if (!inString && !inDollarQuotes && blockCommentDepth === 0 && !inLineComment) {
-            const lineStart = current.trim();
-            if (lineStart === '' && (char === 'D' || char === 'd')) {
+            if ((char === 'D' || char === 'd') && currentIsBlank(i)) {
                 const remaining = sql.substring(i, i + 20).toUpperCase();
                 if (remaining.startsWith('DELIMITER ')) {
                     const delimiterMatch = sql.substring(i).match(/^DELIMITER\s+(\S+)/i);
@@ -303,7 +323,7 @@ function scanSqlStatements(
                             i++;
                         }
                         current = '';
-                        currentStart = i + 1;
+                        startCurrentAt(i + 1);
                         continue;
                     }
                 }
@@ -389,7 +409,7 @@ function scanSqlStatements(
             if (delimiter !== ';') {
                 i += delimiter.length - 1;
             }
-            currentStart = i + 1;
+            startCurrentAt(i + 1);
         } else {
             current += char;
         }

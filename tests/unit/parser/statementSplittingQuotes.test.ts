@@ -42,3 +42,36 @@ describe('statement splitting — quote and identifier delimiters', () => {
         expect(result[0]).toContain('"co""l;n"');
     });
 });
+
+describe('statement splitting — long statements', () => {
+    it('splits a single large INSERT in linear time', () => {
+        const rows = Array.from({ length: 12000 }, (_, i) => `(${i}, 'name_${i}', ${i * 3})`);
+        const sql = `INSERT INTO t (a, b, c) VALUES\n${rows.join(',\n')};\nSELECT 1;`;
+        expect(sql.length).toBeGreaterThan(300 * 1024);
+
+        const started = Date.now();
+        const statements = splitSqlStatements(sql, 'PostgreSQL');
+        const elapsedMs = Date.now() - started;
+
+        expect(statements).toHaveLength(2);
+        expect(statements[1]).toBe('SELECT 1');
+        // Trimming the growing statement on every character took ~6-14 s here.
+        expect(elapsedMs).toBeLessThan(1500);
+    });
+
+    it('still recognizes DELIMITER only at the start of a statement', () => {
+        const sql = [
+            "SELECT 'DELIMITER //' AS note;",
+            'DELIMITER //',
+            'CREATE PROCEDURE p() BEGIN SELECT 1; END //',
+            'DELIMITER ;',
+            'SELECT 2;',
+        ].join('\n');
+
+        expect(splitSqlStatements(sql, 'MySQL')).toEqual([
+            "SELECT 'DELIMITER //' AS note",
+            'CREATE PROCEDURE p() BEGIN SELECT 1; END',
+            'SELECT 2',
+        ]);
+    });
+});
