@@ -300,10 +300,11 @@ describe('parser worker migration prep', () => {
         }
     });
     it('compare-mode baseline parse cannot overwrite a newer interaction state', () => {
-        expect(indexSource).toContain('const compareToken = parseRequestId;');
+        expect(indexSource).toContain('const compareToken = ++compareRequestId;');
         expect(indexSource).toContain('const compareQueryIndex = currentQueryIndex;');
         expect(indexSource).toContain('const baselineResult = await parseAsync(baseline.sql, baseline.dialect, {');
-        expect(indexSource).toContain('compareToken !== parseRequestId || currentQueryIndex !== compareQueryIndex');
+        expect(indexSource).toContain('parseToken !== parseRequestId');
+        expect(indexSource).toContain('compareToken !== compareRequestId');
     });
 
     it('pinned-tab restore parse flow is cancellation-safe during rapid refresh/switch', () => {
@@ -330,6 +331,7 @@ describe('parser worker migration prep', () => {
 
         expect(switchBody).toContain('querySwitchPromises.get(newIndex)');
         expect(switchBody).toContain('await existingSwitch');
+        expect(switchBody).toContain('await switchToQueryIndex(newIndex, options);');
         expect(switchBody).toContain('querySwitchPromises.set(newIndex, switchPromise)');
         expect(switchBody).toContain('querySwitchPromises.delete(newIndex)');
     });

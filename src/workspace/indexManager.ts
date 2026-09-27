@@ -1158,6 +1158,13 @@ export class IndexManager {
             this._lastCacheState = 'stale';
             return null;
         }
+        // Validation can await the filesystem while the user changes dialect
+        // or scope settings. Never install the old snapshot under a new cache
+        // identity, even if it matched when validation began.
+        if (cached.identity !== this.computeCacheIdentity()) {
+            this._lastCacheState = 'identity-mismatch';
+            return null;
+        }
 
         // Reconstruct Maps from arrays
         // Handle backward compatibility: fileHashesArray may not exist in old cache

@@ -199,6 +199,8 @@ let cursorFollowToken = 0;
 let userExplicitlySetDialect = false;
 let lastParsedDialect: SqlDialect | null = null;
 let compareModeActive = false;
+let compareRequestId = 0;
+let comparePending = false;
 let isInactiveEditor = false;
 let persistStateIntervalId: number | null = null;
 let persistStateDebounceId: number | null = null;
@@ -1338,6 +1340,12 @@ function resolveCompareBaseline(): { label: string; sql: string; dialect: SqlDia
 }
 
 async function toggleCompareMode(): Promise<void> {
+    if (comparePending) {
+        // A second click cancels the in-flight baseline parse.
+        compareRequestId++;
+        comparePending = false;
+        return;
+    }
     if (isCompareViewActive()) {
         hideCompareView();
         setCompareModeState(false);
@@ -1359,43 +1367,50 @@ async function toggleCompareMode(): Promise<void> {
         return;
     }
 
-    const currentQuery = batchResult.queries[currentQueryIndex];
-    if (!currentQuery?.sql) {
-        return;
-    }
-
-    const compareToken = parseRequestId;
+    const compareToken = ++compareRequestId;
+    const parseToken = parseRequestId;
     const compareQueryIndex = currentQueryIndex;
     const owningBatch = batchResult;
-    const baselineResult = await parseAsync(baseline.sql, baseline.dialect, {
-        allowDialectFallback: isDialectAutoDetectionEnabled(),
-    }, 'independent');
-    // currentQuery belongs to owningBatch; a refresh that finished meanwhile
-    // would otherwise show the old statement beside the new graph.
-    if (batchResult !== owningBatch || compareToken !== parseRequestId || currentQueryIndex !== compareQueryIndex) {
-        return;
+    comparePending = true;
+    try {
+        // The visible query can still be a deferred placeholder. Wait for its
+        // existing hydration before capturing the graph to diff.
+        if (deferredQueryIndexes.has(compareQueryIndex) || querySwitchPromises.has(compareQueryIndex)) {
+            await switchToQueryIndex(compareQueryIndex);
+        }
+        if (batchResult !== owningBatch || parseToken !== parseRequestId
+            || currentQueryIndex !== compareQueryIndex || compareToken !== compareRequestId) {
+            return;
+        }
+        const currentQuery = owningBatch.queries[compareQueryIndex];
+        if (!currentQuery?.sql) {
+            return;
+        }
+
+        const baselineResult = await parseAsync(baseline.sql, baseline.dialect, {
+            allowDialectFallback: isDialectAutoDetectionEnabled(),
+        }, 'independent');
+        if (batchResult !== owningBatch || parseToken !== parseRequestId
+            || currentQueryIndex !== compareQueryIndex || compareToken !== compareRequestId) {
+            return;
+        }
+        const currentTitle = owningBatch.queries.length > 1
+            ? `Current • Q${compareQueryIndex + 1}`
+            : (window.fileName || 'Current query');
+
+        showCompareView({
+            container: root,
+            left: { label: baseline.label, result: baselineResult },
+            right: { label: currentTitle, result: currentQuery },
+            isDarkTheme: isDarkTheme(),
+            onClose: () => { setCompareModeState(false); },
+        });
+        setCompareModeState(true);
+    } finally {
+        if (compareToken === compareRequestId) {
+            comparePending = false;
+        }
     }
-    const currentTitle = batchResult.queries.length > 1
-        ? `Current • Q${currentQueryIndex + 1}`
-        : (window.fileName || 'Current query');
-
-    showCompareView({
-        container: root,
-        left: {
-            label: baseline.label,
-            result: baselineResult,
-        },
-        right: {
-            label: currentTitle,
-            result: currentQuery,
-        },
-        isDarkTheme: isDarkTheme(),
-        onClose: () => {
-            setCompareModeState(false);
-        },
-    });
-
-    setCompareModeState(true);
 }
 
 function createToolbarCallbacks(): ToolbarCallbacks {
@@ -1761,6 +1776,11 @@ async function switchToQueryIndex(newIndex: number, options: { skipSaveCurrent?:
     const existingSwitch = querySwitchPromises.get(newIndex);
     if (existingSwitch) {
         await existingSwitch;
+        // Another query may have become active while this hydration was in
+        // flight. The latest request still needs to render its target.
+        if (currentQueryIndex !== newIndex) {
+            await switchToQueryIndex(newIndex, options);
+        }
         return;
     }
 
@@ -1781,6 +1801,10 @@ async function performSwitchToQueryIndex(newIndex: number, options: { skipSaveCu
     // currentQueryIndex as NaN, crashing the next renderCurrentQuery().
     if (!batchResult || !Number.isInteger(newIndex) || newIndex < 0 || newIndex >= batchResult.queries.length) {
         return;
+    }
+    if (newIndex !== currentQueryIndex && comparePending) {
+        compareRequestId++;
+        comparePending = false;
     }
 
     // Save current view state before switching

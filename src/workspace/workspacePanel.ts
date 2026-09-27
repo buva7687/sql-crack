@@ -101,6 +101,7 @@ export class WorkspacePanel {
     private readonly _scopeUri: vscode.Uri | undefined;
     private _disposables: vscode.Disposable[] = [];
     private _indexManager: IndexManager;
+    private _initializePromise: Promise<void> | null = null;
     private _indexBuildPromise: Promise<void> | null = null;
     private _dialect: SqlDialect;
     private _currentGraph: WorkspaceDependencyGraph | null = null;
@@ -241,11 +242,15 @@ export class WorkspacePanel {
                 // Different scope — dispose old panel and create new one
                 WorkspacePanel.currentPanel.dispose();
             } else {
-                if (WorkspacePanel.currentPanel._dialect !== dialect) {
-                    WorkspacePanel.currentPanel._dialect = dialect;
-                    WorkspacePanel.currentPanel._indexManager.setDialect(dialect);
+                const existingPanel = WorkspacePanel.currentPanel;
+                if (existingPanel._dialect !== dialect) {
+                    existingPanel._dialect = dialect;
+                    existingPanel._indexManager.setDialect(dialect);
                 }
-                WorkspacePanel.currentPanel._panel.reveal(column);
+                existingPanel._panel.reveal(column);
+                if (existingPanel._initializePromise) {
+                    await existingPanel._initializePromise;
+                }
                 return;
             }
         }
@@ -269,8 +274,10 @@ export class WorkspacePanel {
             }
         );
 
-        WorkspacePanel.currentPanel = new WorkspacePanel(panel, extensionUri, context, dialect, scopeUri);
-        await WorkspacePanel.currentPanel.initialize();
+        const workspacePanel = new WorkspacePanel(panel, extensionUri, context, dialect, scopeUri);
+        WorkspacePanel.currentPanel = workspacePanel;
+        workspacePanel._initializePromise = workspacePanel.initialize();
+        await workspacePanel._initializePromise;
     }
 
     /**

@@ -1045,6 +1045,34 @@ describe('IndexManager', () => {
     // =========================================================================
 
     describe('caching', () => {
+        it('rejects a cached index when dialect changes during filesystem validation', async () => {
+            await mockContext.workspaceState.update('sqlWorkspaceIndex', {
+                version: 7,
+                identity: JSON.stringify({ schema: 7, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                lastUpdated: Date.now(),
+                fileCount: 1,
+                filesArray: [['/cached.sql', createMockAnalysis('/cached.sql', [{ name: 'old_table' }])]],
+                fileHashesArray: [['/cached.sql', hashSql('')]],
+                definitionArray: [['old_table', [{ name: 'old_table', type: 'table', filePath: '/cached.sql', lineNumber: 1, columns: [] }]]],
+                referenceArray: [],
+            });
+            mockScanner.getFileCount.mockResolvedValue(1);
+            let completeValidation!: (current: boolean) => void;
+            jest.spyOn(indexManager as any, 'isCachedIndexCurrent').mockImplementation(() => new Promise<boolean>(resolve => {
+                completeValidation = resolve;
+            }));
+
+            const initialization = indexManager.initialize(0);
+            await flushPromises();
+            indexManager.setDialect('PostgreSQL');
+            completeValidation(true);
+
+            const result = await initialization;
+            expect(result.cacheState).toBe('identity-mismatch');
+            expect(result.hasValidIndex).toBe(false);
+            expect(indexManager.findDefinition('old_table')).toBeUndefined();
+        });
+
         it('should load cached index on initialize', async () => {
             // Pre-populate cache. The identity must match computeCacheIdentity()
             // for this manager (schema 5, no scope, MySQL dialect, no extra
