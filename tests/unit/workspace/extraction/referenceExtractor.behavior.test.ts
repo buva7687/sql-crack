@@ -27,6 +27,14 @@ describe('ReferenceExtractor behavioral coverage', () => {
             .map(reference => reference.tableName)).toContain('b');
     });
 
+    it('keeps the table and catalog in a SQL Server double-dot reference', () => {
+        const references = extractor.extractReferences('SELECT * FROM mydb..orders', '/sql/query.sql', 'TransactSQL');
+        expect(references).toEqual(expect.arrayContaining([
+            expect.objectContaining({ tableName: 'orders', catalog: 'mydb' }),
+        ]));
+        expect(references.some(reference => reference.tableName === 'mydb')).toBe(false);
+    });
+
     it('anchors INSERT and UPDATE targets before later joins to the same table', () => {
         const insertSql = 'INSERT INTO audit (id)\nSELECT e.id\nFROM events e\nJOIN audit a ON a.id = e.id';
         const updateSql = 'UPDATE audit\nSET id = a.id\nFROM events e\nJOIN audit a ON a.id = e.id';

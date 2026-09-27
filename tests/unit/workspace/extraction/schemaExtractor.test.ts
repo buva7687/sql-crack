@@ -29,6 +29,12 @@ describe('SchemaExtractor.extractDefinitions', () => {
             .map(definition => definition.name)).toEqual(['a', 'b']);
     });
 
+    it('keeps the full name of an unquoted Unicode definition', () => {
+        const sql = 'CREATE VIEW café AS SELECT 1; CREATE TABLE größe (id INT);';
+        const definitions = extractor.extractDefinitions(sql, '/sql/unicode.sql', 'PostgreSQL');
+        expect(definitions.map(definition => definition.name)).toEqual(['café', 'größe']);
+    });
+
     it('parses large files one statement at a time instead of using the quadratic batch path', () => {
         const astifySpy = jest.spyOn((extractor as any).parser, 'astify');
         const sql = Array.from({ length: 200 }, (_, index) =>

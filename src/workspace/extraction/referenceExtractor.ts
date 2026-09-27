@@ -2179,7 +2179,9 @@ export class ReferenceExtractor {
 
         const qualifiedTablePattern =
             `(${REFERENCE_SQL_IDENTIFIER_PATTERN})`
-                + `(?:\\s*\\.\\s*(${REFERENCE_SQL_IDENTIFIER_PATTERN}))?`
+                + (this._activeDialect === 'TransactSQL'
+                    ? `(?:\\s*\\.\\s*(${REFERENCE_SQL_IDENTIFIER_PATTERN})?)?`
+                    : `(?:\\s*\\.\\s*(${REFERENCE_SQL_IDENTIFIER_PATTERN}))?`)
                 + `(?:\\s*\\.\\s*(${REFERENCE_SQL_IDENTIFIER_PATTERN}))?`;
         /**
          * Record one table match. `baseIndex` is added to `match.index` when the

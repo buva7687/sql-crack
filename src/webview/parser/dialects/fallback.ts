@@ -153,7 +153,9 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
     const identifierPart = '#?[\\p{L}\\p{N}_$]+';
     const quotedIdentifier = "(?:`[^`]+`|\"[^\"]+\"|\\[[^\\]]+\\]|'[^']+')";
     const identifier = `(?:${quotedIdentifier}|${identifierPart})`;
-    const qualifiedIdentifier = `${identifier}(?:\\.${identifier})*`;
+    const qualifiedIdentifier = dialect === 'TransactSQL'
+        ? `${identifier}(?:\\.${identifier}|\\.\\.${identifier})*`
+        : `${identifier}(?:\\.${identifier})*`;
     const identifierWrapperPattern = /[`"'\[\]]/g;
     const normalizeObjectName = (raw: string): string => {
         const parts = raw.split('.').map((part) => part.replace(identifierWrapperPattern, '')).filter(Boolean);

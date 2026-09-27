@@ -6,6 +6,7 @@
  */
 
 import { parseSql } from '../../../src/webview/sqlParser';
+import { regexFallbackParse } from '../../../src/webview/parser/dialects/fallback';
 import type { SqlDialect } from '../../../src/webview/types/parser';
 
 describe('Item #1: Regex-Based Partial Parser Fallback', () => {
@@ -440,6 +441,12 @@ describe('Item #1: Regex-Based Partial Parser Fallback', () => {
 
             expect(result.partial).toBe(true);
             expect(result.nodes.length).toBeGreaterThan(0);
+        });
+
+        it('keeps the table name in a SQL Server double-dot reference', () => {
+            const result = regexFallbackParse('SELECT * FROM mydb..orders', 'TransactSQL');
+            expect(result.nodes.some(node => node.type === 'table' && node.label === 'orders')).toBe(true);
+            expect(result.nodes.some(node => node.type === 'table' && node.label === 'mydb')).toBe(false);
         });
     });
 });

@@ -15,7 +15,7 @@ import { getIdentifierSemantics } from '../identifiers';
 import { SCHEMA_SQL_RESERVED_WORDS } from './constants';
 
 const SQL_IDENTIFIER_PATTERN =
-    '(?:"(?:[^"]|"")*"|`(?:[^`]|``)*`|\\[(?:[^\\]]|\\]\\])*\\]|[\\w$#@]+)';
+    '(?:"(?:[^"]|"")*"|`(?:[^`]|``)*`|\\[(?:[^\\]]|\\]\\])*\\]|[\\p{L}\\p{M}\\p{N}_$#@]+)';
 
 interface SqlSearchViews {
     searchableSql: string;
@@ -257,7 +257,7 @@ export class SchemaExtractor {
                 /^(?:PRIMARY\s+KEY|FOREIGN\s+KEY|UNIQUE|CHECK|CONSTRAINT)\b/i.test(trimmed))) {
                 continue;
             }
-            const match = new RegExp(`^(${SQL_IDENTIFIER_PATTERN})(?:\\s|$)`).exec(trimmed);
+            const match = new RegExp(`^(${SQL_IDENTIFIER_PATTERN})(?:\\s|$)`, 'u').exec(trimmed);
             if (!match) {continue;}
             result.set(this.unquoteIdentifier(match[1]), this.isQuotedIdentifier(match[1]));
         }
@@ -700,7 +700,7 @@ export class SchemaExtractor {
             `(?:MATERIALIZED\\s+)?${keyword}\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?` +
             `(${SQL_IDENTIFIER_PATTERN})(?:\\s*\\.\\s*(${SQL_IDENTIFIER_PATTERN})?)?`
                 + `(?:\\s*\\.\\s*(${SQL_IDENTIFIER_PATTERN}))?`,
-            'gi'
+            'giu'
         );
     }
 
@@ -858,7 +858,7 @@ export class SchemaExtractor {
             `\\bINTO\\s+(?:(?:TEMP(?:ORARY)?|UNLOGGED)(?:\\s+TABLE)?\\s+|TABLE\\s+)?`
                 + `(${SQL_IDENTIFIER_PATTERN})(?:\\s*\\.\\s*(${SQL_IDENTIFIER_PATTERN})?)?`
                 + `(?:\\s*\\.\\s*(${SQL_IDENTIFIER_PATTERN}))?`,
-            'gi'
+            'giu'
         );
         let match: RegExpExecArray | null;
 
@@ -947,7 +947,7 @@ export class SchemaExtractor {
                     `FOREIGN\\s+KEY\\s*\\(([^)]+)\\)\\s*REFERENCES\\s+` +
                     `(${SQL_IDENTIFIER_PATTERN})(?:\\s*\\.\\s*(${SQL_IDENTIFIER_PATTERN}))?` +
                     `\\s*\\(([^)]+)\\)`,
-                    'i'
+                    'iu'
                 ).exec(trimmed);
                 if (fkMatch) {
                     const columnList = this.splitColumnDefinitions(fkMatch[1])
@@ -977,7 +977,7 @@ export class SchemaExtractor {
             // Match: column_name DATA_TYPE(args) or column_name DATA_TYPE
             const colMatch = new RegExp(
                 `^(${SQL_IDENTIFIER_PATTERN})\\s+(\\w+)(?:\\s*\\([^)]*\\))?([\\s\\S]*)$`,
-                'i'
+                'iu'
             ).exec(trimmed);
             if (colMatch) {
                 const name = this.unquoteIdentifier(colMatch[1]);
@@ -987,7 +987,7 @@ export class SchemaExtractor {
                 // Check for type with precision like VARCHAR(255) or DECIMAL(10,2)
                 const typeWithPrecision = new RegExp(
                     `^${SQL_IDENTIFIER_PATTERN}\\s+(\\w+\\s*\\([^)]+\\))`,
-                    'i'
+                    'iu'
                 ).exec(trimmed);
                 if (typeWithPrecision) {
                     dataType = typeWithPrecision[1].replace(/\s+/g, '');
@@ -1000,7 +1000,7 @@ export class SchemaExtractor {
                     `REFERENCES\\s+(${SQL_IDENTIFIER_PATTERN})` +
                     `(?:\\s*\\.\\s*(${SQL_IDENTIFIER_PATTERN}))?` +
                     `\\s*\\(\\s*(${SQL_IDENTIFIER_PATTERN})\\s*\\)`,
-                    'i'
+                    'iu'
                 ).exec(rest);
 
                 const column: ColumnInfo = {

@@ -46,8 +46,8 @@ export function generateWorkspaceMermaid(
 
     for (const node of graph.nodes) {
         const label = escapeWorkspaceMermaidLabel(node.label);
-        const shape = node.type === 'file' ? '[' : node.type === 'external' ? '((' : '[]';
-        const endShape = node.type === 'file' ? ']' : node.type === 'external' ? '))' : ']';
+        const shape = node.type === 'external' ? '((' : '[';
+        const endShape = node.type === 'external' ? '))' : ']';
         mermaid += `    ${node.id}${shape}"${label}"${endShape}\n`;
     }
 
