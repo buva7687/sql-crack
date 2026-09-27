@@ -59,3 +59,10 @@ describe('sqlFormatter quoted SQL', () => {
         expect(formatted.match(/'a  b, AND SELECT'/g)).toHaveLength(2);
     });
 });
+
+it('does not replace a SQL identifier that resembles a comment marker', () => {
+    const sql = 'SELECT __COMMENT_0__ -- note\nFROM t';
+    const formatted = formatSql(sql);
+    expect(formatted).toContain('SELECT __COMMENT_0__ -- note\nFROM t');
+    expect(formatted.match(/__COMMENT_0__/g)).toHaveLength(1);
+});

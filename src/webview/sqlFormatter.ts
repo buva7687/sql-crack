@@ -137,9 +137,13 @@ function extractComments(sql: string): { sqlWithoutComments: string; comments: M
     let result = '';
     let commentIndex = 0;
     let index = 0;
+    // A user's identifier or comment may itself contain __COMMENT_0__. Pick
+    // a prefix absent from the input so restoration always hits our markers.
+    let placeholderPrefix = '__COMMENT_';
+    while (sql.includes(placeholderPrefix)) { placeholderPrefix += '_'; }
 
     const storeComment = (comment: string): string => {
-        const placeholder = '__COMMENT_' + commentIndex++ + '__';
+        const placeholder = placeholderPrefix + commentIndex++ + '__';
         comments.set(placeholder, comment);
         return placeholder;
     };
