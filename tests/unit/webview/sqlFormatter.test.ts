@@ -47,3 +47,15 @@ describe('sqlFormatter comment edge cases', () => {
         expect(result).not.toMatch(/__COMMENT_\d+__/);
     });
 });
+
+describe('sqlFormatter quoted SQL', () => {
+    it('preserves literals and quoted identifiers through every formatting pass', () => {
+        const tokens = ["'a  b, AND SELECT'", '"from  here"', '`order by`', '[group  by]', '$tag$one  two, AND$tag$'];
+        const sql = `select ${tokens.join(', ')} from t where name = 'a  b, AND SELECT'`;
+        const formatted = formatSql(sql);
+        for (const token of tokens) {
+            expect(formatted).toContain(token);
+        }
+        expect(formatted.match(/'a  b, AND SELECT'/g)).toHaveLength(2);
+    });
+});

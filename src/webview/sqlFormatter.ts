@@ -53,9 +53,12 @@ export function formatSql(sql: string, options: Partial<FormatOptions> = {}): st
 
     // Extract comments and replace with placeholders to preserve them
     const { sqlWithoutComments, comments } = extractComments(sql);
+    // All formatting passes work on SQL structure only. Quoted values and
+    // identifiers may contain whitespace, commas, keywords, or newlines.
+    const { sqlWithoutQuotes, quotes } = protectQuotedTokens(sqlWithoutComments);
 
     // Normalize whitespace (only on non-comment parts)
-    let formatted = sqlWithoutComments.replace(/\s+/g, ' ').trim();
+    let formatted = sqlWithoutQuotes.replace(/\s+/g, ' ').trim();
 
     // Uppercase keywords if enabled
     if (opts.uppercase) {
@@ -68,9 +71,6 @@ export function formatSql(sql: string, options: Partial<FormatOptions> = {}): st
     // Format comma-separated lists
     formatted = formatLists(formatted, opts.indent);
 
-    // Restore comments
-    formatted = restoreComments(formatted, comments);
-
     // Clean up extra whitespace
     formatted = formatted
         .split('\n')
@@ -78,7 +78,54 @@ export function formatSql(sql: string, options: Partial<FormatOptions> = {}): st
         .join('\n')
         .replace(/\n{3,}/g, '\n\n');
 
-    return formatted;
+    return restoreQuotedTokens(restoreComments(formatted, comments), quotes);
+}
+
+function protectQuotedTokens(sql: string): { sqlWithoutQuotes: string; quotes: Map<string, string> } {
+    const quotes = new Map<string, string>();
+    let markerPrefix = '\uE000';
+    while (sql.includes(markerPrefix)) { markerPrefix += '\uE000'; }
+    let result = '';
+    let index = 0;
+
+    while (index < sql.length) {
+        const char = sql[index];
+        let end = index;
+        if (char === "'" || char === '"' || char === '`' || char === '[') {
+            const closing = char === '[' ? ']' : char;
+            end++;
+            while (end < sql.length) {
+                if (sql[end] === '\\' && closing !== ']' && end + 1 < sql.length) {
+                    end += 2;
+                } else if (sql[end] === closing) {
+                    if (sql[end + 1] === closing) { end += 2; }
+                    else { end++; break; }
+                } else { end++; }
+            }
+        } else if (char === '$') {
+            const delimiter = getDollarQuoteDelimiterAt(sql, index);
+            if (delimiter) {
+                const close = sql.indexOf(delimiter, index + delimiter.length);
+                end = close < 0 ? sql.length : close + delimiter.length;
+            }
+        }
+        if (end > index) {
+            const marker = `${markerPrefix}${quotes.size}\uE001`;
+            quotes.set(marker, sql.slice(index, end));
+            result += marker;
+            index = end;
+        } else {
+            result += char;
+            index++;
+        }
+    }
+    return { sqlWithoutQuotes: result, quotes };
+}
+
+function restoreQuotedTokens(sql: string, quotes: Map<string, string>): string {
+    // One pass prevents a quoted value that resembles a marker from being
+    // recursively interpreted as another token.
+    return sql.replace(/\uE000+\d+\uE001/g, marker => quotes.get(marker) ?? marker);
 }
 
 /**
