@@ -24,6 +24,59 @@ describe('VisualizationPanel behavior', () => {
         expect(config.gridStyle).toBe('dots');
     });
 
+    it('keeps a pinned panel on its saved dialect during runtime updates', () => {
+        (vscode as any).__setMockConfig?.('sqlCrack', { defaultDialect: 'MySQL' });
+        const config = (VisualizationPanel.prototype as any)._readRuntimeConfig.call(
+            { _isPinned: true },
+            { dialect: 'PostgreSQL', fileName: 'pinned.sql' }
+        );
+        expect(config.defaultDialect).toBe('PostgreSQL');
+    });
+
+    it('maps cursor lines into a visualized selection and ignores lines outside it', () => {
+        const previous = VisualizationPanel.currentPanel;
+        const postMessage = jest.fn();
+        VisualizationPanel.currentPanel = {
+            _currentOptions: {
+                sourceRange: new vscode.Range(new vscode.Position(10, 4), new vscode.Position(14, 0)),
+            },
+            _postMessage: postMessage,
+        } as any;
+        try {
+            VisualizationPanel.sendCursorPosition(12);
+            VisualizationPanel.sendCursorPosition(15);
+            expect(postMessage).toHaveBeenCalledTimes(1);
+            expect(postMessage).toHaveBeenCalledWith({ command: 'cursorPosition', line: 2 });
+        } finally {
+            VisualizationPanel.currentPanel = previous;
+        }
+    });
+
+    it('maps a node line in a visualized selection back to the source document', async () => {
+        const previousEditor = vscode.window.activeTextEditor;
+        const previousSelection = (vscode as any).Selection;
+        const previousRevealType = (vscode as any).TextEditorRevealType;
+        const editor = { selection: undefined as unknown, revealRange: jest.fn() };
+        (vscode.window as any).activeTextEditor = editor;
+        (vscode as any).Selection = class {
+            constructor(public anchor: vscode.Position, public active: vscode.Position) {}
+        };
+        (vscode as any).TextEditorRevealType = { InCenter: 1 };
+        try {
+            await (VisualizationPanel.prototype as any)._goToLine.call({
+                _currentOptions: {
+                    sourceRange: new vscode.Range(new vscode.Position(10, 4), new vscode.Position(14, 0)),
+                },
+                _sourceDocumentUri: undefined,
+            }, 2);
+            expect((editor.selection as any).active.line).toBe(11);
+        } finally {
+            (vscode.window as any).activeTextEditor = previousEditor;
+            (vscode as any).Selection = previousSelection;
+            (vscode as any).TextEditorRevealType = previousRevealType;
+        }
+    });
+
     it('falls back to the opened dialect and clamps advanced runtime limits', () => {
         (vscode as any).__setMockConfig?.('sqlCrack', {
             'advanced.maxFileSizeKB': 2,

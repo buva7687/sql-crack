@@ -326,10 +326,16 @@ export class VisualizationPanel {
     }
 
     public static sendCursorPosition(line: number) {
-        if (VisualizationPanel.currentPanel) {
-            VisualizationPanel.currentPanel._postMessage({
+        const panel = VisualizationPanel.currentPanel;
+        if (panel) {
+            const range = panel._currentOptions.sourceRange;
+            if (range && (line <= range.start.line
+                || line > range.end.line + (range.end.character > 0 ? 1 : 0))) {
+                return;
+            }
+            panel._postMessage({
                 command: 'cursorPosition',
-                line: line
+                line: range ? line - range.start.line : line
             });
         }
     }
@@ -596,7 +602,7 @@ export class VisualizationPanel {
             return;
         }
         const safeLine = Math.max(1, Math.floor(line)); // 1-indexed, never below 1
-        const zeroBasedLine = safeLine - 1;
+        const zeroBasedLine = safeLine - 1 + (this._currentOptions.sourceRange?.start.line ?? 0);
 
         // Try to use the source document URI if available (preferred method)
         const targetUri = this._sourceDocumentUri;
@@ -786,15 +792,11 @@ export class VisualizationPanel {
         const parseTimeoutSeconds = normalizeAdvancedLimit(config.get<number>('advanced.parseTimeoutSeconds', 5), 5, 1, 60);
         const debugLogging = config.get<boolean>('advanced.debugLogging', false);
 
-        // Report the live configured default dialect (normalized) rather than the
-        // dialect the panel happened to open with. This is what propagates to the
-        // webview on a `sqlCrack.defaultDialect` settings change, so the runtime
-        // dialect no longer goes stale when the user updates the default. The
-        // initial HTML seed still uses options.dialect, so a pinned view's opened
-        // dialect is preserved on first render.
-        const configuredDefaultDialect = normalizeDialect(
-            config.get<string>('defaultDialect') || options.dialect || 'MySQL'
-        );
+        // Mutable panels follow the live default setting. A pinned snapshot
+        // keeps its saved dialect across theme and settings updates.
+        const configuredDefaultDialect = normalizeDialect(this._isPinned
+            ? options.dialect
+            : (config.get<string>('defaultDialect') || options.dialect || 'MySQL'));
 
         return {
             vscodeTheme,

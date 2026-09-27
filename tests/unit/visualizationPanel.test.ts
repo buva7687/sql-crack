@@ -148,7 +148,7 @@ describe('visualizationPanel.ts', () => {
         it('validates a finite integer line and clamps to line 1 before Position', () => {
             expect(source).toContain('Number.isFinite(line)');
             expect(source).toContain('const safeLine = Math.max(1, Math.floor(line))');
-            expect(source).toContain('const zeroBasedLine = safeLine - 1;');
+            expect(source).toContain('const zeroBasedLine = safeLine - 1 + (this._currentOptions.sourceRange?.start.line ?? 0);');
             expect(source).toContain('new vscode.Position(zeroBasedLine, 0)');
         });
 
