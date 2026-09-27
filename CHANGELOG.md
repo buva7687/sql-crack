@@ -163,6 +163,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Workspace Mermaid export safety**: Repository-controlled labels now collapse line breaks and encode Markdown fences, Mermaid shape delimiters, quotes, and HTML delimiters so exported diagrams cannot be fence-broken or inject rendered content.
 - **Workspace export metadata safety**: Comment-block metadata now collapses CR/LF and Unicode line separators and encodes backticks, keeping unusual workspace paths, filters, and lineage names inside Mermaid and DOT export comments.
 - **SQL formatter comment restoration**: Multiline block comments containing line-comment syntax are tokenized in one pass, preventing nested comment placeholders from leaking into formatted SQL.
+- **Quoted SQL formatting**: The SQL preview preserves whitespace, commas, keywords, and line breaks inside string literals and quoted identifiers, including single, double, backtick, bracket, and PostgreSQL dollar-quoted forms, while formatting the surrounding SQL.
 - **MySQL LIMIT details**: Both comma-form and OFFSET-form limits now render the actual row count and offset instead of displaying only the first AST value.
 
 ### Performance
@@ -178,6 +179,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Added regression coverage for PostgreSQL column identifier unwrapping, quote-aware/dotted column IDs, case-distinct quoted CTEs, BigQuery table-name case, filesystem deletion codes and stale-cache rejection, workspace lineage `CREATE TABLE` safety, CTAS `query_expr` references, T-SQL update-alias writes, PostgreSQL-wrapped window identifiers, CASE/ELSE formatting variants, drag-path map reuse, quoted schema extraction, `CREATE` text inside identifiers, comment/string masking, fallback and recursive CTE locations, target resolution, global temporary tables, T-SQL `OUTPUT` partial parses, parameterized limits, dialect scoring and warnings, delimiter-aware preprocessing, indexed impact analysis, statement-scoped lineage, transitive impact, delete/build races, CTAS graph edges, safe bootstrap serialization, deferred hydration, source-preserving refresh, edit-adjusted source selections, nested/hash comments, aggregate aliases, and bounded PNG export.
 - Added focused regression coverage for Mermaid fence-breaking labels and metadata, block comments containing line-comment markers, and MySQL LIMIT row-count/offset rendering.
+- Added formatter regression coverage for string literals and quoted identifiers containing SQL keywords, commas, and repeated spaces.
 - Branch validation: 281 suites, 3,741 tests passing. `npm run typecheck`, `npm run lint`, `npm run package`, and the production dependency audit pass.
 
 ## [0.9.1] - 2026-07-01
