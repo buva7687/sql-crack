@@ -60,8 +60,16 @@ export function generateHints(context: ParserContext, stmt: any): void {
         });
     }
 
-    // Cartesian product (no join condition)
-    if (context.stats.tables > 1 && context.stats.joins === 0 && context.stats.conditions === 0) {
+    // Only tables in the same unconnected FROM list can form a Cartesian
+    // product. Statement totals also include INSERT targets, scalar subqueries,
+    // and independent UNION branches.
+    const unconnectedFromList = type === 'select'
+        && !stmt._next
+        && Array.isArray(stmt.from)
+        && stmt.from.length > 1
+        && stmt.from.slice(1).some((item: any) => !item.join)
+        && !stmt.where;
+    if (unconnectedFromList) {
         context.hints.push({
             type: 'error',
             message: 'Possible Cartesian product',

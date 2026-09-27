@@ -17,6 +17,8 @@ export function formatConditionRecursive(expr: any, conditions: string[], depth 
         } else {
             conditions.push(formatCondition(expr));
         }
+    } else {
+        conditions.push(formatCondition(expr));
     }
 }
 
@@ -29,7 +31,8 @@ export function formatCondition(expr: any): string {
         return `${left} ${expr.operator} ${right}`;
     }
 
-    if (expr.type === 'function' || expr.type === 'aggr_func' || expr.type === 'unary_expr') {
+    if (expr.type === 'function' || expr.type === 'aggr_func' || expr.type === 'unary_expr'
+        || expr.type === 'column_ref' || expr.type === 'bool') {
         return formatConditionOperand(expr);
     }
 
@@ -71,7 +74,12 @@ function formatConditionOperand(operand: any): string {
         return formatCondition(operand);
     }
     if (operand.type === 'unary_expr') {
-        return `${operand.operator || ''}${formatConditionOperand(operand.expr ?? operand.value)}`;
+        const operator = String(operand.operator || '');
+        const inner = formatConditionOperand(operand.expr ?? operand.value);
+        if (operator.toUpperCase() === 'NOT EXISTS') {
+            return `${operator} (${inner})`;
+        }
+        return `${operator}${/[A-Za-z]$/.test(operator) ? ' ' : ''}${inner}`;
     }
     if (operand.type === 'function' || operand.type === 'aggr_func') {
         const funcName = getAstString(operand.name) || (operand.type === 'aggr_func' ? 'AGG' : 'FUNC');
