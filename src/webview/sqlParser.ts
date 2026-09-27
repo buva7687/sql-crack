@@ -1535,7 +1535,7 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
 
         // Enhance error messages with helpful dialect suggestions for common issues
         // This helps users quickly identify when they need to switch SQL dialects
-        const upperSql = originalSql.toUpperCase();
+        const syntaxSql = maskStringsAndComments(originalSql).toUpperCase();
         const hasIntervalQuoted = /INTERVAL\s*'[^']+'/i.test(originalSql);
         const hasParenthesizedUnion = /\(\s*SELECT[\s\S]+\)\s*(UNION|INTERSECT|EXCEPT)/i.test(originalSql);
 
@@ -1575,14 +1575,15 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
                 }
             }
             // Check for INTERSECT/EXCEPT which are only supported in MySQL/PostgreSQL
-            else if (upperSql.includes('INTERSECT') || upperSql.includes('EXCEPT')) {
+            else if (/\b(?:INTERSECT|EXCEPT)\b/.test(syntaxSql)) {
                 const dialectsWithSupport = ['MySQL', 'PostgreSQL'];
                 if (!dialectsWithSupport.includes(context.dialect)) {
                     message = `INTERSECT/EXCEPT not supported in ${context.dialect}. Try MySQL or PostgreSQL dialect.`;
                 }
             }
             // Check for recursive CTE
-            else if (upperSql.includes('RECURSIVE') && !['PostgreSQL', 'MySQL', 'SQLite'].includes(context.dialect)) {
+            else if (/\bRECURSIVE\b/.test(syntaxSql)
+                && !['PostgreSQL', 'MySQL', 'SQLite'].includes(context.dialect)) {
                 message = `RECURSIVE CTE not supported in ${context.dialect}. Try PostgreSQL or MySQL dialect.`;
             }
             // Generic parse error - include original error details for better debugging

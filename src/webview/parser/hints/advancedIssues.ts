@@ -285,22 +285,11 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
     const maskedSql = maskStringsAndComments(sql);
     const sqlLower = maskedSql.toLowerCase();
     
-    // 1. Collect FROM subqueries (already have nodes)
+    // FROM nodes have generic descriptions (such as "Derived table with 2
+    // operations"), which are not comparable SQL. Associate them only after
+    // extracting the actual subquery text below.
     const subqueryNodes = nodes.filter(n => n.type === 'subquery');
-    subqueryNodes.forEach(node => {
-        const desc = (node.description || node.label || '').toLowerCase();
-        if (desc) {
-            // Create normalized signature
-            const normalized = desc.replace(/\s+/g, ' ').trim();
-            allSubqueries.push({
-                sql: desc,
-                normalized: normalized,
-                location: 'from',
-                node: node,
-                parentNodeId: node.parentId
-            });
-        }
-    });
+    let fromSubqueryIndex = 0;
     
     // 2. Extract subqueries from SQL using balanced parentheses matching
     // This handles nested subqueries correctly by tracking parenthesis depth
@@ -363,17 +352,22 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
                 
                 // Determine location based on context
                 const beforeMatch = sql.substring(Math.max(0, parenPos - 100), parenPos).toLowerCase();
-                let location: 'where' | 'select' | 'having' = 'where';
-                if (beforeMatch.includes('select') && !beforeMatch.includes('where') && !beforeMatch.includes('having') && !beforeMatch.includes('from')) {
+                let location: SubqueryMatch['location'] = 'where';
+                if (/\b(?:from|join)\s*$/.test(beforeMatch)) {
+                    location = 'from';
+                } else if (beforeMatch.includes('select') && !beforeMatch.includes('where') && !beforeMatch.includes('having') && !beforeMatch.includes('from')) {
                     location = 'select';
                 } else if (beforeMatch.includes('having')) {
                     location = 'having';
                 }
+                const node = location === 'from' ? subqueryNodes[fromSubqueryIndex++] : undefined;
                 
                 allSubqueries.push({
                     sql: subquery.sql,
                     normalized: normalized,
-                    location: location
+                    location: location,
+                    node,
+                    parentNodeId: node?.parentId
                 });
                 
                 searchIndex = subquery.endIndex + 1;

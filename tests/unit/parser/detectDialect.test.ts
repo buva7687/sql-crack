@@ -187,9 +187,9 @@ describe('detectDialect', () => {
         expect(result.confidence).toBe('high');
     });
 
-    it('detects Oracle NVL/DECODE as low-confidence signal', () => {
+    it('does not treat shared NVL/DECODE functions as an Oracle signal', () => {
         const result = detectDialect('SELECT NVL(name, DECODE(status, 1, active, inactive)) FROM users');
-        expect(result.scores.Oracle).toBeGreaterThan(0);
+        expect(result.scores.Oracle).toBeUndefined();
     });
 
     it('ignores Oracle-like syntax inside comments', () => {

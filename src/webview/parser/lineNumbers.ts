@@ -4,62 +4,12 @@ import { FlowEdge, FlowNode } from '../types';
 import {
     escapeRegex,
     getDollarQuotedTokenEnd,
-    isPostgresJsonPathOperatorAt,
     maskSqlCommentsPreservingPositions,
     quotedStringAllowsBackslashEscapes,
 } from '../../shared';
 
-function stripCommentsPreserveLineNumbers(sql: string): string {
-    const chars = sql.split('');
-    let i = 0;
-
-    while (i < chars.length) {
-        if (chars[i] === '/' && i + 1 < chars.length && chars[i + 1] === '*') {
-            chars[i] = ' ';
-            chars[i + 1] = ' ';
-            i += 2;
-            while (i < chars.length) {
-                if (chars[i] === '*' && i + 1 < chars.length && chars[i + 1] === '/') {
-                    chars[i] = ' ';
-                    chars[i + 1] = ' ';
-                    i += 2;
-                    break;
-                }
-                if (chars[i] !== '\n' && chars[i] !== '\r') {
-                    chars[i] = ' ';
-                }
-                i++;
-            }
-            continue;
-        }
-
-        if (chars[i] === '-' && i + 1 < chars.length && chars[i + 1] === '-') {
-            while (i < chars.length && chars[i] !== '\n' && chars[i] !== '\r') {
-                chars[i] = ' ';
-                i++;
-            }
-            continue;
-        }
-
-        if (chars[i] === '#' && !isPostgresJsonPathOperatorAt(sql, i)) {
-            const next = i + 1 < chars.length ? chars[i + 1] : '';
-            const isIdentChar = /[a-zA-Z0-9_]/.test(next);
-            if (!isIdentChar) {
-                while (i < chars.length && chars[i] !== '\n' && chars[i] !== '\r') {
-                    chars[i] = ' ';
-                    i++;
-                }
-                continue;
-            }
-        }
-        i++;
-    }
-
-    return chars.join('');
-}
-
 export function extractKeywordLineNumbers(sql: string): Map<string, number[]> {
-    const lines = stripCommentsPreserveLineNumbers(sql).split('\n');
+    const lines = maskSqlCommentsPreservingPositions(sql).split('\n');
     const keywordLines = new Map<string, number[]>();
 
     const keywords = [
@@ -273,7 +223,7 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string, edges: FlowEdg
 function assignScopedLineNumbers(nodes: FlowNode[], sql: string, childScope: boolean): Map<string, number> {
     const keywordLines = extractKeywordLineNumbers(sql);
     const sqlLines = sql.split('\n');
-    const commentStripped = stripCommentsPreserveLineNumbers(sql);
+    const commentStripped = maskSqlCommentsPreservingPositions(sql);
     const commentStrippedLines = commentStripped.split('\n');
     const clauseRegex = /\b(from|join|into|using|update|delete)\b/i;
     // DDL and utility statements (CREATE, DROP, ALTER, RENAME, TRUNCATE, ...)

@@ -1,5 +1,6 @@
 import { detectAdvancedIssues } from '../../../../src/webview/parser/hints/advancedIssues';
 import { createFreshContext } from '../../../../src/webview/parser/context';
+import { parseSql } from '../../../../src/webview/sqlParser';
 import type { FlowNode } from '../../../../src/webview/types';
 
 function makeNode(overrides: Partial<FlowNode>): FlowNode {
@@ -61,6 +62,12 @@ describe('detectAdvancedIssues', () => {
     });
 
     describe('duplicate subquery detection', () => {
+        it('does not group unrelated derived tables by a generic node description', () => {
+            const sql = 'SELECT * FROM (SELECT id FROM a) x JOIN (SELECT id FROM b) y ON x.id = y.id';
+            const result = parseSql(sql, 'PostgreSQL');
+            expect(result.hints.some(hint => hint.message.includes('similar subqueries'))).toBe(false);
+        });
+
         it('detects duplicate subqueries in WHERE clause', () => {
             const ctx = createFreshContext('PostgreSQL');
             const nodes = [

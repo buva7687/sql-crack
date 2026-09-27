@@ -57,6 +57,22 @@ describe('extractKeywordLineNumbers', () => {
         expect(map.get('FROM')).toEqual([5]);
         expect(map.get('JOIN')).toBeUndefined();
     });
+
+    it('keeps clause lines after comment markers inside a string literal', () => {
+        const sql = [
+            'SELECT id FROM t',
+            "WHERE url LIKE 'http://x/*'",
+            'GROUP BY id',
+            'HAVING COUNT(*) > 1',
+            'ORDER BY id',
+            'LIMIT 5',
+        ].join('\n');
+        const map = extractKeywordLineNumbers(sql);
+        expect(map.get('GROUP BY')).toEqual([3]);
+        expect(map.get('HAVING')).toEqual([4]);
+        expect(map.get('ORDER BY')).toEqual([5]);
+        expect(map.get('LIMIT')).toEqual([6]);
+    });
 });
 
 describe('Audit regression: #3 — Union nodes get distinct line numbers', () => {

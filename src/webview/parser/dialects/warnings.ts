@@ -19,14 +19,13 @@ export function detectDialectSpecificSyntax(context: ParserContext, sql: string,
     const syntax = detectDialectSyntaxPatterns(strippedSql);
 
     const hasSnowflakePathOperator = syntax.hasSnowflakePathOperator;
-    const hasSnowflakeNamedArgs = syntax.hasSnowflakeNamedArgs;
     const hasFlatten = syntax.hasFlatten;
-    if ((hasSnowflakePathOperator || hasSnowflakeNamedArgs || hasFlatten) && currentDialect !== 'Snowflake') {
+    if ((hasSnowflakePathOperator || hasFlatten) && currentDialect !== 'Snowflake') {
         context.hints.push({
             type: 'warning',
             message: 'Snowflake-specific syntax detected',
             suggestion: currentDialect === 'MySQL' || currentDialect === 'PostgreSQL'
-                ? 'This query uses Snowflake syntax (e.g., : path operator or => named arguments). Try Snowflake dialect for full support.'
+                ? 'This query uses Snowflake syntax (e.g., : path operator or FLATTEN). Try Snowflake dialect for full support.'
                 : 'This query uses Snowflake-specific syntax. Consider switching to Snowflake dialect.',
             category: 'best-practice',
             severity: 'medium',
@@ -100,13 +99,12 @@ export function detectDialectSpecificSyntax(context: ParserContext, sql: string,
     const hasOracleConnectBy = syntax.hasOracleConnectBy;
     const hasOracleRownum = syntax.hasOracleRownum;
     const hasOracleOuterJoinOperator = syntax.hasOracleOuterJoinOperator;
-    const hasOracleNvlDecode = syntax.hasOracleNvlDecode;
-    if ((hasOracleConnectBy || hasOracleRownum || hasOracleOuterJoinOperator || hasOracleNvlDecode)
+    if ((hasOracleConnectBy || hasOracleRownum || hasOracleOuterJoinOperator)
         && currentDialect !== 'Oracle') {
         context.hints.push({
             type: 'warning',
             message: 'Oracle-specific syntax detected',
-            suggestion: 'This query uses Oracle syntax (e.g., CONNECT BY, ROWNUM, (+) joins, or NVL/DECODE). Try Oracle dialect.',
+            suggestion: 'This query uses Oracle syntax (e.g., CONNECT BY, ROWNUM, or (+) joins). Try Oracle dialect.',
             category: 'best-practice',
             severity: 'medium',
             action: getSwitchDialectAction('Oracle'),

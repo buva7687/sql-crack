@@ -86,7 +86,6 @@ function hasPostgresDollarQuoteLiteral(sql: string): boolean {
 
 export function detectDialectSyntaxPatterns(sql: string): {
     hasSnowflakePathOperator: boolean;
-    hasSnowflakeNamedArgs: boolean;
     hasFlatten: boolean;
     hasThreePartNames: boolean;
     hasQualify: boolean;
@@ -109,7 +108,6 @@ export function detectDialectSyntaxPatterns(sql: string): {
     hasPivot: boolean;
     hasOracleConnectBy: boolean;
     hasOracleRownum: boolean;
-    hasOracleNvlDecode: boolean;
     hasOracleMinus: boolean;
     hasOracleSequence: boolean;
     hasOracleOuterJoinOperator: boolean;
@@ -159,7 +157,6 @@ export function detectDialectSyntaxPatterns(sql: string): {
         // Allowing whitespace before ':' makes `SELECT :bind_name` look like
         // a path whose left side is the SELECT keyword.
         hasSnowflakePathOperator: /\b[A-Za-z_][\w$]*:\s*[A-Za-z_][\w$]*(?!:)/.test(maskedSql),
-        hasSnowflakeNamedArgs: /\w+\s*=>\s*/.test(maskedSql),
         hasFlatten: /\bFLATTEN\s*\(/i.test(maskedSql),
         hasThreePartNames: /\b[\w$]+\.[\w$]+\.[\w$]+\b/.test(maskedSql),
         hasQualify: /\bQUALIFY\b/i.test(maskedSql),
@@ -174,7 +171,7 @@ export function detectDialectSyntaxPatterns(sql: string): {
         hasPostgresTypeCast: /::\s*[a-z_][\w$]*(?:\s*\(\s*\d+(?:\s*,\s*\d+)?\s*\))?/i.test(maskedSql),
         hasPostgresAtTimeZone: /\bAT\s+TIME\s+ZONE\b/i.test(maskedSql),
         hasPostgresDollarQuotes: hasPostgresDollarQuoteLiteral(sql),
-        hasPostgresJsonOperators: /->>|#>|\?&|\?\|/.test(maskedSql),
+        hasPostgresJsonOperators: /#>|\?&|\?\|/.test(maskedSql),
         hasMysqlBackticks: /`[\w-]+`/.test(maskedSql),
         hasMysqlGroupByRollup: /GROUP BY.*WITH ROLLUP/i.test(maskedSql),
         hasMysqlDual: /FROM\s+DUAL/i.test(maskedSql),
@@ -183,7 +180,6 @@ export function detectDialectSyntaxPatterns(sql: string): {
         hasPivot: /\bPIVOT\s*\(/i.test(maskedSql),
         hasOracleConnectBy: /\bCONNECT\s+BY\b/i.test(maskedSql),
         hasOracleRownum: /\bROWNUM\b/i.test(maskedSql),
-        hasOracleNvlDecode: /\b(NVL2?|DECODE)\s*\(/i.test(maskedSql),
         hasOracleMinus: /\bMINUS\b/i.test(maskedSql),
         hasOracleSequence: /\.\s*(NEXTVAL|CURRVAL)\b/i.test(maskedSql),
         hasOracleOuterJoinOperator: /\(\+\)/.test(maskedSql),
@@ -249,7 +245,6 @@ export function detectDialect(sql: string): DialectDetectionResult {
     };
 
     if (syntax.hasSnowflakePathOperator) { addScore('Snowflake'); }
-    if (syntax.hasSnowflakeNamedArgs) { addScore('Snowflake'); }
     if (syntax.hasFlatten) { addScore('Snowflake'); }
     if (syntax.hasCreateOrReplaceTable) { addScore('Snowflake', 2); }
     if (syntax.hasQualify) { addScore('Snowflake', 2); }
@@ -286,7 +281,6 @@ export function detectDialect(sql: string): DialectDetectionResult {
 
     if (syntax.hasOracleConnectBy) { addScore('Oracle', 3); }
     if (syntax.hasOracleRownum) { addScore('Oracle', 2); }
-    if (syntax.hasOracleNvlDecode) { addScore('Oracle'); }
     if (syntax.hasOracleSequence) { addScore('Oracle', 2); }
     if (syntax.hasOracleOuterJoinOperator) { addScore('Oracle', 3); }
     if (syntax.hasOracleSysdate) { addScore('Oracle'); }
