@@ -313,19 +313,10 @@ export class SchemaExtractor {
     ): SchemaDefinition | null {
         try {
             const astIdentifier = this.extractTableName(stmt);
-            const sourceIdentifier = this.findDefinitionIdentifierParts(
-                sourceViews.structuralSql,
-                'table',
-                statementIndex
-            );
-            const { name: tableName, schema, catalog } = sourceIdentifier || astIdentifier;
+            const header = this.findDefinitionHeader(sourceViews, 'table', statementIndex, astIdentifier.name);
+            const { name: tableName, schema, catalog } = header?.parts || astIdentifier;
             const columns = this.extractColumns(stmt);
-            const identifierMetadata = this.findDefinitionIdentifierMetadata(
-                sourceViews.searchableSql,
-                tableName,
-                'table',
-                statementIndex
-            );
+            const identifierMetadata = this.getIdentifierMetadata(header);
 
             return {
                 type: 'table',
@@ -336,18 +327,12 @@ export class SchemaExtractor {
                 statementIndex,
                 columns,
                 filePath,
-                lineNumber: this.findLineNumber(
-                    originalSql,
-                    tableName,
-                    'table',
-                    sourceViews.searchableSql
-                ),
-                sql: this.extractStatementSql(
-                    originalSql,
-                    tableName,
-                    'table',
-                    sourceViews
-                )
+                lineNumber: header
+                    ? this.getLineNumberAtIndex(originalSql, header.index)
+                    : this.findLineNumber(originalSql, tableName, 'table', sourceViews.searchableSql),
+                sql: header
+                    ? this.extractStatementFromIndex(originalSql, header.index, sourceViews.structuralSql, true)
+                    : this.extractStatementSql(originalSql, tableName, 'table', sourceViews)
             };
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -367,19 +352,10 @@ export class SchemaExtractor {
     ): SchemaDefinition | null {
         try {
             const astIdentifier = this.extractTableName(stmt);
-            const sourceIdentifier = this.findDefinitionIdentifierParts(
-                sourceViews.structuralSql,
-                'view',
-                statementIndex
-            );
-            const { name: viewName, schema, catalog } = sourceIdentifier || astIdentifier;
+            const header = this.findDefinitionHeader(sourceViews, 'view', statementIndex, astIdentifier.name);
+            const { name: viewName, schema, catalog } = header?.parts || astIdentifier;
             const columns = this.extractViewColumns(stmt);
-            const identifierMetadata = this.findDefinitionIdentifierMetadata(
-                sourceViews.searchableSql,
-                viewName,
-                'view',
-                statementIndex
-            );
+            const identifierMetadata = this.getIdentifierMetadata(header);
 
             return {
                 type: 'view',
@@ -390,18 +366,12 @@ export class SchemaExtractor {
                 statementIndex,
                 columns,
                 filePath,
-                lineNumber: this.findLineNumber(
-                    originalSql,
-                    viewName,
-                    'view',
-                    sourceViews.searchableSql
-                ),
-                sql: this.extractStatementSql(
-                    originalSql,
-                    viewName,
-                    'view',
-                    sourceViews
-                )
+                lineNumber: header
+                    ? this.getLineNumberAtIndex(originalSql, header.index)
+                    : this.findLineNumber(originalSql, viewName, 'view', sourceViews.searchableSql),
+                sql: header
+                    ? this.extractStatementFromIndex(originalSql, header.index, sourceViews.structuralSql, true)
+                    : this.extractStatementSql(originalSql, viewName, 'view', sourceViews)
                 // Note: sourceQuery will be populated by lineage builder
             };
         } catch (error) {
@@ -624,20 +594,11 @@ export class SchemaExtractor {
             || (trimmed.startsWith('[') && trimmed.endsWith(']'));
     }
 
-    private findDefinitionIdentifierMetadata(
-        searchableSql: string,
-        identifier: string,
-        type: 'table' | 'view',
-        statementIndex: number
-    ): IdentifierMetadata {
-        const identifierKey = identifier.toLowerCase();
-        const match = this.getHeaderMatchesByStatement(searchableSql, type)
-            .get(statementIndex)
-            ?.find(candidate => candidate.parts.name.toLowerCase() === identifierKey);
-        if (!match) {
+    private getIdentifierMetadata(header: HeaderMatch | null): IdentifierMetadata {
+        if (!header) {
             return { nameQuoted: false, schemaQuoted: false, catalogQuoted: false };
         }
-        const { parts } = match;
+        const { parts } = header;
         return {
             nameQuoted: this.isQuotedIdentifier(parts.rawName),
             schemaQuoted: this.isQuotedIdentifier(parts.rawSchema),
@@ -654,12 +615,21 @@ export class SchemaExtractor {
         return this.offsets.semicolonSegmentAt(structuralSql, charIndex);
     }
 
-    private findDefinitionIdentifierParts(
-        structuralSql: string,
+    /**
+     * The CREATE header of the definition parsed from statement
+     * `statementIndex`. When a statement holds several headers, the one whose
+     * name matches the AST wins; otherwise the first.
+     */
+    private findDefinitionHeader(
+        sourceViews: SqlSearchViews,
         type: 'table' | 'view',
-        statementIndex: number
-    ): QualifiedIdentifierParts | null {
-        return this.getHeaderMatchesByStatement(structuralSql, type).get(statementIndex)?.[0]?.parts ?? null;
+        statementIndex: number,
+        astName: string
+    ): HeaderMatch | null {
+        const headers = this.getHeaderMatchesByStatement(sourceViews, type).get(statementIndex);
+        if (!headers || headers.length === 0) {return null;}
+        const astKey = astName.toLowerCase();
+        return headers.find(header => header.parts.name.toLowerCase() === astKey) ?? headers[0];
     }
 
     /** All CREATE TABLE/VIEW header matches in `text`, in source order. */
@@ -677,14 +647,21 @@ export class SchemaExtractor {
         return matches;
     }
 
-    /** Header matches grouped by the `;`-delimited statement of `text` they start in. */
-    private getHeaderMatchesByStatement(text: string, type: DefinitionType): Map<number, HeaderMatch[]> {
-        const cached = this.headerMatchesByStatementCache[type].get(text);
+    /**
+     * Header matches grouped by the `;`-delimited statement they start in.
+     * Headers are matched in `searchableSql`, which keeps quoted identifiers
+     * (`structuralSql` blanks them, so `CREATE VIEW "v" AS` would capture
+     * `AS`), while statements are counted in `structuralSql` so semicolons
+     * inside quoted identifiers cannot shift the index. Both views preserve
+     * offsets, so a match index is valid in either.
+     */
+    private getHeaderMatchesByStatement(sourceViews: SqlSearchViews, type: DefinitionType): Map<number, HeaderMatch[]> {
+        const cached = this.headerMatchesByStatementCache[type].get(sourceViews.searchableSql);
         if (cached) {return cached;}
 
         const byStatement = new Map<number, HeaderMatch[]>();
-        for (const match of this.getHeaderMatches(text, type)) {
-            const statementIndex = this.getStatementIndexAt(text, match.index);
+        for (const match of this.getHeaderMatches(sourceViews.searchableSql, type)) {
+            const statementIndex = this.getStatementIndexAt(sourceViews.structuralSql, match.index);
             const matches = byStatement.get(statementIndex);
             if (matches) {
                 matches.push(match);
@@ -692,7 +669,7 @@ export class SchemaExtractor {
                 byStatement.set(statementIndex, [match]);
             }
         }
-        this.headerMatchesByStatementCache[type].set(text, byStatement);
+        this.headerMatchesByStatementCache[type].set(sourceViews.searchableSql, byStatement);
         return byStatement;
     }
 
@@ -778,15 +755,7 @@ export class SchemaExtractor {
                 const tableBody = this.extractBalancedParens(afterHeader, parenStart + 1);
                 const columns = this.extractColumnsFromBody(tableBody);
 
-                // Use findCreateStatementLocation on ORIGINAL sql (not sqlNoComments) to get correct line number
-                // Previous bug: used match.index from sqlNoComments with getLineNumberAtIndex(originalSql, ...)
-                // causing character index misalignment and wrong line numbers
-                const loc = this.findCreateStatementLocation(
-                    sql,
-                    tableName,
-                    'table',
-                    sourceViews.searchableSql
-                );
+                const loc = this.getHeaderLocation(sql, match.index);
                 definitions.push({
                     type: 'table',
                     name: tableName,
@@ -807,13 +776,7 @@ export class SchemaExtractor {
                 });
             } else {
                 // No parenthesis - might be CREATE TABLE AS SELECT
-                // Use findCreateStatementLocation on ORIGINAL sql to get correct line number and char index
-                const loc = this.findCreateStatementLocation(
-                    sql,
-                    tableName,
-                    'table',
-                    sourceViews.searchableSql
-                );
+                const loc = this.getHeaderLocation(sql, match.index);
                 definitions.push({
                     type: 'table',
                     name: tableName,
@@ -851,13 +814,7 @@ export class SchemaExtractor {
                 continue;
             }
 
-            // Use findCreateStatementLocation on ORIGINAL sql (not sqlNoComments) to get correct line number
-            const loc = this.findCreateStatementLocation(
-                sql,
-                viewName,
-                'view',
-                sourceViews.searchableSql
-            );
+            const loc = this.getHeaderLocation(sql, match.index);
             definitions.push({
                 type: 'view',
                 name: viewName,
@@ -1363,6 +1320,15 @@ export class SchemaExtractor {
 
         // Fallback: return line 1 if not found (should rarely happen)
         return { lineNumber: 1, charIndex: 0 };
+    }
+
+    /**
+     * Location of a header matched in `sql`'s offset-preserving masked view.
+     * Using the match itself (not a lookup by name) keeps same-name
+     * definitions in different schemas at their own statements.
+     */
+    private getHeaderLocation(sql: string, charIndex: number): { lineNumber: number; charIndex: number } {
+        return { lineNumber: this.getLineNumberAtIndex(sql, charIndex), charIndex };
     }
 
     private findLineNumber(

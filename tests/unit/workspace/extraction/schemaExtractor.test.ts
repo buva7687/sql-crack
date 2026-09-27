@@ -680,3 +680,68 @@ CREATE TABLE accounts (real_id INT);
         });
     });
 });
+
+describe('SchemaExtractor definition identity and location', () => {
+    const extract = (sql: string, dialect: Parameters<SchemaExtractor['extractDefinitions']>[2]) =>
+        new SchemaExtractor().extractDefinitionsWithStatus(sql, '/sql/defs.sql', dialect).definitions;
+
+    it('keeps quoted view and CTAS names instead of capturing the AS keyword', () => {
+        const [mysqlView] = extract('CREATE VIEW `active_users` AS SELECT id FROM users;', 'MySQL');
+        expect(mysqlView).toEqual(expect.objectContaining({ type: 'view', name: 'active_users', nameQuoted: true }));
+
+        const pg = extract([
+            'CREATE VIEW "ActiveUsers" AS SELECT id FROM users;',
+            'CREATE TABLE "daily_totals" AS SELECT 1 AS n;',
+            'CREATE VIEW analytics."Revenue" AS SELECT 1 AS n;',
+        ].join('\n'), 'PostgreSQL');
+        expect(pg.map(d => [d.type, d.schema, d.name, d.lineNumber])).toEqual([
+            ['view', undefined, 'ActiveUsers', 1],
+            ['table', undefined, 'daily_totals', 2],
+            ['view', 'analytics', 'Revenue', 3],
+        ]);
+        expect(pg[1].sql).toBe('CREATE TABLE "daily_totals" AS SELECT 1 AS n;');
+    });
+
+    it('keeps distinct BigQuery backtick views as separate definitions', () => {
+        const defs = extract([
+            'CREATE VIEW `proj.ds.v1` AS SELECT 1 AS a;',
+            'CREATE VIEW `proj.ds.v2` AS SELECT 2 AS b;',
+        ].join('\n'), 'BigQuery');
+        expect(defs.map(d => d.name)).toEqual(['proj.ds.v1', 'proj.ds.v2']);
+    });
+
+    it('locates same-name definitions in different schemas at their own statement', () => {
+        const sql = [
+            'CREATE TABLE staging.orders (id INT);',               // 1
+            '',                                                    // 2
+            'CREATE TABLE mart.orders AS SELECT id FROM raw_orders;', // 3
+        ].join('\n');
+
+        const defs = extract(sql, 'PostgreSQL');
+
+        expect(defs.map(d => [d.schema, d.name, d.statementIndex, d.lineNumber])).toEqual([
+            ['staging', 'orders', 0, 1],
+            ['mart', 'orders', 1, 3],
+        ]);
+        expect(defs[1].sql).toBe('CREATE TABLE mart.orders AS SELECT id FROM raw_orders;');
+    });
+
+    it('locates same-name definitions at their own statement on the regex fallback path', () => {
+        // The unterminated CASE forces the AST parser to fail for this file.
+        const sql = [
+            'CREATE TABLE staging.orders (id INT);',
+            'SELECT CASE WHEN FROM;',
+            'CREATE TABLE mart.orders (id INT, total INT);',
+        ].join('\n');
+
+        const { definitions, warnings } = new SchemaExtractor()
+            .extractDefinitionsWithStatus(sql, '/sql/defs.sql', 'PostgreSQL');
+
+        expect(warnings.length).toBeGreaterThan(0);
+        expect(definitions.map(d => [d.schema, d.name, d.lineNumber, d.columns.length])).toEqual([
+            ['staging', 'orders', 1, 1],
+            ['mart', 'orders', 3, 2],
+        ]);
+        expect(definitions[1].sql).toContain('mart.orders');
+    });
+});
