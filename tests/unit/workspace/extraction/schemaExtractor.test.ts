@@ -7,6 +7,22 @@ describe('SchemaExtractor.extractDefinitions', () => {
         extractor = new SchemaExtractor();
     });
 
+    it('finds definitions after a MySQL procedure using DELIMITER $$', () => {
+        const sql = [
+            'CREATE TABLE src (id INT);',
+            'DELIMITER $$',
+            'CREATE PROCEDURE p() BEGIN SELECT id FROM src; END $$',
+            'DELIMITER ;',
+            'CREATE VIEW v_audit AS SELECT id FROM audit;',
+        ].join('\n');
+        const definitions = extractor.extractDefinitions(sql, '/sql/migration.sql', 'MySQL');
+        expect(definitions.map(definition => definition.name)).toEqual(['src', 'v_audit']);
+        expect(definitions[1]).toEqual(expect.objectContaining({
+            lineNumber: 5,
+            sql: expect.stringMatching(/^CREATE VIEW v_audit AS/),
+        }));
+    });
+
     it('parses large files one statement at a time instead of using the quadratic batch path', () => {
         const astifySpy = jest.spyOn((extractor as any).parser, 'astify');
         const sql = Array.from({ length: 200 }, (_, index) =>

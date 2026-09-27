@@ -156,6 +156,8 @@ export function isHashTempTableIdentifierAt(sql: string, offset: number): boolea
 }
 
 export interface StripSqlCommentsOptions {
+    /** Set false for MySQL-family SQL, where $$ can be a statement delimiter. */
+    dollarQuotes?: boolean;
     /** Set false when the caller knows `#` always starts a MySQL-style comment. */
     preserveHashTempIdentifiers?: boolean;
     /**
@@ -260,7 +262,7 @@ export function maskSqlCommentsPreservingPositions(
     while (i < len) {
         const ch = sql[i];
 
-        const dollarQuotedEnd = getDollarQuotedTokenEnd(sql, i);
+        const dollarQuotedEnd = options.dollarQuotes === false ? null : getDollarQuotedTokenEnd(sql, i);
         if (dollarQuotedEnd !== null) {
             i = dollarQuotedEnd;
             continue;
@@ -348,7 +350,7 @@ export function stripSqlComments(sql: string, options: StripSqlCommentsOptions =
 
         // PostgreSQL dollar-quoted string: pass through verbatim. Comment-like
         // text inside the token is literal content, not SQL comments.
-        const dollarQuotedEnd = getDollarQuotedTokenEnd(sql, i);
+        const dollarQuotedEnd = options.dollarQuotes === false ? null : getDollarQuotedTokenEnd(sql, i);
         if (dollarQuotedEnd !== null) {
             out += sql.slice(i, dollarQuotedEnd);
             i = dollarQuotedEnd;

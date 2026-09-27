@@ -7,6 +7,20 @@ describe('ReferenceExtractor behavioral coverage', () => {
         extractor = new ReferenceExtractor();
     });
 
+    it('finds references after a MySQL procedure using DELIMITER $$', () => {
+        const sql = [
+            'SELECT id FROM src;',
+            'DELIMITER $$',
+            'CREATE PROCEDURE p() BEGIN SELECT id FROM log; END $$',
+            'DELIMITER ;',
+            'SELECT id FROM audit;',
+        ].join('\n');
+        const references = extractor.extractReferences(sql, '/sql/migration.sql', 'MySQL');
+        expect(references).toEqual(expect.arrayContaining([
+            expect.objectContaining({ tableName: 'audit', lineNumber: 5 }),
+        ]));
+    });
+
     it('anchors INSERT and UPDATE targets before later joins to the same table', () => {
         const insertSql = 'INSERT INTO audit (id)\nSELECT e.id\nFROM events e\nJOIN audit a ON a.id = e.id';
         const updateSql = 'UPDATE audit\nSET id = a.id\nFROM events e\nJOIN audit a ON a.id = e.id';

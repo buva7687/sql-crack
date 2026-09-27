@@ -1627,7 +1627,7 @@ export class ReferenceExtractor {
 
         for (let index = 0; index < sql.length; index++) {
             const char = sql[index];
-            if (!inString && !inBracketIdentifier && char === '$') {
+            if (this.supportsDollarQuotes() && !inString && !inBracketIdentifier && char === '$') {
                 const delimiter = getDollarQuoteDelimiterAt(sql, index);
                 if (delimiter) {
                     const close = sql.indexOf(delimiter, index + delimiter.length);
@@ -1928,9 +1928,14 @@ export class ReferenceExtractor {
         return dialectSupportsBackslashEscapes(this._activeDialect);
     }
 
+    private supportsDollarQuotes(): boolean {
+        return this._activeDialect !== 'MySQL' && this._activeDialect !== 'MariaDB';
+    }
+
     private getCommentMaskOptions(): StripSqlCommentsOptions {
         return {
             backslashEscapes: this.supportsBackslashEscapes(),
+            dollarQuotes: this.supportsDollarQuotes(),
             // In PostgreSQL `#` is XOR; masking it as a comment hid the rest of
             // the line, including table names and the statement's `;`.
             hashComments: dialectSupportsHashComments(this._activeDialect),
@@ -1969,7 +1974,7 @@ export class ReferenceExtractor {
                 continue;
             }
 
-            if (sql[index] === '$') {
+            if (this.supportsDollarQuotes() && sql[index] === '$') {
                 const delimiter = getDollarQuoteDelimiterAt(sql, index);
                 if (delimiter) {
                     const start = index;

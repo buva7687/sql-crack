@@ -94,7 +94,7 @@ describe('Item #4: Procedural SQL Splitting (BEGIN...END Blocks)', () => {
                 $$ LANGUAGE plpgsql;
                 SELECT * FROM users;
             `;
-            const statements = splitSqlStatements(sql);
+            const statements = splitSqlStatements(sql, 'PostgreSQL');
 
             // Should be 2 statements: CREATE FUNCTION and SELECT
             expect(statements.length).toBe(2);
@@ -120,7 +120,7 @@ describe('Item #4: Procedural SQL Splitting (BEGIN...END Blocks)', () => {
                 $$;
                 SELECT * FROM products;
             `;
-            const statements = splitSqlStatements(sql);
+            const statements = splitSqlStatements(sql, 'PostgreSQL');
 
             // Should be 2 statements
             expect(statements.length).toBe(2);
@@ -135,7 +135,7 @@ describe('Item #4: Procedural SQL Splitting (BEGIN...END Blocks)', () => {
                 $function$ LANGUAGE plpgsql;
                 SELECT * FROM users;
             `;
-            const statements = splitSqlStatements(sql);
+            const statements = splitSqlStatements(sql, 'PostgreSQL');
 
             // Should be 2 statements
             expect(statements.length).toBe(2);
@@ -145,7 +145,8 @@ describe('Item #4: Procedural SQL Splitting (BEGIN...END Blocks)', () => {
 
         it('supports Unicode dollar-quote tags', () => {
             const statements = splitSqlStatements(
-                'SELECT $étiquette$literal;still literal$étiquette$; SELECT 2;'
+                'SELECT $étiquette$literal;still literal$étiquette$; SELECT 2;',
+                'PostgreSQL'
             );
 
             expect(statements).toEqual([
@@ -156,7 +157,8 @@ describe('Item #4: Procedural SQL Splitting (BEGIN...END Blocks)', () => {
 
         it('does not open a dollar quote inside a Unicode identifier', () => {
             const statements = splitSqlStatements(
-                'SELECT * FROM café$$tbl; SELECT * FROM real_tbl;'
+                'SELECT * FROM café$$tbl; SELECT * FROM real_tbl;',
+                'PostgreSQL'
             );
 
             expect(statements).toEqual([
@@ -253,6 +255,28 @@ describe('Item #4: Procedural SQL Splitting (BEGIN...END Blocks)', () => {
     });
 
     describe('Complex Scenarios', () => {
+        it('does not count an @end variable as a procedural END', () => {
+            const sql = 'CREATE PROCEDURE p @end INT AS BEGIN SELECT @end; SELECT 2; END; SELECT 3;';
+            const statements = splitSqlStatements(sql, 'TransactSQL');
+            expect(statements).toHaveLength(2);
+            expect(statements[0]).toContain('SELECT 2; END');
+            expect(statements[1]).toBe('SELECT 3');
+        });
+
+        it('keeps END CASE and END REPEAT blocks inside their procedure', () => {
+            for (const block of [
+                'SELECT CASE WHEN 1 = 1 THEN 1 END CASE;',
+                'REPEAT SELECT 1; UNTIL done END REPEAT;',
+                'FOR x IN 1..2 DO SELECT x; END FOR;',
+            ]) {
+                const sql = `CREATE PROCEDURE p() BEGIN ${block} SELECT 2; END; SELECT 3;`;
+                const statements = splitSqlStatements(sql, 'MySQL');
+                expect(statements).toHaveLength(2);
+                expect(statements[0]).toContain('SELECT 2; END');
+                expect(statements[1]).toBe('SELECT 3');
+            }
+        });
+
         it('should handle migration file with multiple procedures', () => {
             const sql = `
                 CREATE PROCEDURE proc1()

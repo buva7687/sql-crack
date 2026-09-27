@@ -74,4 +74,20 @@ describe('statement splitting — long statements', () => {
             'SELECT 2',
         ]);
     });
+
+    it('recognizes DELIMITER after leading comments', () => {
+        const sql = [
+            '-- migration header',
+            '/* generated script */',
+            'DELIMITER $$',
+            'CREATE PROCEDURE p() BEGIN SELECT 1; END $$',
+            'DELIMITER ;',
+            'SELECT 2;',
+        ].join('\n');
+
+        expect(splitSqlStatements(sql, 'MySQL')).toEqual([
+            'CREATE PROCEDURE p() BEGIN SELECT 1; END',
+            'SELECT 2',
+        ]);
+    });
 });

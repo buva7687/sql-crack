@@ -64,6 +64,7 @@ export class SchemaExtractor {
     private backslashEscapes = true;
     /** Whether `#` starts a line comment (MySQL, MariaDB, BigQuery) for this extraction. */
     private hashComments = true;
+    private dollarQuotes = true;
     private readonly headerMatchCache: Record<DefinitionType, Map<string, HeaderMatch[]>> = {
         table: new Map(),
         view: new Map(),
@@ -128,6 +129,7 @@ export class SchemaExtractor {
         const warnings: string[] = [];
         this.backslashEscapes = dialectSupportsBackslashEscapes(dialect);
         this.hashComments = dialectSupportsHashComments(dialect);
+        this.dollarQuotes = dialect !== 'MySQL' && dialect !== 'MariaDB';
         const { sql: normalizedSql } = preprocessSqlForWorkspaceParsing(sql, dialect);
         const sourceViews = this.createSqlSearchViews(sql);
         const normalizedViews = normalizedSql === sql
@@ -231,6 +233,7 @@ export class SchemaExtractor {
         const searchableSql = maskSqlCommentsPreservingPositions(definition.sql, {
             backslashEscapes: this.backslashEscapes,
             hashComments: this.hashComments,
+            dollarQuotes: this.dollarQuotes,
         });
         const header = this.createHeaderRegex(definition.type).exec(searchableSql);
         if (!header) {return result;}
@@ -1173,7 +1176,7 @@ export class SchemaExtractor {
                 continue;
             }
 
-            if (maskStrings && char === '$') {
+            if (maskStrings && this.dollarQuotes && char === '$') {
                 const delimiter = getDollarQuoteDelimiterAt(sql, i);
                 if (delimiter) {
                     const start = i;
@@ -1410,7 +1413,9 @@ export class SchemaExtractor {
         let match: RegExpExecArray | null;
         while ((match = intoRegex.exec(sql)) !== null) {
             const statementStart = sql.lastIndexOf(';', Math.max(0, match.index - 1)) + 1;
-            const statementPrefix = stripSqlComments(sql.slice(statementStart, match.index)).toUpperCase();
+            const statementPrefix = stripSqlComments(sql.slice(statementStart, match.index), {
+                dollarQuotes: this.dollarQuotes,
+            }).toUpperCase();
             if (!/\bSELECT\b/.test(statementPrefix)) {
                 continue;
             }

@@ -67,26 +67,12 @@ function scanSqlStatements(
     // so each emitted statement can report its exact source offset.
     let current = '';
     let currentStart = 0;
-    // `current` always equals sql.slice(currentStart, i) at the top of the
-    // loop. The DELIMITER check only needs to know whether it is still blank;
-    // scanning `sql` forward from the last checked offset keeps that linear,
-    // where trimming `current` on every character made long statements
-    // quadratic (reading `current` would also re-flatten the growing string).
-    let blankScanEnd = 0;
-    let currentHasText = false;
-    const currentIsBlank = (end: number): boolean => {
-        while (!currentHasText && blankScanEnd < end) {
-            if (!/\s/.test(sql[blankScanEnd])) {
-                currentHasText = true;
-            }
-            blankScanEnd++;
-        }
-        return !currentHasText;
-    };
+    // Only executable text prevents a DELIMITER directive. Comments may
+    // precede it, and this flag avoids rescanning a growing statement.
+    let currentHasCode = false;
     const startCurrentAt = (offset: number): void => {
         currentStart = offset;
-        blankScanEnd = offset;
-        currentHasText = false;
+        currentHasCode = false;
     };
     let inString = false;
     let stringChar = '';
@@ -99,6 +85,7 @@ function scanSqlStatements(
     // Track procedural blocks
     let beginEndDepth = 0;
     let caseDepth = 0;
+    let closingCaseKeywordAt = -1;
     let inDollarQuotes = false;
     let dollarQuoteTag = '';
     let customDelimiter = null as string | null;
@@ -124,7 +111,7 @@ function scanSqlStatements(
                 return false;
             }
         }
-        if (idx > 0 && isIdentifierChar(sql[idx - 1])) { return false; }
+        if (idx > 0 && (isIdentifierChar(sql[idx - 1]) || /[@$#.]/.test(sql[idx - 1]))) { return false; }
         const afterIdx = idx + keyword.length;
         if (afterIdx < sql.length && isIdentifierChar(sql[afterIdx])) { return false; }
         return true;
@@ -290,7 +277,7 @@ function scanSqlStatements(
             }
         }
 
-        if (!inString && char === '$') {
+        if (!inString && char === '$' && dialect !== 'MySQL' && dialect !== 'MariaDB') {
             if (inDollarQuotes) {
                 const fullTag = `$${dollarQuoteTag}$`;
                 if (sql.startsWith(fullTag, i)) {
@@ -305,6 +292,7 @@ function scanSqlStatements(
                 if (fullTag) {
                     inDollarQuotes = true;
                     dollarQuoteTag = fullTag.slice(1, -1);
+                    currentHasCode = true;
                     current += fullTag;
                     i += fullTag.length - 1;
                     continue;
@@ -313,7 +301,7 @@ function scanSqlStatements(
         }
 
         if (!inString && !inDollarQuotes && blockCommentDepth === 0 && !inLineComment) {
-            if ((char === 'D' || char === 'd') && currentIsBlank(i)) {
+            if ((char === 'D' || char === 'd') && !currentHasCode) {
                 const remaining = sql.substring(i, i + 20).toUpperCase();
                 if (remaining.startsWith('DELIMITER ')) {
                     const delimiterMatch = sql.substring(i).match(/^DELIMITER\s+(\S+)/i);
@@ -328,6 +316,10 @@ function scanSqlStatements(
                     }
                 }
             }
+        }
+
+        if (!inString && !inDollarQuotes && !/\s/.test(char)) {
+            currentHasCode = true;
         }
 
         if (!inDollarQuotes) {
@@ -375,7 +367,7 @@ function scanSqlStatements(
             // negative depth that disables every later semicolon split.
             if (char === ')') { depth = Math.max(0, depth - 1); }
 
-            if (matchKeyword(i, 'CASE')) {
+            if (matchKeyword(i, 'CASE') && i !== closingCaseKeywordAt) {
                 caseDepth++;
             }
 
@@ -386,8 +378,11 @@ function scanSqlStatements(
             }
 
             if (matchKeyword(i, 'END')) {
-                const afterEnd = sql.substring(i + 3, i + 15).trim().toUpperCase();
-                if (/^(TRY|CATCH|IF|LOOP|WHILE)\b/.test(afterEnd)) {
+                const qualifier = /^\s*(CASE|TRY|CATCH|IF|LOOP|WHILE|REPEAT|FOR)\b/i.exec(sql.slice(i + 3, i + 24));
+                if (qualifier?.[1].toUpperCase() === 'CASE') {
+                    caseDepth = Math.max(0, caseDepth - 1);
+                    closingCaseKeywordAt = i + 3 + qualifier[0].length - qualifier[1].length;
+                } else if (qualifier) {
                     // Block-qualifier END.
                 } else if (caseDepth > 0) {
                     caseDepth--;
