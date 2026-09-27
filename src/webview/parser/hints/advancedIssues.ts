@@ -518,6 +518,9 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
     // ============================================================
     
     const selectNodes = collectSelectNodes(nodes);
+    // Every intermediate SELECT checks the same source statement. Normalize
+    // it once; large CTE chains otherwise repeat this full scan per CTE.
+    const fullNormalizedSql = stripSqlComments(sql).replace(/\s+/g, ' ').trim();
     selectNodes.forEach(selectNode => {
         if (!selectNode.columns || selectNode.columns.length === 0) {return;}
 
@@ -529,9 +532,6 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
             // This is a top-level SELECT - all columns are valid output, skip dead column detection
             return;
         }
-
-        // Normalize SQL: remove comments, normalize whitespace for reliable matching
-        const fullNormalizedSql = stripSqlComments(sql).replace(/\s+/g, ' ').trim();
 
         // Scope SQL to the relevant CTE/subquery body, but keep downstream
         // query text so CTE output columns selected later are not treated as dead.

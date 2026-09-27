@@ -328,32 +328,39 @@ function assignScopedLineNumbers(nodes: FlowNode[], sql: string, childScope: boo
         return pick(occurrencesOf(...keywords), [isOuter], false)?.line;
     }
 
+    type TableOccurrence = SqlOccurrence & { keywordContext: boolean; commaContext: boolean };
+    const tableOccurrences = new Map<string, TableOccurrence[]>();
     function findTableLine(tableName: string): number | undefined {
-        const pattern = new RegExp(`(?<![\\w$#])${escapeRegex(tableName)}(?![\\w$#])`, 'gi');
-        const candidates: Array<SqlOccurrence & { keywordContext: boolean; commaContext: boolean }> = [];
-        let match: RegExpExecArray | null;
-        while ((match = pattern.exec(commentStripped)) !== null) {
-            const after = commentStripped.slice(match.index + match[0].length, match.index + match[0].length + 160);
-            // `orders.id` is a column qualifier and `, recent AS (` a CTE
-            // definition; neither is a reference to the table.
-            if (/^["`\]]?\s*\./.test(after) || CTE_DEFINITION_AFTER.test(after)) {
-                continue;
+        const key = tableName.toLowerCase();
+        let candidates = tableOccurrences.get(key);
+        if (!candidates) {
+            candidates = [];
+            const pattern = new RegExp(`(?<![\\w$#])${escapeRegex(tableName)}(?![\\w$#])`, 'gi');
+            let match: RegExpExecArray | null;
+            while ((match = pattern.exec(commentStripped)) !== null) {
+                const after = commentStripped.slice(match.index + match[0].length, match.index + match[0].length + 160);
+                // `orders.id` is a column qualifier and `, recent AS (` a CTE
+                // definition; neither is a reference to the table.
+                if (/^["`\]]?\s*\./.test(after) || CTE_DEFINITION_AFTER.test(after)) {
+                    continue;
+                }
+                const before = textBefore(match.index, 160);
+                const occurrence = occurrenceAt(`table:${key}@${match.index}`, match.index);
+                // A whole quoted identifier ("orders", `orders`, [orders]) is a
+                // reference, not quoted text.
+                const opener = commentStripped[match.index - 1];
+                const closer = commentStripped[match.index + match[0].length];
+                if ((opener === '"' || opener === '`' || opener === '[')
+                    && closer === (opener === '[' ? ']' : opener)) {
+                    occurrence.inQuotes = false;
+                }
+                candidates.push({
+                    ...occurrence,
+                    keywordContext: TABLE_KEYWORD_CONTEXT.test(before),
+                    commaContext: TABLE_COMMA_CONTEXT.test(before) && inTableList(match.index),
+                });
             }
-            const before = textBefore(match.index, 160);
-            const occurrence = occurrenceAt(`table:${tableName.toLowerCase()}@${match.index}`, match.index);
-            // A whole quoted identifier ("orders", `orders`, [orders]) is a
-            // reference, not quoted text.
-            const opener = commentStripped[match.index - 1];
-            const closer = commentStripped[match.index + match[0].length];
-            if ((opener === '"' || opener === '`' || opener === '[')
-                && closer === (opener === '[' ? ']' : opener)) {
-                occurrence.inQuotes = false;
-            }
-            candidates.push({
-                ...occurrence,
-                keywordContext: TABLE_KEYWORD_CONTEXT.test(before),
-                commaContext: TABLE_COMMA_CONTEXT.test(before) && inTableList(match.index),
-            });
+            tableOccurrences.set(key, candidates);
         }
         const predicates: OccurrencePredicate<typeof candidates[number]>[] = [
             c => isOuter(c) && c.keywordContext,

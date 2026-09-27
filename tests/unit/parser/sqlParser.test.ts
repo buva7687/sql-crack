@@ -934,6 +934,18 @@ SELECT * FROM t3;`;
       expect(result.error).toBeUndefined();
     });
 
+    it('connects a UNION ALL chain through one merge node', () => {
+      const sql = ['a', 'b', 'c', 'd'].map(table => `SELECT id FROM ${table}`).join(' UNION ALL ');
+      const result = parseSql(sql, 'PostgreSQL');
+      const unionNodes = result.nodes.filter(node => node.type === 'union');
+
+      expect(result.error).toBeUndefined();
+      expect(result.stats.unions).toBe(3);
+      expect(unionNodes).toHaveLength(1);
+      expect(unionNodes[0].details).toEqual(['4 branches']);
+      expect(result.edges.filter(edge => edge.target === unionNodes[0].id)).toHaveLength(4);
+    });
+
     it('parses INTERSECT', () => {
       const sql = 'SELECT id FROM customers INTERSECT SELECT customer_id FROM orders';
       const result = parseSql(sql, 'PostgreSQL');
