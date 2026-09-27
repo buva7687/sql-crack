@@ -23,6 +23,12 @@ describe('SchemaExtractor.extractDefinitions', () => {
         }));
     });
 
+    it('finds a definition after a MySQL comment containing a glob path', () => {
+        const sql = 'CREATE TABLE a (id INT); /* /backups/*.sql */ CREATE VIEW b AS SELECT id FROM a;';
+        expect(extractor.extractDefinitions(sql, '/sql/migration.sql', 'MySQL')
+            .map(definition => definition.name)).toEqual(['a', 'b']);
+    });
+
     it('parses large files one statement at a time instead of using the quadratic batch path', () => {
         const astifySpy = jest.spyOn((extractor as any).parser, 'astify');
         const sql = Array.from({ length: 200 }, (_, index) =>

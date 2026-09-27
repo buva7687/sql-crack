@@ -6,6 +6,7 @@
  */
 
 import { splitSqlStatements } from '../../../src/webview/parser/validation/splitting';
+import { parseSqlBatch } from '../../../src/webview/sqlParser';
 
 describe('statement splitting — quote and identifier delimiters', () => {
     it('does not split on a semicolon inside a backtick-quoted identifier', () => {
@@ -89,5 +90,12 @@ describe('statement splitting — long statements', () => {
             'CREATE PROCEDURE p() BEGIN SELECT 1; END',
             'SELECT 2',
         ]);
+    });
+
+    it('does not nest MySQL block comments containing a glob path', () => {
+        const sql = 'SELECT * FROM a /* /backups/*.sql */; SELECT * FROM b;';
+        expect(splitSqlStatements(sql, 'MySQL')).toHaveLength(2);
+        expect(splitSqlStatements(sql, 'PostgreSQL')).toHaveLength(1);
+        expect(parseSqlBatch(sql, 'MySQL').queries).toHaveLength(2);
     });
 });

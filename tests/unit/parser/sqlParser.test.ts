@@ -231,7 +231,7 @@ SELECT 2;`;
       const sql = `/* outer; /* inner; */ still outer; */
 SELECT 1;
 SELECT 2;`;
-      const statements = splitSqlStatements(sql);
+      const statements = splitSqlStatements(sql, 'PostgreSQL');
 
       expect(statements).toHaveLength(2);
       expect(statements[0]).toContain('SELECT 1');

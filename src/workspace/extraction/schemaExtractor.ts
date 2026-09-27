@@ -65,6 +65,7 @@ export class SchemaExtractor {
     /** Whether `#` starts a line comment (MySQL, MariaDB, BigQuery) for this extraction. */
     private hashComments = true;
     private dollarQuotes = true;
+    private nestedBlockComments = true;
     private readonly headerMatchCache: Record<DefinitionType, Map<string, HeaderMatch[]>> = {
         table: new Map(),
         view: new Map(),
@@ -130,6 +131,7 @@ export class SchemaExtractor {
         this.backslashEscapes = dialectSupportsBackslashEscapes(dialect);
         this.hashComments = dialectSupportsHashComments(dialect);
         this.dollarQuotes = dialect !== 'MySQL' && dialect !== 'MariaDB';
+        this.nestedBlockComments = dialect !== 'MySQL' && dialect !== 'MariaDB';
         const { sql: normalizedSql } = preprocessSqlForWorkspaceParsing(sql, dialect);
         const sourceViews = this.createSqlSearchViews(sql);
         const normalizedViews = normalizedSql === sql
@@ -234,6 +236,7 @@ export class SchemaExtractor {
             backslashEscapes: this.backslashEscapes,
             hashComments: this.hashComments,
             dollarQuotes: this.dollarQuotes,
+            nestedBlockComments: this.nestedBlockComments,
         });
         const header = this.createHeaderRegex(definition.type).exec(searchableSql);
         if (!header) {return result;}
@@ -1219,7 +1222,7 @@ export class SchemaExtractor {
                 let depth = 1;
                 i += 2;
                 while (i < sql.length && depth > 0) {
-                    if (sql[i] === '/' && sql[i + 1] === '*') {
+                    if (this.nestedBlockComments && sql[i] === '/' && sql[i + 1] === '*') {
                         depth++;
                         i += 2;
                     } else if (sql[i] === '*' && sql[i + 1] === '/') {
@@ -1415,6 +1418,7 @@ export class SchemaExtractor {
             const statementStart = sql.lastIndexOf(';', Math.max(0, match.index - 1)) + 1;
             const statementPrefix = stripSqlComments(sql.slice(statementStart, match.index), {
                 dollarQuotes: this.dollarQuotes,
+                nestedBlockComments: this.nestedBlockComments,
             }).toUpperCase();
             if (!/\bSELECT\b/.test(statementPrefix)) {
                 continue;

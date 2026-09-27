@@ -2,7 +2,7 @@ import { dialectSupportsBackslashEscapes, dialectSupportsHashComments, getDollar
 import type { SqlDialect } from '../../types/parser';
 import { maskStringsAndComments } from '../dialects/preprocessing';
 
-export function stripLeadingComments(sql: string): string {
+export function stripLeadingComments(sql: string, nestedBlockComments = true): string {
     let result = sql.trim();
     let changed = true;
 
@@ -22,7 +22,7 @@ export function stripLeadingComments(sql: string): string {
             let blockDepth = 1;
             let endIdx = 2;
             while (endIdx < result.length && blockDepth > 0) {
-                if (result[endIdx] === '/' && result[endIdx + 1] === '*') {
+                if (nestedBlockComments && result[endIdx] === '/' && result[endIdx + 1] === '*') {
                     blockDepth++;
                     endIdx += 2;
                 } else if (result[endIdx] === '*' && result[endIdx + 1] === '/') {
@@ -70,9 +70,13 @@ function scanSqlStatements(
     // Only executable text prevents a DELIMITER directive. Comments may
     // precede it, and this flag avoids rescanning a growing statement.
     let currentHasCode = false;
+    let routineHeaderOpen = false;
+    let oracleDeclarationOpen = false;
     const startCurrentAt = (offset: number): void => {
         currentStart = offset;
         currentHasCode = false;
+        routineHeaderOpen = false;
+        oracleDeclarationOpen = false;
     };
     let inString = false;
     let stringChar = '';
@@ -92,6 +96,7 @@ function scanSqlStatements(
     // `#` is an operator in PostgreSQL (`#`, `#>`, `#>>`, `#-`) and has no
     // comment meaning outside MySQL-family dialects.
     const hashStartsComment = dialectSupportsHashComments(dialect);
+    const nestedBlockComments = dialect !== 'MySQL' && dialect !== 'MariaDB';
 
     const isIdentifierChar = (ch: string | undefined): boolean => {
         if (!ch) { return false; }
@@ -192,7 +197,7 @@ function scanSqlStatements(
     const flushStatement = (): void => {
         const trimmed = current.trim();
         if (trimmed) {
-            const withoutComments = stripLeadingComments(trimmed).trim();
+            const withoutComments = stripLeadingComments(trimmed, nestedBlockComments).trim();
             if (withoutComments) {
                 const rawStart = currentStart + (current.length - current.trimStart().length);
                 const rawEnd = rawStart + trimmed.length;
@@ -206,6 +211,7 @@ function scanSqlStatements(
         const char = sql[i];
         const nextChar = i < sql.length - 1 ? sql[i + 1] : '';
         const prevChar = i > 0 ? sql[i - 1] : '';
+        const atStatementStart = !currentHasCode;
 
         if (inBracketIdentifier) {
             current += char;
@@ -230,7 +236,7 @@ function scanSqlStatements(
 
         if (blockCommentDepth > 0) {
             current += char;
-            if (char === '/' && nextChar === '*') {
+            if (nestedBlockComments && char === '/' && nextChar === '*') {
                 current += '*';
                 i++;
                 blockCommentDepth++;
@@ -367,13 +373,26 @@ function scanSqlStatements(
             // negative depth that disables every later semicolon split.
             if (char === ')') { depth = Math.max(0, depth - 1); }
 
+            if (atStatementStart && matchKeyword(i, 'CREATE')
+                && /^CREATE\s+(?:OR\s+REPLACE\s+)?(?:FUNCTION|PROCEDURE|TRIGGER)\b/i.test(sql.slice(i, i + 100))) {
+                routineHeaderOpen = true;
+                oracleDeclarationOpen = dialect === 'Oracle';
+            }
+            if (dialect === 'Oracle' && atStatementStart && matchKeyword(i, 'DECLARE')) {
+                routineHeaderOpen = true;
+                oracleDeclarationOpen = true;
+            }
+
             if (matchKeyword(i, 'CASE') && i !== closingCaseKeywordAt) {
                 caseDepth++;
             }
 
             if (matchKeyword(i, 'BEGIN')) {
-                if (isProceduralBegin(i)) {
+                if (routineHeaderOpen || isProceduralBegin(i)
+                    || (dialect === 'Oracle' && atStatementStart)) {
                     beginEndDepth++;
+                    routineHeaderOpen = false;
+                    oracleDeclarationOpen = false;
                 }
             }
 
@@ -394,7 +413,8 @@ function scanSqlStatements(
 
         const delimiter = customDelimiter || ';';
         const isDelimiter = delimiter === ';'
-            ? (char === ';' && !inString && !inDollarQuotes && depth === 0 && beginEndDepth === 0)
+            ? (char === ';' && !inString && !inDollarQuotes && depth === 0
+                && beginEndDepth === 0 && !oracleDeclarationOpen)
             : (sql.substring(i).startsWith(delimiter) && !inString && !inDollarQuotes && depth === 0 && beginEndDepth === 0);
 
         if (isDelimiter) {

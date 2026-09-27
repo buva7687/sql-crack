@@ -255,6 +255,27 @@ describe('Item #4: Procedural SQL Splitting (BEGIN...END Blocks)', () => {
     });
 
     describe('Complex Scenarios', () => {
+        it('keeps Oracle declaration sections with their BEGIN body', () => {
+            for (const sql of [
+                'CREATE PROCEDURE p IS v NUMBER; BEGIN SELECT 1 INTO v FROM orders; END; SELECT 2;',
+                'DECLARE v NUMBER; BEGIN SELECT 1 INTO v FROM orders; END; SELECT 2;',
+            ]) {
+                const statements = splitSqlStatements(sql, 'Oracle');
+                expect(statements).toHaveLength(2);
+                expect(statements[0]).toContain('v NUMBER; BEGIN');
+                expect(statements[1]).toBe('SELECT 2');
+            }
+        });
+
+        it('recognizes BEGIN after a long MySQL routine header', () => {
+            const parameter = 'x'.repeat(240);
+            const sql = `CREATE PROCEDURE p(IN ${parameter} INT) BEGIN SELECT 1; SELECT 2; END; SELECT 3;`;
+            const statements = splitSqlStatements(sql, 'MySQL');
+            expect(statements).toHaveLength(2);
+            expect(statements[0]).toContain('SELECT 1; SELECT 2; END');
+            expect(statements[1]).toBe('SELECT 3');
+        });
+
         it('does not count an @end variable as a procedural END', () => {
             const sql = 'CREATE PROCEDURE p @end INT AS BEGIN SELECT @end; SELECT 2; END; SELECT 3;';
             const statements = splitSqlStatements(sql, 'TransactSQL');

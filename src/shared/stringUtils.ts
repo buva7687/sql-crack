@@ -158,6 +158,8 @@ export function isHashTempTableIdentifierAt(sql: string, offset: number): boolea
 export interface StripSqlCommentsOptions {
     /** Set false for MySQL-family SQL, where $$ can be a statement delimiter. */
     dollarQuotes?: boolean;
+    /** Set false where an inner block-comment opener is plain text. */
+    nestedBlockComments?: boolean;
     /** Set false when the caller knows `#` always starts a MySQL-style comment. */
     preserveHashTempIdentifiers?: boolean;
     /**
@@ -296,7 +298,8 @@ export function maskSqlCommentsPreservingPositions(
             let depth = 1;
             i += 2;
             while (i < len && depth > 0) {
-                if (sql[i] === '/' && i + 1 < len && sql[i + 1] === '*') {
+                if (options.nestedBlockComments !== false
+                    && sql[i] === '/' && i + 1 < len && sql[i + 1] === '*') {
                     depth++;
                     i += 2;
                 } else if (sql[i] === '*' && i + 1 < len && sql[i + 1] === '/') {
@@ -420,7 +423,8 @@ export function stripSqlComments(sql: string, options: StripSqlCommentsOptions =
             i += 2;
             out += ' ';
             while (i < len && depth > 0) {
-                if (sql[i] === '/' && i + 1 < len && sql[i + 1] === '*') {
+                if (options.nestedBlockComments !== false
+                    && sql[i] === '/' && i + 1 < len && sql[i + 1] === '*') {
                     depth++;
                     i += 2;
                     continue;

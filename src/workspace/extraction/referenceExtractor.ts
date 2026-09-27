@@ -1936,6 +1936,7 @@ export class ReferenceExtractor {
         return {
             backslashEscapes: this.supportsBackslashEscapes(),
             dollarQuotes: this.supportsDollarQuotes(),
+            nestedBlockComments: this._activeDialect !== 'MySQL' && this._activeDialect !== 'MariaDB',
             // In PostgreSQL `#` is XOR; masking it as a comment hid the rest of
             // the line, including table names and the statement's `;`.
             hashComments: dialectSupportsHashComments(this._activeDialect),

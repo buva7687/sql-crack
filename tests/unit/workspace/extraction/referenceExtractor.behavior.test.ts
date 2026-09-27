@@ -21,6 +21,12 @@ describe('ReferenceExtractor behavioral coverage', () => {
         ]));
     });
 
+    it('finds references after a MySQL comment containing a glob path', () => {
+        const sql = 'SELECT * FROM a; /* /backups/*.sql */ SELECT * FROM b;';
+        expect(extractor.extractReferences(sql, '/sql/migration.sql', 'MySQL')
+            .map(reference => reference.tableName)).toContain('b');
+    });
+
     it('anchors INSERT and UPDATE targets before later joins to the same table', () => {
         const insertSql = 'INSERT INTO audit (id)\nSELECT e.id\nFROM events e\nJOIN audit a ON a.id = e.id';
         const updateSql = 'UPDATE audit\nSET id = a.id\nFROM events e\nJOIN audit a ON a.id = e.id';
