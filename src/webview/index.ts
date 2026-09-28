@@ -1775,12 +1775,22 @@ function renderCurrentQuery(): void {
 async function switchToQueryIndex(newIndex: number, options: { skipSaveCurrent?: boolean } = {}): Promise<void> {
     const existingSwitch = querySwitchPromises.get(newIndex);
     if (existingSwitch) {
-        await existingSwitch;
-        // Another query may have become active while this hydration was in
-        // flight. The latest request still needs to render its target.
+        // The query is still hydrating from an earlier request. Make it current
+        // again now, as a fresh switch would, so the in-flight switch renders it
+        // when hydration settles. Re-rendering after the await instead would
+        // override any newer switch the user made in the meantime.
         if (currentQueryIndex !== newIndex) {
-            await switchToQueryIndex(newIndex, options);
+            enterQueryIndex(newIndex, options);
+            updateBatchTabsUI();
+            const loadingToken = beginQueryLoading();
+            try {
+                await existingSwitch;
+            } finally {
+                endQueryLoading(loadingToken);
+            }
+            return;
         }
+        await existingSwitch;
         return;
     }
 
@@ -1795,13 +1805,8 @@ async function switchToQueryIndex(newIndex: number, options: { skipSaveCurrent?:
     }
 }
 
-async function performSwitchToQueryIndex(newIndex: number, options: { skipSaveCurrent?: boolean } = {}): Promise<void> {
-    // Number.isInteger also rejects NaN, which would otherwise slip past both
-    // range comparisons (every NaN comparison is false) and leave
-    // currentQueryIndex as NaN, crashing the next renderCurrentQuery().
-    if (!batchResult || !Number.isInteger(newIndex) || newIndex < 0 || newIndex >= batchResult.queries.length) {
-        return;
-    }
+/** Leave the current query and make `newIndex` current, before any rendering. */
+function enterQueryIndex(newIndex: number, options: { skipSaveCurrent?: boolean }): void {
     if (newIndex !== currentQueryIndex && comparePending) {
         compareRequestId++;
         comparePending = false;
@@ -1812,11 +1817,20 @@ async function performSwitchToQueryIndex(newIndex: number, options: { skipSaveCu
         queryViewStates.set(currentQueryIndex, getViewState());
     }
 
-    // Switch to new query
     currentQueryIndex = newIndex;
     hideCompareView();
     setCompareModeState(false);
     clearUndoHistory();
+}
+
+async function performSwitchToQueryIndex(newIndex: number, options: { skipSaveCurrent?: boolean } = {}): Promise<void> {
+    // Number.isInteger also rejects NaN, which would otherwise slip past both
+    // range comparisons (every NaN comparison is false) and leave
+    // currentQueryIndex as NaN, crashing the next renderCurrentQuery().
+    if (!batchResult || !Number.isInteger(newIndex) || newIndex < 0 || newIndex >= batchResult.queries.length) {
+        return;
+    }
+    enterQueryIndex(newIndex, options);
 
     if (deferredQueryIndexes.has(newIndex)) {
         const loadingToken = beginQueryLoading();

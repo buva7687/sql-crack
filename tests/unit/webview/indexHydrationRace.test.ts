@@ -269,4 +269,49 @@ describe('webview refresh query state (H11, M15)', () => {
         expect((global as any).alert).toHaveBeenCalled();
         delete (global as any).alert;
     });
+
+    it('keeps the last requested query when a joined hydration settles late (A1 follow-up)', async () => {
+        for (const finalIndex of [0, 2]) {
+            const { batchCalls, render, send, settle } = bootWebview();
+            send({ command: 'refresh', sql: 'A', options: { dialect: 'MySQL', fileName: 'big.sql' } });
+            await settle();
+            batchCalls[0].result.resolve(makeBatch('a', 60));
+            await settle();
+            const hydrate = (sql: string) => batchCalls.find(call => call.sql === sql)!.result
+                .resolve({ ...makeBatch('h', 1), queries: [makeQuery(sql)] });
+
+            // Q2 starts hydrating, the user goes Q1 -> Q2 (joins) -> final.
+            for (const index of [1, 0, 1, finalIndex]) {
+                send({ command: 'switchToQuery', queryIndex: index });
+                await settle();
+            }
+            if (finalIndex === 2) {
+                hydrate('SELECT a2 FROM t;');
+                await settle();
+            }
+            hydrate('SELECT a1 FROM t;');
+            await settle();
+
+            const lastRendered = render.mock.calls[render.mock.calls.length - 1]?.[0];
+            expect(lastRendered?.sql).toBe(`SELECT a${finalIndex} FROM t;`);
+            jest.resetModules();
+        }
+    });
+
+    it('still renders a re-requested query whose hydration was joined (A1)', async () => {
+        const { batchCalls, render, send, settle } = bootWebview();
+        send({ command: 'refresh', sql: 'A', options: { dialect: 'MySQL', fileName: 'big.sql' } });
+        await settle();
+        batchCalls[0].result.resolve(makeBatch('a', 60));
+        await settle();
+        for (const index of [1, 0, 1]) {
+            send({ command: 'switchToQuery', queryIndex: index });
+            await settle();
+        }
+        batchCalls.find(call => call.sql === 'SELECT a1 FROM t;')!.result
+            .resolve({ ...makeBatch('h', 1), queries: [makeQuery('SELECT a1 FROM t;')] });
+        await settle();
+
+        expect(render.mock.calls[render.mock.calls.length - 1]?.[0]?.sql).toBe('SELECT a1 FROM t;');
+    });
 });

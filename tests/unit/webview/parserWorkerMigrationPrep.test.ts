@@ -331,7 +331,10 @@ describe('parser worker migration prep', () => {
 
         expect(switchBody).toContain('querySwitchPromises.get(newIndex)');
         expect(switchBody).toContain('await existingSwitch');
-        expect(switchBody).toContain('await switchToQueryIndex(newIndex, options);');
+        // Re-requesting a hydrating query makes it current before awaiting, so
+        // the in-flight switch renders it and newer switches are not overridden.
+        expect(switchBody).toContain('enterQueryIndex(newIndex, options);');
+        expect(switchBody).not.toContain('await switchToQueryIndex(newIndex, options);');
         expect(switchBody).toContain('querySwitchPromises.set(newIndex, switchPromise)');
         expect(switchBody).toContain('querySwitchPromises.delete(newIndex)');
     });
