@@ -762,7 +762,15 @@ async function applyInitialUiStateIfAvailable(): Promise<void> {
         setViewState(activeQueryViewState);
     }
 
-    const restoreHistory = () => restoreLayoutHistoryState(state.renderer.layoutHistory);
+    const restoreHistory = () => {
+        restoreLayoutHistoryState(state.renderer.layoutHistory);
+        // The history snapshot carries the viewport of the last recorded
+        // layout change. Wheel zoom and pan are not recorded, so the persisted
+        // viewport is newer; apply it last.
+        if (activeQueryViewState) {
+            setViewState(activeQueryViewState);
+        }
+    };
     if (state.renderer.layout !== getCurrentLayout()) {
         switchLayout(state.renderer.layout, { recordHistory: false, onComplete: restoreHistory });
     } else {
@@ -1319,6 +1327,11 @@ function init(): void {
 
     // Mark persist dirty when renderer-side keyboard shortcuts mutate view state directly.
     document.addEventListener('layout-state-changed', () => {
+        persistStateDirty = true;
+    });
+    // Wheel zoom, pan, and pinch change the viewport without a layout change;
+    // the interval above saves them instead of waiting for beforeunload.
+    document.addEventListener('view-state-changed', () => {
         persistStateDirty = true;
     });
 

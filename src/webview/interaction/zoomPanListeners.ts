@@ -25,6 +25,7 @@ export function registerZoomPanListeners(
 
         callbacks.updateTransform();
         callbacks.updateZoomIndicator();
+        callbacks.onViewStateChanged();
     }, { passive: false });
 
     svg.addEventListener('click', (e) => {
@@ -107,6 +108,7 @@ export function registerZoomPanListeners(
         if (e.touches.length === 0) {
             state.isDragging = false;
             pinchState = null;
+            callbacks.onViewStateChanged();
             return;
         }
 

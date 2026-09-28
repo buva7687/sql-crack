@@ -1,5 +1,5 @@
 /**
- * Regression guards for renderer state handling (audit S2, S3, S7).
+ * Regression guards for renderer state handling (audit S2, S3, S7, S8).
  *
  * renderer.ts depends on the DOM and d3, so these assertions read its source.
  * Both behaviours were also checked in a browser against the built webview:
@@ -44,5 +44,14 @@ describe('render() state preservation', () => {
         // Undo to a focus-mode snapshot restores layout and focus direction;
         // applyFocusMode() alone never told the layout picker.
         expect(body.lastIndexOf('notifyRendererStateChanged();')).toBeGreaterThan(focusBranchEnd);
+    });
+
+    it('does not refit on the ResizeObserver initial size notification (S8)', () => {
+        const start = rendererSource.indexOf('rendererResizeObserver = new ResizeObserver(');
+        const body = rendererSource.slice(start, rendererSource.indexOf('rendererResizeObserver.observe(container);', start));
+        // The first notification records the size; only a changed size refits,
+        // so a viewport restored from persisted state is not overridden.
+        expect(body).toContain('if (observedContainerSize === null || size === observedContainerSize) {');
+        expect(body.indexOf('return;')).toBeLessThan(body.indexOf('fitView();'));
     });
 });

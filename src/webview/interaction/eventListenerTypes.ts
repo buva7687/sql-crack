@@ -21,6 +21,8 @@ export interface EventListenerCallbacks {
     updateTransform: () => void;
     updateZoomIndicator: () => void;
     recordLayoutHistorySnapshot: () => void;
+    /** A user gesture changed the viewport or node positions (persisted UI state). */
+    onViewStateChanged: () => void;
     selectNode: (nodeId: string | null) => void;
     clearFocusMode: () => void;
     fitView: () => void;

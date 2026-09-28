@@ -59,6 +59,7 @@ function createCallbacks(overrides: Partial<EventListenerCallbacks> = {}): Event
         updateTransform: jest.fn(),
         updateZoomIndicator: jest.fn(),
         recordLayoutHistorySnapshot: jest.fn(),
+        onViewStateChanged: jest.fn(),
         selectNode: jest.fn(),
         clearFocusMode: jest.fn(),
         fitView: jest.fn(),

@@ -57,6 +57,7 @@ function createCallbacks(): EventListenerCallbacks {
         updateTransform: jest.fn(),
         updateZoomIndicator: jest.fn(),
         recordLayoutHistorySnapshot: jest.fn(),
+        onViewStateChanged: jest.fn(),
         selectNode: jest.fn(),
         clearFocusMode: jest.fn(),
         fitView: jest.fn(),
@@ -145,6 +146,21 @@ describe('zoomPanListeners', () => {
         expect(state.offsetY).toBeCloseTo(-12.3);
         expect(callbacks.updateTransform).toHaveBeenCalled();
         expect(callbacks.updateZoomIndicator).toHaveBeenCalled();
+        // Wheel zoom is not a layout change; the persisted viewport must still be saved (S8).
+        expect(callbacks.onViewStateChanged).toHaveBeenCalledTimes(1);
+    });
+
+    it('reports a view-state change when a touch gesture ends (S8)', () => {
+        const state = createState();
+        const svg = createSvg();
+        const callbacks = createCallbacks();
+
+        registerZoomPanListeners(createContext(state, svg), callbacks);
+
+        svg.emit('touchstart', { touches: [{ clientX: 10, clientY: 10 }], preventDefault: jest.fn() });
+        expect(callbacks.onViewStateChanged).not.toHaveBeenCalled();
+        svg.emit('touchend', { touches: [] });
+        expect(callbacks.onViewStateChanged).toHaveBeenCalledTimes(1);
     });
 
     it('clears selection on background click and refits when exiting a zoomed node', () => {

@@ -1265,6 +1265,9 @@ export function initRenderer(container: HTMLElement): void {
             updateTransform,
             updateZoomIndicator,
             recordLayoutHistorySnapshot,
+            // Wheel zoom, pan, and drags change persisted view state without a
+            // layout change; index.ts marks its UI state dirty on this event.
+            onViewStateChanged: () => document.dispatchEvent(new CustomEvent('view-state-changed')),
             selectNode,
             clearFocusMode,
             fitView,
@@ -1311,7 +1314,18 @@ export function initRenderer(container: HTMLElement): void {
         clearTimeout(resizeObserverDebounceTimer);
         resizeObserverDebounceTimer = null;
     }
-    rendererResizeObserver = new ResizeObserver(() => {
+    let observedContainerSize: string | null = null;
+    rendererResizeObserver = new ResizeObserver((entries) => {
+        const rect = entries[0]?.contentRect;
+        const size = rect ? `${Math.round(rect.width)}x${Math.round(rect.height)}` : '';
+        // ResizeObserver also reports the initial size when observation
+        // starts. Fitting then would override a viewport restored from
+        // persisted state; render() already fits new graphs itself.
+        if (observedContainerSize === null || size === observedContainerSize) {
+            observedContainerSize = size;
+            return;
+        }
+        observedContainerSize = size;
         // Debounce resize events
         if (resizeObserverDebounceTimer) {
             clearTimeout(resizeObserverDebounceTimer);

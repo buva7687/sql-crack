@@ -88,7 +88,7 @@ describe('webview refresh query state (H11, M15)', () => {
         jest.resetModules();
     });
 
-    const bootWebview = () => {
+    const bootWebview = (options: { initialUiState?: unknown } = {}) => {
         const batchCalls: Array<{ sql: string; result: Deferred<unknown> }> = [];
         const parseBatchAsync = jest.fn((sql: string) => {
             const result = deferred<unknown>();
@@ -102,12 +102,13 @@ describe('webview refresh query state (H11, M15)', () => {
             parseAsync: jest.fn(() => Promise.resolve(makeQuery('baseline'))),
             isCancelledBatchParseResult: () => false,
         }));
-        jest.doMock('../../../src/webview/renderer', () => proxyModule({
+        const renderer = proxyModule({
             render,
             getViewState: jest.fn(() => ({})),
             getCurrentLayout: jest.fn(() => 'vertical'),
             isDarkTheme: jest.fn(() => true),
-        }));
+        }) as Record<string, jest.Mock>;
+        jest.doMock('../../../src/webview/renderer', () => renderer);
         const ui = {
             updateBatchTabs: jest.fn(),
             updateErrorBadge: jest.fn(),
@@ -117,7 +118,9 @@ describe('webview refresh query state (H11, M15)', () => {
         };
         jest.doMock('../../../src/webview/ui', () => proxyModule(ui));
         jest.doMock('../../../src/webview/hintActions', () => proxyModule());
-        jest.doMock('../../../src/webview/state/persistedViewState', () => proxyModule({
+        // Real validators, so a test can supply a persisted UI state.
+        jest.doMock('../../../src/webview/state/persistedViewState', () => ({
+            ...jest.requireActual('../../../src/webview/state/persistedViewState'),
             readPersistedUiState: jest.fn(() => null),
         }));
         jest.doMock('../../../src/webview/minimapVisibility', () => proxyModule());
@@ -153,6 +156,7 @@ describe('webview refresh query state (H11, M15)', () => {
             requestAnimationFrame: (callback: () => void) => trackedTimeout(callback, 0),
             vscodeApi: { postMessage: jest.fn(), getState: jest.fn(), setState: jest.fn() },
             initialSqlCode: '',
+            initialUiState: options.initialUiState ?? null,
             sqlCrackConfig: { deferredQueryThreshold: 50, maxStatements: 500, maxFileSizeKB: 1024, parseTimeoutSeconds: 5 },
         };
         (global as any).requestAnimationFrame = (callback: () => void) => trackedTimeout(callback, 0);
@@ -169,7 +173,7 @@ describe('webview refresh query state (H11, M15)', () => {
         };
         const send = (data: unknown) => messageHandler!({ data });
         const toolbarCallbacks = () => (ui.createToolbar.mock.calls[0] as unknown[] | undefined)?.[1] as any;
-        return { batchCalls, render, send, settle, ui, toolbarCallbacks };
+        return { batchCalls, render, renderer, send, settle, ui, toolbarCallbacks };
     };
 
     it('does not write a hydration started before the refreshed result into that result', async () => {
@@ -390,5 +394,43 @@ describe('webview refresh query state (H11, M15)', () => {
         expect(lastBatch.successCount).toBe(2);
         expect(lastBatch.parseErrors).toEqual([expect.objectContaining({ queryIndex: 1, message: 'Unsupported statement' })]);
         expect(ui.updateErrorBadge).toHaveBeenLastCalledWith(1, [expect.objectContaining({ queryIndex: 1 })]);
+    });
+
+    it('applies the persisted viewport after restoring layout history (S8)', async () => {
+        const viewState = { scale: 0.72, offsetX: -90, offsetY: 350 };
+        const { batchCalls, renderer, send, settle } = bootWebview({
+            initialUiState: {
+                version: 1,
+                currentDialect: 'MySQL',
+                currentQueryIndex: 0,
+                userExplicitlySetDialect: false,
+                compareModeActive: false,
+                activeTabId: null,
+                queryViewStates: [{ queryIndex: 0, viewState }],
+                renderer: {
+                    viewState,
+                    layout: 'vertical',
+                    legendVisible: true,
+                    hintsVisible: true,
+                    sqlPreviewVisible: false,
+                    columnFlowsVisible: false,
+                    focusMode: 'all',
+                    focusModeEnabled: false,
+                    layoutHistory: null,
+                },
+            },
+        });
+        send({ command: 'refresh', sql: 'one', options: { dialect: 'MySQL', fileName: 'q.sql' }, documentKey: 'file:///q.sql' });
+        await settle();
+        batchCalls[0].result.resolve(makeBatch('q', 1));
+        await settle();
+
+        // The history snapshot's viewport predates wheel zoom and pan, so the
+        // persisted viewport must be applied after it.
+        const historyOrder = renderer.restoreLayoutHistoryState.mock.invocationCallOrder;
+        const viewOrder = renderer.setViewState.mock.invocationCallOrder;
+        expect(historyOrder).toHaveLength(1);
+        expect(Math.max(...viewOrder)).toBeGreaterThan(historyOrder[0]);
+        expect(renderer.setViewState).toHaveBeenLastCalledWith(viewState);
     });
 });

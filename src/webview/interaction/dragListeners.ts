@@ -143,6 +143,7 @@ export function registerDragListeners(
 
         if (shouldRecordHistory) {
             callbacks.recordLayoutHistorySnapshot();
+            callbacks.onViewStateChanged();
         }
     };
 
