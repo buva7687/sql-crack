@@ -77,6 +77,42 @@ describe('VisualizationPanel behavior', () => {
         }
     });
 
+    it('sends the current pin list to the main panel and every pinned panel (S9)', () => {
+        const previousCurrent = VisualizationPanel.currentPanel;
+        const previousContext = (VisualizationPanel as any)._context;
+        const pins = [
+            { id: 'pin-1', name: 'Q1', sql: 'SELECT 1', dialect: 'MySQL', timestamp: 1 },
+            { id: 'pin-2', name: 'Q2', sql: 'SELECT 2', dialect: 'MySQL', timestamp: 2 },
+        ];
+        (VisualizationPanel as any)._context = { workspaceState: { get: jest.fn(() => pins), update: jest.fn() } };
+        const main = { _postMessage: jest.fn() };
+        const pinnedOne = { _postMessage: jest.fn() };
+        VisualizationPanel.currentPanel = main as any;
+        VisualizationPanel.pinnedPanels.set('pin-1', pinnedOne as any);
+        try {
+            VisualizationPanel.broadcastPinnedTabs();
+            for (const panel of [main, pinnedOne]) {
+                expect(panel._postMessage).toHaveBeenCalledTimes(1);
+                expect(panel._postMessage).toHaveBeenCalledWith(expect.objectContaining({
+                    command: 'viewLocationOptions',
+                    pinnedTabs: pins,
+                }));
+            }
+        } finally {
+            VisualizationPanel.currentPanel = previousCurrent;
+            VisualizationPanel.pinnedPanels.delete('pin-1');
+            (VisualizationPanel as any)._context = previousContext;
+        }
+    });
+
+    it('broadcasts the pin list after pinning and unpinning (S9)', () => {
+        const source = require('fs').readFileSync(require('path').join(__dirname, '../../src/visualizationPanel.ts'), 'utf8');
+        const pinCase = source.slice(source.indexOf("case 'pinVisualization':"), source.indexOf("case 'persistUiState':"));
+        const unpinCase = source.slice(source.indexOf("case 'unpinTab':"), source.indexOf("case 'savePng':"));
+        expect(pinCase).toContain('VisualizationPanel.broadcastPinnedTabs();');
+        expect(unpinCase).toContain('VisualizationPanel.broadcastPinnedTabs();');
+    });
+
     it('falls back to the opened dialect and clamps advanced runtime limits', () => {
         (vscode as any).__setMockConfig?.('sqlCrack', {
             'advanced.maxFileSizeKB': 2,

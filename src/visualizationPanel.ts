@@ -397,6 +397,24 @@ export class VisualizationPanel {
         );
     }
 
+    /**
+     * Send the current pin list to every open SQL Flow page. Each page keeps
+     * its own copy for the Compare baseline, and pinned pages would otherwise
+     * keep the list captured when they were built.
+     */
+    public static broadcastPinnedTabs() {
+        const config = vscode.workspace.getConfiguration('sqlCrack');
+        const location = config.get<ViewLocation>('viewLocation') || 'tab';
+        const pinnedTabs = VisualizationPanel.getPinnedTabs();
+        const panels = new Set<VisualizationPanel>(VisualizationPanel.pinnedPanels.values());
+        if (VisualizationPanel.currentPanel) {
+            panels.add(VisualizationPanel.currentPanel);
+        }
+        for (const panel of panels) {
+            panel._postMessage({ command: 'viewLocationOptions', currentLocation: location, pinnedTabs });
+        }
+    }
+
     public static sendViewLocationOptions() {
         if (VisualizationPanel.currentPanel) {
             const config = vscode.workspace.getConfiguration('sqlCrack');
@@ -494,6 +512,7 @@ export class VisualizationPanel {
                                 pinId: pinId,
                                 pinnedTabs: VisualizationPanel.getPinnedTabs()
                             });
+                            VisualizationPanel.broadcastPinnedTabs();
                             vscode.window.showInformationMessage(`Pinned: ${message.name || this._currentOptions.fileName}`);
                         } else {
                             vscode.window.showErrorMessage('Cannot pin: extension context not available');
@@ -528,7 +547,7 @@ export class VisualizationPanel {
                             if (pinnedPanel) {
                                 pinnedPanel.dispose();
                             }
-                            VisualizationPanel.sendViewLocationOptions();
+                            VisualizationPanel.broadcastPinnedTabs();
                         }
                         return;
                     case 'savePng':
