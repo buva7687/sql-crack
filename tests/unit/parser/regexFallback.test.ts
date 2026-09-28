@@ -450,3 +450,40 @@ describe('Item #1: Regex-Based Partial Parser Fallback', () => {
         });
     });
 });
+
+describe('Regex fallback: SELECT ... INTO procedural variables', () => {
+    const tables = (sql: string, dialect: SqlDialect) =>
+        regexFallbackParse(sql, dialect).nodes.filter(node => node.type === 'table').map(node => node.label);
+
+    it('does not show PL/SQL variables and parameters as tables', () => {
+        const sql = [
+            'CREATE OR REPLACE PROCEDURE refresh_stats(p_region IN VARCHAR2, p_total OUT NUMBER) IS',
+            '  v_count NUMBER;',
+            '  v_max orders.amount%TYPE;',
+            'BEGIN',
+            '  SELECT COUNT(*), MAX(amount) INTO v_count, v_max FROM orders WHERE region = p_region;',
+            '  SELECT SUM(amount) INTO p_total FROM refunds;',
+            '  UPDATE stats SET c = v_count;',
+            'END;',
+        ].join('\n');
+
+        expect(tables(sql, 'Oracle')).toEqual(['orders', 'refunds', 'stats']);
+    });
+
+    it('does not show MySQL DECLAREd variables as tables', () => {
+        const sql = 'CREATE PROCEDURE p(IN p_id INT) BEGIN DECLARE total, cnt INT; SELECT SUM(x), COUNT(*) INTO total, cnt FROM sales WHERE id = p_id; INSERT INTO audit VALUES (total); END';
+        expect(tables(sql, 'MySQL')).toEqual(['sales', 'audit']);
+    });
+
+    it('keeps SELECT INTO new tables inside procedures', () => {
+        const sql = [
+            'CREATE PROCEDURE dbo.load AS',
+            'BEGIN',
+            '  DECLARE @ids TABLE (id INT);',
+            '  SELECT * INTO #staging FROM orders;',
+            '  INSERT INTO @ids SELECT id FROM #staging;',
+            'END',
+        ].join('\n');
+        expect(tables(sql, 'TransactSQL')).toEqual(['orders', '#staging']);
+    });
+});

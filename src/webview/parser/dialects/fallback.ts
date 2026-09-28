@@ -119,6 +119,32 @@ function maskQuotedTokens(sql: string, backslashEscapes: boolean, bracketIdentif
  * Extracts basic structure (tables, columns, JOINs) to show best-effort visualization.
  * This is better than showing nothing - 70% accuracy > 0%.
  */
+const DECLARED_NAME = /^(?:(?:IN\s+OUT|INOUT|IN|OUT)\s+)?([A-Za-z_][\w$#]*)/i;
+
+/**
+ * Variables and parameters a procedural block declares: routine parameter
+ * lists, a PL/SQL `IS`/`AS`/`DECLARE ... BEGIN` section, and `DECLARE a, b`
+ * statements. Empty for non-procedural SQL.
+ */
+function collectDeclaredVariables(sql: string): Set<string> {
+    const names = new Set<string>();
+    if (!/\b(?:PROCEDURE|FUNCTION|TRIGGER|DECLARE|BEGIN)\b/i.test(sql)) {
+        return names;
+    }
+    const addFirstName = (part: string): void => {
+        const name = DECLARED_NAME.exec(part.trim())?.[1];
+        if (name) { names.add(name.toLowerCase()); }
+    };
+    const parameters = /\b(?:PROCEDURE|FUNCTION)\s+[\w$#".]+\s*\(([^)]*)\)/i.exec(sql);
+    parameters?.[1].split(',').forEach(addFirstName);
+    const declarations = /\b(?:IS|AS|DECLARE)\b([\s\S]*?)\bBEGIN\b/i.exec(sql);
+    declarations?.[1].split(';').forEach(addFirstName);
+    for (const match of sql.matchAll(/\bDECLARE\s+([A-Za-z_][\w$#]*(?:\s*,\s*[A-Za-z_][\w$#]*)*)/gi)) {
+        match[1].split(',').forEach(addFirstName);
+    }
+    return names;
+}
+
 export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
     const nodes: FlowNode[] = [];
     const edges: FlowEdge[] = [];
@@ -227,6 +253,14 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
         });
     }
 
+    // In procedural code `SELECT ... INTO name` (and FETCH ... INTO) assigns a
+    // declared variable or parameter; only INSERT/REPLACE/MERGE INTO, or an
+    // undeclared name (T-SQL/PostgreSQL SELECT INTO new_table), writes a table.
+    const declaredVariables = collectDeclaredVariables(commentStripped);
+    const isVariableIntoTarget = (matchIndex: number, name: string): boolean =>
+        declaredVariables.has(name.toLowerCase())
+        && !/\b(?:INSERT|REPLACE|MERGE)(?:\s+(?:IGNORE|OVERWRITE|ALL|FIRST))?\s*$/i.test(commentStripped.slice(Math.max(0, matchIndex - 40), matchIndex));
+
     const tablePatterns = [
         new RegExp(`\\bFROM\\s+(${qualifiedIdentifier})`, 'giu'),
         new RegExp(`\\bJOIN\\s+(${qualifiedIdentifier})`, 'giu'),
@@ -249,6 +283,9 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
             }
             const tableName = normalizeObjectName(match[1]);
             if (!tableName) {
+                continue;
+            }
+            if (/^INTO\b/i.test(match[0]) && isVariableIntoTarget(match.index, tableName)) {
                 continue;
             }
             trackTableUsage(tableName);
