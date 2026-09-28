@@ -970,6 +970,10 @@ function restoreLayoutHistorySnapshot(snapshot: LayoutHistorySnapshot): void {
     } else {
         clearFocusMode();
     }
+    // The snapshot can change the layout and focus direction; the layout
+    // picker, Focus Direction button, and persisted state follow this event.
+    // applyFocusMode() does not dispatch it, so a focus snapshot went unseen.
+    notifyRendererStateChanged();
 }
 
 function syncUndoRedoUiState(): void {

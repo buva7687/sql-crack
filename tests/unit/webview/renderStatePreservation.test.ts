@@ -1,5 +1,5 @@
 /**
- * Regression guards for render() state handling (audit S2, S3).
+ * Regression guards for renderer state handling (audit S2, S3, S7).
  *
  * renderer.ts depends on the DOM and d3, so these assertions read its source.
  * Both behaviours were also checked in a browser against the built webview:
@@ -35,5 +35,14 @@ describe('render() state preservation', () => {
         expect(errorBranch.indexOf('refreshVisibleSqlPreview();')).toBeLessThan(errorBranch.indexOf('return;'));
         expect(emptyBranch).toContain('refreshVisibleSqlPreview();');
         expect(renderBody.split('refreshVisibleSqlPreview();').length - 1).toBe(3);
+    });
+
+    it('notifies the toolbar after restoring any layout history snapshot (S7)', () => {
+        const start = rendererSource.indexOf('function restoreLayoutHistorySnapshot(');
+        const body = rendererSource.slice(start, rendererSource.indexOf('\n}\n', start));
+        const focusBranchEnd = body.lastIndexOf('clearFocusMode();');
+        // Undo to a focus-mode snapshot restores layout and focus direction;
+        // applyFocusMode() alone never told the layout picker.
+        expect(body.lastIndexOf('notifyRendererStateChanged();')).toBeGreaterThan(focusBranchEnd);
     });
 });
