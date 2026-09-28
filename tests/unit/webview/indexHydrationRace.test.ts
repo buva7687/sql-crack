@@ -110,6 +110,7 @@ describe('webview refresh query state (H11, M15)', () => {
         }));
         const ui = {
             updateBatchTabs: jest.fn(),
+            updateErrorBadge: jest.fn(),
             createToolbar: jest.fn(() => ({ cleanup: jest.fn() })),
             isCompareViewActive: jest.fn(() => false),
             showCompareView: jest.fn(),
@@ -361,5 +362,33 @@ describe('webview refresh query state (H11, M15)', () => {
         const { right } = ui.showCompareView.mock.calls[0][0];
         expect(right.result.sql).toBe('SELECT a5 FROM t;');
         expect(right.result.nodes).toHaveLength(1);
+    });
+
+    it('counts a query that recovery turns into an error as failed (S6)', async () => {
+        const { batchCalls, send, settle, ui } = bootWebview();
+        const batch = makeBatch('q', 3);
+        batch.queries[1] = { ...makeQuery('SET NOCOUNT ON;'), nodes: [] };
+        send({ command: 'refresh', sql: 'three', options: { dialect: 'MySQL', fileName: 'q.sql' }, documentKey: 'file:///q.sql' });
+        await settle();
+        batchCalls[0].result.resolve(batch);
+        await settle();
+        expect(ui.updateErrorBadge).not.toHaveBeenCalled();
+
+        // Opening the empty query starts recovery; the re-parse fails.
+        send({ command: 'switchToQuery', queryIndex: 1 });
+        await settle();
+        batchCalls.find(call => call.sql === 'SET NOCOUNT ON;')!.result.resolve({
+            ...makeBatch('r', 1),
+            queries: [{ ...makeQuery('SET NOCOUNT ON;'), nodes: [], error: 'Unsupported statement' }],
+            errorCount: 1,
+            successCount: 0,
+        });
+        await settle();
+
+        const [lastBatch] = ui.updateBatchTabs.mock.calls[ui.updateBatchTabs.mock.calls.length - 1];
+        expect(lastBatch.errorCount).toBe(1);
+        expect(lastBatch.successCount).toBe(2);
+        expect(lastBatch.parseErrors).toEqual([expect.objectContaining({ queryIndex: 1, message: 'Unsupported statement' })]);
+        expect(ui.updateErrorBadge).toHaveBeenLastCalledWith(1, [expect.objectContaining({ queryIndex: 1 })]);
     });
 });

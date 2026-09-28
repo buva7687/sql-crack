@@ -887,7 +887,7 @@ async function reparseStoredQuery(queryIndex: number, fallbackMessage: string): 
             applyLineOffsetToResult(hydratedQuery, lineOffset);
         }
 
-        owningBatch.queries[queryIndex] = hydratedQuery;
+        replaceQueryResult(owningBatch, queryIndex, hydratedQuery);
         deferredQueryIndexes.delete(queryIndex);
     })();
 
@@ -900,6 +900,52 @@ async function reparseStoredQuery(queryIndex: number, fallbackMessage: string): 
             hydrationPromises.delete(queryIndex);
         }
     }
+}
+
+/**
+ * Replace one query's result in place (hydration, recovery) and keep the
+ * batch's error totals and the toolbar error badge in step with it, using the
+ * same definitions as parseSqlBatch: a query with `error` is failed.
+ */
+function replaceQueryResult(batch: BatchParseResult, queryIndex: number, result: ParseResult): void {
+    batch.queries[queryIndex] = result;
+    const otherErrors = (batch.parseErrors || []).filter(error => error.queryIndex !== queryIndex);
+    if (result.error) {
+        const existing = batch.parseErrors?.find(error => error.queryIndex === queryIndex);
+        const querySql = result.sql || '';
+        otherErrors.push(existing ?? {
+            queryIndex,
+            line: batch.queryLineRanges?.[queryIndex]?.startLine,
+            message: result.error,
+            sql: querySql.substring(0, 500) + (querySql.length > 500 ? '...' : ''),
+        });
+        otherErrors.sort((a, b) => a.queryIndex - b.queryIndex);
+    }
+    batch.parseErrors = otherErrors.length > 0 ? otherErrors : undefined;
+    batch.errorCount = batch.queries.filter(query => query.error).length;
+    batch.successCount = batch.queries.length - batch.errorCount;
+    if (batch === batchResult) {
+        syncErrorBadge();
+    }
+}
+
+function syncErrorBadge(): void {
+    const owningBatch = batchResult;
+    if (!owningBatch || !owningBatch.errorCount) {
+        clearErrorBadge();
+        return;
+    }
+    const errorDetails = (owningBatch.parseErrors || []).map(e => {
+        const lineRange = owningBatch.queryLineRanges?.[e.queryIndex];
+        const sourceLine = extractSourceLineFromParseError(e, lineRange);
+        return {
+            queryIndex: e.queryIndex,
+            message: e.message.length > 100 ? e.message.substring(0, 100) + '...' : e.message,
+            line: e.line,
+            sourceLine
+        };
+    });
+    updateErrorBadge(owningBatch.errorCount, errorDetails);
 }
 
 function recoverQueryVisualization(queryIndex: number): void {
@@ -921,7 +967,7 @@ function recoverQueryVisualization(queryIndex: number): void {
                 return;
             }
             const message = error instanceof Error ? error.message : fallbackMessage;
-            owningBatch.queries[queryIndex] = buildFallbackQueryErrorResult(querySql, message);
+            replaceQueryResult(owningBatch, queryIndex, buildFallbackQueryErrorResult(querySql, message));
             deferredQueryIndexes.delete(queryIndex);
         })
         .finally(() => {
@@ -1711,19 +1757,8 @@ async function visualize(sql: string): Promise<void> {
     }
 
     // Update error badge in toolbar if there are parse errors
+    syncErrorBadge();
     if (batchResult && batchResult.errorCount && batchResult.errorCount > 0) {
-        const errorDetails = batchResult.parseErrors?.map(e => {
-            const lineRange = batchResult?.queryLineRanges?.[e.queryIndex];
-            const sourceLine = extractSourceLineFromParseError(e, lineRange);
-            return {
-                queryIndex: e.queryIndex,
-                message: e.message.length > 100 ? e.message.substring(0, 100) + '...' : e.message,
-                line: e.line,
-                sourceLine
-            };
-        });
-        updateErrorBadge(batchResult.errorCount, errorDetails);
-
         const suggestedDialect = batchResult.parseErrors
             ?.map(error => getSuggestedDialectFromMessage(error.message))
             .find((dialect): dialect is SqlDialect => Boolean(dialect)) ?? null;
@@ -1731,7 +1766,6 @@ async function visualize(sql: string): Promise<void> {
             showDialectSwitchSuggestion(suggestedDialect, sql);
         }
     } else {
-        clearErrorBadge();
         clearDialectSwitchSuggestion();
     }
 
@@ -1847,7 +1881,7 @@ async function performSwitchToQueryIndex(newIndex: number, options: { skipSaveCu
             if (batchResult === owningBatch && parseRequestId === hydrateToken) {
                 const querySql = owningBatch.queries[newIndex]?.sql || '';
                 const msg = error instanceof Error ? error.message : 'Failed to load query details';
-                owningBatch.queries[newIndex] = buildFallbackQueryErrorResult(querySql, msg);
+                replaceQueryResult(owningBatch, newIndex, buildFallbackQueryErrorResult(querySql, msg));
                 deferredQueryIndexes.delete(newIndex);
             }
         } finally {
