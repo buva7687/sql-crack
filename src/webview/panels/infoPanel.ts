@@ -507,6 +507,23 @@ export function updateStatsPanelContent(options: StatsPanelOptions): void {
             copyBtn.style.background = baseBg;
         });
 
+        // Capture the idle label once: a click while "Copied!" is showing must
+        // restore this, not the "Copied!" markup it would otherwise capture.
+        const idleLabel = copyBtn.innerHTML;
+        let restoreTimer: ReturnType<typeof setTimeout> | null = null;
+        const showCopied = (): void => {
+            if (restoreTimer !== null) {
+                clearTimeout(restoreTimer);
+            }
+            copyBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M20 6L9 17l-5-5"/></svg> Copied!';
+            copyBtn.style.color = isDarkTheme ? '#34d399' : '#10b981';
+            restoreTimer = setTimeout(() => {
+                restoreTimer = null;
+                copyBtn.innerHTML = idleLabel;
+                copyBtn.style.color = isDarkTheme ? '#a5b4fc' : '#6366f1';
+            }, 2000);
+        };
+
         copyBtn.addEventListener('click', async (e) => {
             e.stopPropagation();
             const tables = copyBtn.getAttribute('data-tables');
@@ -516,13 +533,7 @@ export function updateStatsPanelContent(options: StatsPanelOptions): void {
 
             try {
                 await navigator.clipboard.writeText(tables);
-                const originalText = copyBtn.innerHTML;
-                copyBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M20 6L9 17l-5-5"/></svg> Copied!';
-                copyBtn.style.color = isDarkTheme ? '#34d399' : '#10b981';
-                setTimeout(() => {
-                    copyBtn.innerHTML = originalText;
-                    copyBtn.style.color = isDarkTheme ? '#a5b4fc' : '#6366f1';
-                }, 2000);
+                showCopied();
             } catch {
                 const textarea = document.createElement('textarea');
                 textarea.value = tables;
@@ -532,13 +543,7 @@ export function updateStatsPanelContent(options: StatsPanelOptions): void {
                 textarea.select();
                 try {
                     document.execCommand('copy');
-                    const originalText = copyBtn.innerHTML;
-                    copyBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12"><path d="M20 6L9 17l-5-5"/></svg> Copied!';
-                    copyBtn.style.color = isDarkTheme ? '#34d399' : '#10b981';
-                    setTimeout(() => {
-                        copyBtn.innerHTML = originalText;
-                        copyBtn.style.color = isDarkTheme ? '#a5b4fc' : '#6366f1';
-                    }, 2000);
+                    showCopied();
                 } finally {
                     document.body.removeChild(textarea);
                 }
