@@ -334,4 +334,32 @@ describe('webview refresh query state (H11, M15)', () => {
         expect(lastBatch.queries).toHaveLength(0);
         expect(lastIndex).toBe(0);
     });
+
+    it('opens Compare against the hydrated query, not its loading placeholder (S5)', async () => {
+        const { batchCalls, send, settle, ui, toolbarCallbacks } = bootWebview();
+        send({ command: 'refresh', sql: 'A', options: { dialect: 'MySQL', fileName: 'big.sql' }, documentKey: 'file:///big.sql' });
+        await settle();
+        batchCalls[0].result.resolve(makeBatch('a', 60));
+        await settle();
+        send({
+            command: 'pinCreated',
+            pinId: 'pin-1',
+            pinnedTabs: [{ id: 'pin-1', name: 'Earlier', sql: 'SELECT pinned FROM t;', dialect: 'MySQL', timestamp: 1 }],
+        });
+
+        send({ command: 'switchToQuery', queryIndex: 5 });
+        await settle();
+        toolbarCallbacks().onToggleCompareMode();
+        await settle();
+        expect(ui.showCompareView).not.toHaveBeenCalled();
+
+        batchCalls.find(call => call.sql === 'SELECT a5 FROM t;')!.result
+            .resolve({ ...makeBatch('h', 1), queries: [makeQuery('SELECT a5 FROM t;')] });
+        await settle();
+
+        expect(ui.showCompareView).toHaveBeenCalledTimes(1);
+        const { right } = ui.showCompareView.mock.calls[0][0];
+        expect(right.result.sql).toBe('SELECT a5 FROM t;');
+        expect(right.result.nodes).toHaveLength(1);
+    });
 });
