@@ -56,7 +56,7 @@ describe('sqlFormatter quoted SQL', () => {
         for (const token of tokens) {
             expect(formatted).toContain(token);
         }
-        expect(formatted.match(/'a  b, AND SELECT'/g)).toHaveLength(2);
+        expect(formatted.match(/'a {2}b, AND SELECT'/g)).toHaveLength(2);
     });
 });
 
