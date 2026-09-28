@@ -459,4 +459,29 @@ describe('webview refresh query state (H11, M15)', () => {
         expect(Math.max(...viewOrder)).toBeGreaterThan(historyOrder[0]);
         expect(renderer.setViewState).toHaveBeenLastCalledWith(viewState);
     });
+
+    it('labels UI-state saves with the document whose result is on screen', async () => {
+        const { batchCalls, send, settle } = bootWebview();
+        const posted = (global as any).window.vscodeApi.postMessage as jest.Mock;
+        const saves = () => posted.mock.calls.map(([message]) => message).filter(message => message.command === 'persistUiState');
+        const waitForDebounce = () => new Promise(resolve => setTimeout(resolve, 200));
+
+        send({ command: 'refresh', sql: 'A', options: { dialect: 'MySQL', fileName: 'a.sql' }, documentKey: 'file:///a.sql' });
+        await settle();
+        batchCalls[0].result.resolve(makeBatch('a', 2));
+        await settle();
+        await waitForDebounce();
+        expect(saves().pop()?.documentKey).toBe('file:///a.sql');
+
+        // Switching documents: until b.sql's parse finishes, a.sql is still on screen.
+        send({ command: 'refresh', sql: 'B', options: { dialect: 'MySQL', fileName: 'b.sql' }, documentKey: 'file:///b.sql' });
+        await settle();
+        await waitForDebounce();
+        expect(saves().pop()?.documentKey).toBe('file:///a.sql');
+
+        batchCalls.find(call => call.sql === 'B')!.result.resolve(makeBatch('b', 2));
+        await settle();
+        await waitForDebounce();
+        expect(saves().pop()?.documentKey).toBe('file:///b.sql');
+    });
 });

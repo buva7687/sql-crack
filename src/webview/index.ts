@@ -205,6 +205,12 @@ let isInactiveEditor = false;
 let persistStateIntervalId: number | null = null;
 let persistStateDebounceId: number | null = null;
 let persistStateDirty = false;
+/**
+ * Document whose parse result is on screen. A refresh switches
+ * window.documentKey before the new parse finishes, and the page being
+ * replaced can still save; the host files each save under this key.
+ */
+let renderedDocumentKey: string | null = window.documentKey ?? window.fileName ?? null;
 let applyInitialStatePending = true;
 let dialectResyncAttempted = false;
 let renderedQueryIndex = 0;
@@ -639,6 +645,7 @@ function persistUiStateNow(): void {
     window.vscodeApi.postMessage({
         command: 'persistUiState',
         state: capturePersistedState(),
+        documentKey: renderedDocumentKey,
     });
 }
 
@@ -1612,6 +1619,7 @@ function createToolbarCallbacks(): ToolbarCallbacks {
 
 async function visualize(sql: string): Promise<void> {
     const requestId = ++parseRequestId;
+    const documentKeyForParse = window.documentKey ?? window.fileName ?? null;
     // Error and empty results below have a single entry, so they fall back to Q1.
     let retainedQueryIndex = 0;
     cancelQueryLoading();
@@ -1644,6 +1652,7 @@ async function visualize(sql: string): Promise<void> {
                 complexityScore: 0
             }
         };
+        renderedDocumentKey = documentKeyForParse;
         currentQueryIndex = 0;
         updateBatchTabsUI();
         renderCurrentQuery();
@@ -1736,6 +1745,8 @@ async function visualize(sql: string): Promise<void> {
             hideGlobalLoading();
         }
     }
+    // Stale and cancelled parses returned above, so this result is on screen.
+    renderedDocumentKey = documentKeyForParse;
 
     // Filter out dead column hints/warnings if the setting is disabled
     // This addresses false positives where columns are used by the application layer

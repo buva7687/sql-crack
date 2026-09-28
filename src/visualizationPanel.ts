@@ -109,6 +109,12 @@ export class VisualizationPanel {
     private _isPinned: boolean = false;
     private _pinId: string | undefined;
     private _sourceDocumentUri: vscode.Uri | undefined; // Track source document for navigation
+    /**
+     * UI-state keys of documents this panel showed recently, by the webview's
+     * documentKey. Switching documents updates the panel before the old page
+     * (or an in-flight save) stops persisting, so saves name their document.
+     */
+    private readonly _uiStateKeysByDocument = new Map<string, string>();
     private _disposed: boolean = false;
     // One-shot first-run flag, resolved (and persisted) once at construction so
     // the first-run state is computed without mutating globalState during render.
@@ -139,12 +145,8 @@ export class VisualizationPanel {
         return store[key] ?? null;
     }
 
-    private static _persistUiState(
-        options: { documentUri?: vscode.Uri; isPinned: boolean; pinId?: string; fileName?: string },
-        state: unknown
-    ): void {
+    private static _persistUiState(key: string | null, state: unknown): void {
         if (!VisualizationPanel._context) { return; }
-        const key = VisualizationPanel._createUiStateKey(options);
         if (!key) { return; }
         const store = VisualizationPanel._context.workspaceState.get<Record<string, unknown>>(VisualizationPanel._uiStateStoreKey) || {};
         store[key] = state;
@@ -320,6 +322,7 @@ export class VisualizationPanel {
             });
             VisualizationPanel.currentPanel._currentSql = sqlCode;
             VisualizationPanel.currentPanel._currentOptions = options;
+            VisualizationPanel.currentPanel._rememberUiStateKey();
             VisualizationPanel.currentPanel._sourceDocumentUri = options.documentUri;
             VisualizationPanel.currentPanel._isStale = false;
         }
@@ -441,6 +444,7 @@ export class VisualizationPanel {
         this._currentOptions = options;
         this._isPinned = isPinned;
         this._pinId = pinId;
+        this._rememberUiStateKey();
 
         // Resolve first-run state once, here, and persist it — so HTML rendering
         // stays a pure read of this instance flag rather than a globalState write.
@@ -519,12 +523,7 @@ export class VisualizationPanel {
                         }
                         return;
                     case 'persistUiState':
-                        VisualizationPanel._persistUiState({
-                            documentUri: this._sourceDocumentUri,
-                            isPinned: this._isPinned,
-                            pinId: this._pinId,
-                            fileName: this._currentOptions.fileName
-                        }, message.state);
+                        VisualizationPanel._persistUiState(this._resolveUiStateKey(message.documentKey), message.state);
                         return;
                     case 'changeViewLocation':
                         this._changeViewLocation(message.location);
@@ -768,10 +767,49 @@ export class VisualizationPanel {
     private _update(sqlCode: string, options: VisualizationOptions) {
         this._currentSql = sqlCode;
         this._currentOptions = options;
+        this._rememberUiStateKey();
         this._sourceDocumentUri = options.documentUri;
         this._isStale = false;
         const webview = this._panel.webview;
         this._panel.webview.html = this._getHtmlForWebview(webview, sqlCode, options);
+    }
+
+    /** Record the UI-state key for the document this panel now shows. */
+    private _rememberUiStateKey(): void {
+        const options = this._currentOptions;
+        // Mirrors the documentKey the page receives (see _getHtmlForWebview and refresh()).
+        const documentKey = options.documentUri?.toString() ?? options.fileName ?? null;
+        const key = VisualizationPanel._createUiStateKey({
+            documentUri: options.documentUri,
+            isPinned: this._isPinned,
+            pinId: this._pinId,
+            fileName: options.fileName,
+        });
+        if (!documentKey || !key) { return; }
+        this._uiStateKeysByDocument.delete(documentKey);
+        this._uiStateKeysByDocument.set(documentKey, key);
+        // Only saves still in flight from recently shown documents need this.
+        while (this._uiStateKeysByDocument.size > 8) {
+            const oldest = this._uiStateKeysByDocument.keys().next().value as string;
+            this._uiStateKeysByDocument.delete(oldest);
+        }
+    }
+
+    /**
+     * Storage key for a save from the page. A save that names its document is
+     * filed under that document; one naming a document this panel no longer
+     * tracks is dropped rather than written over the current document's state.
+     */
+    private _resolveUiStateKey(documentKey: unknown): string | null {
+        if (typeof documentKey === 'string') {
+            return this._uiStateKeysByDocument.get(documentKey) ?? null;
+        }
+        return VisualizationPanel._createUiStateKey({
+            documentUri: this._sourceDocumentUri,
+            isPinned: this._isPinned,
+            pinId: this._pinId,
+            fileName: this._currentOptions.fileName,
+        });
     }
 
     private _readRuntimeConfig(options: VisualizationOptions): SqlFlowRuntimeConfig {

@@ -113,6 +113,47 @@ describe('VisualizationPanel behavior', () => {
         expect(unpinCase).toContain('VisualizationPanel.broadcastPinnedTabs();');
     });
 
+    it('files each UI-state save under the document it belongs to', () => {
+        const proto = VisualizationPanel.prototype as any;
+        const panel: any = { _isPinned: false, _pinId: undefined, _uiStateKeysByDocument: new Map() };
+        const show = (path: string) => {
+            panel._currentOptions = { documentUri: vscode.Uri.file(path), fileName: path.split('/').pop(), dialect: 'MySQL' };
+            panel._sourceDocumentUri = panel._currentOptions.documentUri;
+            proto._rememberUiStateKey.call(panel);
+        };
+
+        show('/w/a.sql');
+        show('/w/b.sql');
+        const a = vscode.Uri.file('/w/a.sql').toString();
+        const b = vscode.Uri.file('/w/b.sql').toString();
+
+        // The page for a.sql can still save after the panel switched to b.sql.
+        expect(proto._resolveUiStateKey.call(panel, a)).toBe(`doc:${a}`);
+        expect(proto._resolveUiStateKey.call(panel, b)).toBe(`doc:${b}`);
+        // A document the panel no longer tracks is dropped, not filed under b.sql.
+        expect(proto._resolveUiStateKey.call(panel, 'file:///w/evicted.sql')).toBeNull();
+        // Saves without a document key keep the previous behaviour.
+        expect(proto._resolveUiStateKey.call(panel, undefined)).toBe(`doc:${b}`);
+
+        for (let index = 0; index < 10; index++) {
+            show(`/w/q${index}.sql`);
+        }
+        expect(panel._uiStateKeysByDocument.size).toBe(8);
+        expect(proto._resolveUiStateKey.call(panel, a)).toBeNull();
+    });
+
+    it('keys pinned panel saves by pin id', () => {
+        const proto = VisualizationPanel.prototype as any;
+        const panel: any = {
+            _isPinned: true,
+            _pinId: 'pin-7',
+            _uiStateKeysByDocument: new Map(),
+            _currentOptions: { documentUri: vscode.Uri.file('/w/a.sql'), fileName: 'a.sql', dialect: 'MySQL' },
+        };
+        proto._rememberUiStateKey.call(panel);
+        expect(proto._resolveUiStateKey.call(panel, vscode.Uri.file('/w/a.sql').toString())).toBe('pin:pin-7');
+    });
+
     it('falls back to the opened dialect and clamps advanced runtime limits', () => {
         (vscode as any).__setMockConfig?.('sqlCrack', {
             'advanced.maxFileSizeKB': 2,

@@ -19,7 +19,7 @@ export type SqlFlowWebviewMessage =
     | { command: 'error'; text: string }
     | { command: 'info'; text: string }
     | { command: 'requestRefresh' }
-    | { command: 'persistUiState'; state: unknown }
+    | { command: 'persistUiState'; state: unknown; documentKey?: string | null }
     | { command: 'goToLine'; line: number }
     | { command: 'traceInWorkspaceLineage'; tableName: string; nodeType: 'table' | 'view' }
     | { command: 'requestFullscreen'; enable: boolean }
