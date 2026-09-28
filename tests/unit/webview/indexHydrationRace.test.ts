@@ -396,6 +396,32 @@ describe('webview refresh query state (H11, M15)', () => {
         expect(ui.updateErrorBadge).toHaveBeenLastCalledWith(1, [expect.objectContaining({ queryIndex: 1 })]);
     });
 
+    it('refreshes query tabs when hydration fails after switching away (S6)', async () => {
+        const { batchCalls, send, settle, ui } = bootWebview();
+        send({ command: 'refresh', sql: 'A', options: { dialect: 'MySQL', fileName: 'big.sql' } });
+        await settle();
+        batchCalls[0].result.resolve(makeBatch('a', 60));
+        await settle();
+        send({ command: 'switchToQuery', queryIndex: 1 });
+        await settle();
+        send({ command: 'switchToQuery', queryIndex: 0 });
+        await settle();
+        const updatesBeforeFailure = ui.updateBatchTabs.mock.calls.length;
+        batchCalls.find(call => call.sql === 'SELECT a1 FROM t;')!.result.resolve({
+            ...makeBatch('h', 1),
+            queries: [{ ...makeQuery('SELECT a1 FROM t;'), nodes: [], error: 'Unsupported statement' }],
+            errorCount: 1,
+            successCount: 0,
+        });
+        await settle();
+
+        expect(ui.updateErrorBadge).toHaveBeenLastCalledWith(1, expect.any(Array));
+        expect(ui.updateBatchTabs.mock.calls.length).toBeGreaterThan(updatesBeforeFailure);
+        const [lastBatch, lastIndex] = ui.updateBatchTabs.mock.calls[ui.updateBatchTabs.mock.calls.length - 1];
+        expect(lastBatch.errorCount).toBe(1);
+        expect(lastIndex).toBe(0);
+    });
+
     it('applies the persisted viewport after restoring layout history (S8)', async () => {
         const viewState = { scale: 0.72, offsetX: -90, offsetY: 350 };
         const { batchCalls, renderer, send, settle } = bootWebview({

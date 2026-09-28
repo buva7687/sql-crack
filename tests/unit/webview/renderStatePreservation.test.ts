@@ -16,9 +16,8 @@ const renderBody = rendererSource.slice(renderStart, rendererSource.indexOf('\n}
 
 describe('render() state preservation', () => {
     it('does not re-run a non-vertical layout over an unchanged graph (S2)', () => {
-        expect(renderBody).toContain(
-            'const reRendersSameGraph = !shouldResetCloudState && clustered.nodes === result.nodes;'
-        );
+        expect(renderBody).toContain('preserveProjectedNodePositions(clustered.nodes, clustered.edges, renderNodes, renderEdges)');
+        expect(renderBody.indexOf('preserveProjectedNodePositions(')).toBeLessThan(renderBody.indexOf('renderNodes = clustered.nodes;'));
         expect(renderBody).toContain("if (initialLayout !== 'vertical' && !reRendersSameGraph) {");
         // The layout switch must stay behind that guard.
         const guard = renderBody.indexOf('!reRendersSameGraph');

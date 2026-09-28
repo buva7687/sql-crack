@@ -455,6 +455,11 @@ describe('Regex fallback: SELECT ... INTO procedural variables', () => {
     const tables = (sql: string, dialect: SqlDialect) =>
         regexFallbackParse(sql, dialect).nodes.filter(node => node.type === 'table').map(node => node.label);
 
+    it('does not treat declaration text inside a literal as a real variable', () => {
+        const sql = "SELECT 'DECLARE archive INT' AS note, * INTO archive FROM orders OPTION (RECOMPILE)";
+        expect(tables(sql, 'TransactSQL')).toEqual(['orders', 'archive']);
+    });
+
     it('does not show PL/SQL variables and parameters as tables', () => {
         const sql = [
             'CREATE OR REPLACE PROCEDURE refresh_stats(p_region IN VARCHAR2, p_total OUT NUMBER) IS',

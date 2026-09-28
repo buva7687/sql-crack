@@ -49,8 +49,7 @@ function collectSelectNodes(nodes: FlowNode[]): FlowNode[] {
     return selectNodes;
 }
 
-function extractCteBodyScope(fullNormalizedSql: string, cteName: string): { bodySql: string; downstreamSql: string } | null {
-    const maskedSql = maskStringsAndComments(fullNormalizedSql);
+function extractCteBodyScope(fullNormalizedSql: string, maskedSql: string, cteName: string): { bodySql: string; downstreamSql: string } | null {
     const ctePattern = new RegExp(`\\b${escapeRegex(cteName)}\\b\\s+as\\s*\\(`, 'i');
     const cteMatch = ctePattern.exec(maskedSql);
     if (!cteMatch) {
@@ -521,6 +520,7 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
     // Every intermediate SELECT checks the same source statement. Normalize
     // it once; large CTE chains otherwise repeat this full scan per CTE.
     const fullNormalizedSql = stripSqlComments(sql).replace(/\s+/g, ' ').trim();
+    let maskedNormalizedSql: string | undefined;
     selectNodes.forEach(selectNode => {
         if (!selectNode.columns || selectNode.columns.length === 0) {return;}
 
@@ -543,7 +543,8 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
             if (parentNode?.type === 'cte' && parentNode.label) {
                 const cteName = extractCteName(parentNode.label);
                 if (cteName) {
-                    const cteScope = extractCteBodyScope(fullNormalizedSql, cteName);
+                    maskedNormalizedSql ??= maskStringsAndComments(fullNormalizedSql);
+                    const cteScope = extractCteBodyScope(fullNormalizedSql, maskedNormalizedSql, cteName);
                     if (cteScope) {
                         normalizedSql = cteScope.bodySql;
                         const cteQualifiers = collectCteReferenceQualifiers(cteScope.downstreamSql, cteName);

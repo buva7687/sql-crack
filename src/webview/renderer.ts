@@ -105,6 +105,7 @@ import {
 import {
     applyClusteringFeature,
     preCalculateExpandableDimensionsFeature,
+    preserveProjectedNodePositions,
 } from './rendering/clusterProjection';
 import { getScrollbarColors, getComponentUiColors, COLUMN_LINEAGE_BANNER_THEME } from './constants/colors';
 import type { ColorblindMode } from '../shared/theme';
@@ -1781,6 +1782,8 @@ export function render(result: ParseResult, options?: RenderOptions): void {
     preCalculateExpandableDimensions(result.nodes);
 
     const clustered = applyClustering(result.nodes, result.edges);
+    const reRendersSameGraph = !shouldResetCloudState
+        && preserveProjectedNodePositions(clustered.nodes, clustered.edges, renderNodes, renderEdges);
     renderNodes = clustered.nodes;
     renderEdges = clustered.edges;
     renderNodeMap = new Map(renderNodes.map(node => [node.id, node]));
@@ -1790,10 +1793,10 @@ export function render(result: ParseResult, options?: RenderOptions): void {
     // create hundreds of off-screen DOM nodes only to prune them a frame later.
     // Re-rendering the same graph (theme or grid/accent setting changes) keeps
     // its positions, which already carry this layout and any dragged nodes;
-    // switchLayout() lays out currentNodes itself. Collapsed clusters are
-    // rebuilt each render, so graphs that substitute them still re-layout.
+    // switchLayout() lays out currentNodes itself. Rebuilt cluster nodes keep
+    // their positions too; expanding or collapsing changes the projection
+    // and still applies the selected layout.
     const initialLayout = state.layoutType || 'vertical';
-    const reRendersSameGraph = !shouldResetCloudState && clustered.nodes === result.nodes;
     if (initialLayout !== 'vertical' && !reRendersSameGraph) {
         const bottomUp = window.flowDirection === 'bottom-up';
         switch (initialLayout) {

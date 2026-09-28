@@ -57,7 +57,8 @@ describe('parsing edge hardening guards', () => {
     it('masks strings and comments before scanning CTE bodies in advanced issue detection', () => {
         const source = readFileSync(join(__dirname, '../../../src/webview/parser/hints/advancedIssues.ts'), 'utf8');
         expect(source).toContain("import { maskStringsAndComments } from '../dialects/preprocessing';");
-        expect(source).toContain('const maskedSql = maskStringsAndComments(fullNormalizedSql);');
+        expect(source).toContain('maskedNormalizedSql ??= maskStringsAndComments(fullNormalizedSql);');
+        expect(source).toContain('extractCteBodyScope(fullNormalizedSql, maskedNormalizedSql, cteName)');
         expect(source).toContain('const cteMatch = ctePattern.exec(maskedSql);');
     });
 

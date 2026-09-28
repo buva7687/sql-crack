@@ -256,7 +256,9 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
     // In procedural code `SELECT ... INTO name` (and FETCH ... INTO) assigns a
     // declared variable or parameter; only INSERT/REPLACE/MERGE INTO, or an
     // undeclared name (T-SQL/PostgreSQL SELECT INTO new_table), writes a table.
-    const declaredVariables = collectDeclaredVariables(commentStripped);
+    // Declaration keywords inside literals or quoted identifiers cannot
+    // declare a variable that suppresses a real SELECT INTO table target.
+    const declaredVariables = collectDeclaredVariables(quotedMasked);
     const isVariableIntoTarget = (matchIndex: number, name: string): boolean =>
         declaredVariables.has(name.toLowerCase())
         && !/\b(?:INSERT|REPLACE|MERGE)(?:\s+(?:IGNORE|OVERWRITE|ALL|FIRST))?\s*$/i.test(commentStripped.slice(Math.max(0, matchIndex - 40), matchIndex));

@@ -13,6 +13,36 @@ interface ApplyClusteringFeatureOptions {
     onClustersUpdated: (clusters: NodeCluster[], clusterNodeMap: Map<string, NodeCluster>) => void;
 }
 
+/** Keep dragged positions when a rerender recreates the same cluster projection. */
+export function preserveProjectedNodePositions(
+    nodes: FlowNode[],
+    edges: FlowEdge[],
+    previousNodes: FlowNode[],
+    previousEdges: FlowEdge[]
+): boolean {
+    if (nodes.length !== previousNodes.length || edges.length !== previousEdges.length) {
+        return false;
+    }
+
+    const previousById = new Map(previousNodes.map(node => [node.id, node]));
+    const previousEdgeById = new Map(previousEdges.map(edge => [edge.id, edge]));
+    if (nodes.some(node => !previousById.has(node.id)) || edges.some(edge => {
+        const previous = previousEdgeById.get(edge.id);
+        return !previous || previous.source !== edge.source || previous.target !== edge.target;
+    })) {
+        return false;
+    }
+
+    // Visible nodes are reused, but collapsed cluster nodes are freshly built
+    // from their members' bounds and need their rendered positions restored.
+    for (const node of nodes) {
+        const previous = previousById.get(node.id)!;
+        node.x = previous.x;
+        node.y = previous.y;
+    }
+    return true;
+}
+
 export function preCalculateExpandableDimensionsFeature(nodes: FlowNode[]): void {
     for (const node of nodes) {
         if ((node.type === 'cte' || node.type === 'subquery') && node.children && node.children.length > 0) {

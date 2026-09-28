@@ -934,6 +934,9 @@ function replaceQueryResult(batch: BatchParseResult, queryIndex: number, result:
     batch.successCount = batch.queries.length - batch.errorCount;
     if (batch === batchResult) {
         syncErrorBadge();
+        // A background hydration can settle after the user switches away;
+        // its switch then skips rendering, but the tab status still changed.
+        updateBatchTabsUI();
     }
 }
 
