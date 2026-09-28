@@ -1723,6 +1723,7 @@ export function render(result: ParseResult, options?: RenderOptions): void {
         renderError(result.error, result.errorSourceLine);
         updateStatsPanel();
         updateHintsPanel();
+        refreshVisibleSqlPreview();
         hideTooltip();
         hideContextMenu();
         updateMinimap();
@@ -1745,6 +1746,7 @@ export function render(result: ParseResult, options?: RenderOptions): void {
         renderError('No visualization data');
         updateStatsPanel();
         updateHintsPanel();
+        refreshVisibleSqlPreview();
         hideTooltip();
         hideContextMenu();
         updateMinimap();
@@ -1768,8 +1770,13 @@ export function render(result: ParseResult, options?: RenderOptions): void {
     // Parser coordinates are vertical. Apply the configured layout to the data
     // before choosing the first visible subset so non-vertical layouts do not
     // create hundreds of off-screen DOM nodes only to prune them a frame later.
+    // Re-rendering the same graph (theme or grid/accent setting changes) keeps
+    // its positions, which already carry this layout and any dragged nodes;
+    // switchLayout() lays out currentNodes itself. Collapsed clusters are
+    // rebuilt each render, so graphs that substitute them still re-layout.
     const initialLayout = state.layoutType || 'vertical';
-    if (initialLayout !== 'vertical') {
+    const reRendersSameGraph = !shouldResetCloudState && clustered.nodes === result.nodes;
+    if (initialLayout !== 'vertical' && !reRendersSameGraph) {
         const bottomUp = window.flowDirection === 'bottom-up';
         switch (initialLayout) {
             case 'horizontal':
@@ -1831,10 +1838,7 @@ export function render(result: ParseResult, options?: RenderOptions): void {
     updateStatsPanel();
     updateHintsPanel();
 
-    // Update SQL preview if visible
-    if (sqlPreviewPanel && sqlPreviewPanel.style.visibility !== 'hidden') {
-        updateSqlPreview();
-    }
+    refreshVisibleSqlPreview();
 
     // Fit view
     if (!canVirtualizeOnFirstPaint) {
@@ -3307,6 +3311,13 @@ export function isSqlPreviewVisible(): boolean {
         return false;
     }
     return !(sqlPreviewPanel.style.visibility === 'hidden' || sqlPreviewPanel.style.opacity === '0');
+}
+
+/** Keep an open SQL preview on the statement being rendered, including error renders. */
+function refreshVisibleSqlPreview(): void {
+    if (sqlPreviewPanel && sqlPreviewPanel.style.visibility !== 'hidden') {
+        updateSqlPreview();
+    }
 }
 
 function updateSqlPreview(): void {
