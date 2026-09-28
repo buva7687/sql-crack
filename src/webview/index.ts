@@ -638,15 +638,28 @@ function capturePersistedState(): PersistedWebviewState {
     };
 }
 
-function persistUiStateNow(): void {
-    if (!window.vscodeApi) {
-        return;
+/**
+ * Whether the on-screen state may be saved. Until the saved state is restored
+ * the page shows defaults, and while a refresh loads another document the
+ * state is already reset for it but still shows the previous document's
+ * result; saving either would overwrite a document's real state.
+ */
+function canPersistUiState(): boolean {
+    return !applyInitialStatePending
+        && renderedDocumentKey === (window.documentKey ?? window.fileName ?? null);
+}
+
+/** Returns false when saving is deferred (see canPersistUiState). */
+function persistUiStateNow(): boolean {
+    if (!window.vscodeApi || !canPersistUiState()) {
+        return false;
     }
     window.vscodeApi.postMessage({
         command: 'persistUiState',
         state: capturePersistedState(),
         documentKey: renderedDocumentKey,
     });
+    return true;
 }
 
 function schedulePersistUiState(delayMs = 150): void {
@@ -659,8 +672,9 @@ function schedulePersistUiState(delayMs = 150): void {
     }
     persistStateDebounceId = window.setTimeout(() => {
         persistStateDebounceId = null;
-        persistStateDirty = false;
-        persistUiStateNow();
+        if (persistUiStateNow()) {
+            persistStateDirty = false;
+        }
     }, delayMs);
 }
 
@@ -717,7 +731,12 @@ async function applyInitialUiStateIfAvailable(): Promise<void> {
         return;
     }
     const state = parseInitialUiState(window.initialUiState);
-    if (!state || batchResult.queries.length === 0) {
+    if (!state) {
+        // Nothing (valid) to restore, so saving can start.
+        applyInitialStatePending = false;
+        return;
+    }
+    if (batchResult.queries.length === 0) {
         return;
     }
 
@@ -1120,6 +1139,13 @@ function handleRefresh(
     // clamps it to the new statement count); a different document starts at Q1.
     const nextDocumentKey = documentKey ?? options.fileName ?? null;
     if (nextDocumentKey !== (window.documentKey ?? window.fileName ?? null)) {
+        // Save the outgoing document's state before resetting it for the new
+        // one; saves then pause until the new document's result is on screen.
+        if (persistStateDebounceId !== null) {
+            window.clearTimeout(persistStateDebounceId);
+            persistStateDebounceId = null;
+        }
+        persistUiStateNow();
         currentQueryIndex = 0;
     }
     window.documentKey = nextDocumentKey;
@@ -1329,9 +1355,8 @@ function init(): void {
         window.clearInterval(persistStateIntervalId);
     }
     persistStateIntervalId = window.setInterval(() => {
-        if (batchResult && persistStateDirty) {
+        if (batchResult && persistStateDirty && persistUiStateNow()) {
             persistStateDirty = false;
-            persistUiStateNow();
         }
     }, 1500);
 

@@ -280,10 +280,15 @@ describe('persisted view state validation', () => {
                 /async function applyInitialUiStateIfAvailable\(\): Promise<void> \{[\s\S]*?\n}\n/
             )?.[0];
             expect(functionBody).toBeDefined();
-            expect(functionBody!.indexOf('applyInitialStatePending = false;'))
+            // A valid saved state stays pending across the dialect re-parse.
+            expect(functionBody!.lastIndexOf('applyInitialStatePending = false;'))
                 .toBeGreaterThan(functionBody!.indexOf('state.currentDialect !== lastParsedDialect'));
-            expect(functionBody!.indexOf('applyInitialStatePending = false;'))
+            expect(functionBody!.lastIndexOf('applyInitialStatePending = false;'))
                 .toBeGreaterThan(functionBody!.indexOf('void visualize(sql);'));
+            // The only earlier release is for a missing or invalid saved state,
+            // which has nothing to restore (saves are held while it is pending).
+            const earlyRelease = functionBody!.indexOf('applyInitialStatePending = false;');
+            expect(functionBody!.slice(0, earlyRelease)).toMatch(/if \(!state\) \{[^}]*$/);
         });
 
         it('updateTransform sanitizes geometry before writing the SVG transform', () => {

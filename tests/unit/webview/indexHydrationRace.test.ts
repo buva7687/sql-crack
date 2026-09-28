@@ -126,6 +126,7 @@ describe('webview refresh query state (H11, M15)', () => {
         jest.doMock('../../../src/webview/minimapVisibility', () => proxyModule());
 
         let messageHandler: ((event: { data: unknown }) => void) | undefined;
+        const windowListeners = new Map<string, () => void>();
         (global as any).document = {
             readyState: 'complete',
             getElementById: jest.fn(() => createFakeElement()),
@@ -141,6 +142,7 @@ describe('webview refresh query state (H11, M15)', () => {
         };
         (global as any).window = {
             addEventListener: jest.fn((type: string, handler: (event: { data: unknown }) => void) => {
+                windowListeners.set(type, handler as () => void);
                 if (type === 'message') {
                     messageHandler = handler;
                 }
@@ -173,7 +175,11 @@ describe('webview refresh query state (H11, M15)', () => {
         };
         const send = (data: unknown) => messageHandler!({ data });
         const toolbarCallbacks = () => (ui.createToolbar.mock.calls[0] as unknown[] | undefined)?.[1] as any;
-        return { batchCalls, render, renderer, send, settle, ui, toolbarCallbacks };
+        const fireWindowEvent = (type: string) => windowListeners.get(type)?.();
+        const saves = () => ((global as any).window.vscodeApi.postMessage as jest.Mock).mock.calls
+            .map(([message]) => message)
+            .filter(message => message.command === 'persistUiState');
+        return { batchCalls, render, renderer, send, settle, ui, toolbarCallbacks, fireWindowEvent, saves };
     };
 
     it('does not write a hydration started before the refreshed result into that result', async () => {
@@ -483,5 +489,62 @@ describe('webview refresh query state (H11, M15)', () => {
         await settle();
         await waitForDebounce();
         expect(saves().pop()?.documentKey).toBe('file:///b.sql');
+    });
+
+    it('does not overwrite saved state when the page closes before restoring it', async () => {
+        const viewState = { scale: 0.72, offsetX: -90, offsetY: 350 };
+        const { batchCalls, send, settle, fireWindowEvent, saves } = bootWebview({
+            initialUiState: {
+                version: 1, currentDialect: 'MySQL', currentQueryIndex: 2, userExplicitlySetDialect: false,
+                compareModeActive: false, activeTabId: null, queryViewStates: [{ queryIndex: 2, viewState }],
+                renderer: {
+                    viewState, layout: 'vertical', legendVisible: true, hintsVisible: true, sqlPreviewVisible: false,
+                    columnFlowsVisible: false, focusMode: 'all', focusModeEnabled: false, layoutHistory: null,
+                },
+            },
+        });
+        send({ command: 'refresh', sql: 'A', options: { dialect: 'MySQL', fileName: 'a.sql' }, documentKey: 'file:///a.sql' });
+        await settle();
+        await new Promise(resolve => setTimeout(resolve, 200));
+
+        // Closed while the first parse is still running: the saved Q3 state
+        // has not been restored, so nothing may be written over it.
+        fireWindowEvent('beforeunload');
+        expect(saves()).toHaveLength(0);
+
+        batchCalls[0].result.resolve(makeBatch('a', 3));
+        await settle();
+        await new Promise(resolve => setTimeout(resolve, 200));
+        expect(saves().pop()).toEqual(expect.objectContaining({
+            documentKey: 'file:///a.sql',
+            state: expect.objectContaining({ currentQueryIndex: 2 }),
+        }));
+    });
+
+    it('saves the outgoing document before a refresh resets it for another document', async () => {
+        const { batchCalls, send, settle, saves } = bootWebview();
+        const waitForDebounce = () => new Promise(resolve => setTimeout(resolve, 200));
+        send({ command: 'refresh', sql: 'A', options: { dialect: 'MySQL', fileName: 'a.sql' }, documentKey: 'file:///a.sql' });
+        await settle();
+        batchCalls[0].result.resolve(makeBatch('a', 3));
+        await settle();
+        send({ command: 'switchToQuery', queryIndex: 2 });
+        await settle();
+
+        send({ command: 'refresh', sql: 'B', options: { dialect: 'MySQL', fileName: 'b.sql' }, documentKey: 'file:///b.sql' });
+        await settle();
+        await waitForDebounce();
+
+        // a.sql's save carries its own Q3, not the Q1 the switch reset to.
+        const aSaves = saves().filter(message => message.documentKey === 'file:///a.sql');
+        expect(aSaves.pop()?.state.currentQueryIndex).toBe(2);
+
+        batchCalls.find(call => call.sql === 'B')!.result.resolve(makeBatch('b', 2));
+        await settle();
+        await waitForDebounce();
+        expect(saves().pop()).toEqual(expect.objectContaining({
+            documentKey: 'file:///b.sql',
+            state: expect.objectContaining({ currentQueryIndex: 0 }),
+        }));
     });
 });
