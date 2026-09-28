@@ -1700,6 +1700,10 @@ async function visualize(sql: string): Promise<void> {
         const message = hasExecutableSql(sql)
             ? 'No SQL statements could be parsed from this input.'
             : 'No executable SQL found. File appears to contain only comments or whitespace.';
+        // Drop the previous result's tabs; they would stay clickable and
+        // report "N ok" beside this error.
+        currentQueryIndex = 0;
+        updateBatchTabsUI();
         updateErrorBadge(1, [{ queryIndex: 0, message }]);
         render(buildFallbackQueryErrorResult(sql, message));
         schedulePersistUiState();

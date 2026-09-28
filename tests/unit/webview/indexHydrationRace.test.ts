@@ -109,6 +109,7 @@ describe('webview refresh query state (H11, M15)', () => {
             isDarkTheme: jest.fn(() => true),
         }));
         const ui = {
+            updateBatchTabs: jest.fn(),
             createToolbar: jest.fn(() => ({ cleanup: jest.fn() })),
             isCompareViewActive: jest.fn(() => false),
             showCompareView: jest.fn(),
@@ -313,5 +314,24 @@ describe('webview refresh query state (H11, M15)', () => {
         await settle();
 
         expect(render.mock.calls[render.mock.calls.length - 1]?.[0]?.sql).toBe('SELECT a1 FROM t;');
+    });
+
+    it('hides stale query tabs when a refresh parses zero statements (S4)', async () => {
+        const { batchCalls, send, settle, ui } = bootWebview();
+        send({ command: 'refresh', sql: 'three', options: { dialect: 'MySQL', fileName: 'q.sql' }, documentKey: 'file:///q.sql' });
+        await settle();
+        batchCalls[0].result.resolve(makeBatch('q', 3));
+        await settle();
+        send({ command: 'switchToQuery', queryIndex: 2 });
+        await settle();
+
+        send({ command: 'refresh', sql: '-- c\n;', options: { dialect: 'MySQL', fileName: 'q.sql' }, documentKey: 'file:///q.sql' });
+        await settle();
+        batchCalls[batchCalls.length - 1].result.resolve({ ...makeBatch('none', 0), successCount: 0 });
+        await settle();
+
+        const [lastBatch, lastIndex] = ui.updateBatchTabs.mock.calls[ui.updateBatchTabs.mock.calls.length - 1];
+        expect(lastBatch.queries).toHaveLength(0);
+        expect(lastIndex).toBe(0);
     });
 });
