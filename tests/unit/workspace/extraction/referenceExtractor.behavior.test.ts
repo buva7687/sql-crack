@@ -87,6 +87,19 @@ describe('ReferenceExtractor behavioral coverage', () => {
         ]));
     });
 
+    it('attributes qualified columns to the correct alias in a self-join', () => {
+        const refs = extractor.extractReferences(
+            'SELECT o1.id, o2.parent_id FROM orders o1 JOIN orders o2 ON o1.id = o2.parent_id WHERE o1.status = 1',
+            'query.sql',
+            'MySQL'
+        );
+        const first = refs.find(ref => ref.alias === 'o1');
+        const second = refs.find(ref => ref.alias === 'o2');
+
+        expect(first?.columns?.map(col => col.tableAlias)).toEqual(['o1', 'o1']);
+        expect(second?.columns?.map(col => col.tableAlias)).toEqual(['o2']);
+    });
+
     it('preserves schema-qualified names and schema metadata', () => {
         const refs = extractor.extractReferences(
             'SELECT * FROM analytics.users u JOIN sales.orders o ON u.id = o.user_id',

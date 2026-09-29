@@ -2579,6 +2579,15 @@ export class ReferenceExtractor {
     ): boolean {
         if (!tableName) {return true;} // If no table specified, include all columns
 
+        // An explicit alias identifies one FROM item, even when several items
+        // resolve to the same physical table (for example a self-join).
+        if (col.tableAlias && tableAliases.has(col.tableAlias)) {
+            return col.tableAlias === tableAlias;
+        }
+        if (col.tableName && tableAliases.has(col.tableName)) {
+            return col.tableName === tableAlias;
+        }
+
         // Check if column explicitly references this table
         if (col.tableName === tableName) {
             return true;
@@ -2587,14 +2596,6 @@ export class ReferenceExtractor {
         // Check if column references this table's alias
         if (col.tableAlias === tableAlias) {
             return true;
-        }
-
-        // Check if column's table name resolves to this table via alias
-        if (col.tableName && tableAliases.has(col.tableName)) {
-            const resolved = tableAliases.get(col.tableName);
-            if (resolved === tableName) {
-                return true;
-            }
         }
 
         // If column has no table qualifier, it might belong to this table
