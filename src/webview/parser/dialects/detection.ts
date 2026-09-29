@@ -249,7 +249,9 @@ export function detectDialect(sql: string): DialectDetectionResult {
     if (syntax.hasCreateOrReplaceTable) { addScore('Snowflake', 2); }
     if (syntax.hasQualify) { addScore('Snowflake', 2); }
     if (syntax.hasMergeInto) { addScore('Snowflake'); }
-    if (syntax.hasThreePartNames) { addScore('Snowflake', 3); }
+    // Three-part names are also valid in T-SQL and Redshift. They can support
+    // another Snowflake signal, but cannot identify Snowflake on their own.
+    if (syntax.hasThreePartNames) { addScore('Snowflake'); }
     if (syntax.hasIlike) { addScore('Snowflake'); }
 
     if (syntax.hasBigQueryStruct) { addScore('BigQuery'); }
