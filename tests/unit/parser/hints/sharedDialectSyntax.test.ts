@@ -26,4 +26,30 @@ describe('shared dialect syntax does not suggest a wrong switch', () => {
         expect(detectDialect("SELECT doc->>'$.name' FROM t").dialect).not.toBe('PostgreSQL');
         expect(detectDialect('SELECT f(a => 1)').dialect).not.toBe('Snowflake');
     });
+
+    it('warns for Oracle-style functions under MySQL while accepting compatible dialects', () => {
+        expect(messages('SELECT NVL(a, b), DECODE(status, 1, 2) FROM t', 'MySQL'))
+            .toContain('Oracle-compatible functions detected');
+        for (const dialect of ['Oracle', 'Snowflake', 'Redshift'] as const) {
+            expect(messages('SELECT NVL(a, b), DECODE(status, 1, 2) FROM t', dialect))
+                .not.toContain('Oracle-compatible functions detected');
+        }
+        expect(messages("SELECT 'NVL(a, b)' FROM t -- DECODE(x, y)", 'MySQL'))
+            .not.toContain('Oracle-compatible functions detected');
+    });
+
+    it('warns for unsupported JSON arrow and named-argument syntax without flagging shared dialects', () => {
+        expect(messages("SELECT doc->>'$.name' FROM t", 'TransactSQL'))
+            .toContain('JSON arrow syntax detected');
+        for (const dialect of ['MySQL', 'PostgreSQL', 'Snowflake'] as const) {
+            expect(messages("SELECT doc->>'$.name' FROM t", dialect))
+                .not.toContain('JSON arrow syntax detected');
+        }
+        expect(messages('SELECT f(a => 1)', 'MySQL'))
+            .toContain('Named-argument syntax detected');
+        for (const dialect of ['PostgreSQL', 'BigQuery', 'Snowflake'] as const) {
+            expect(messages('SELECT f(a => 1)', dialect))
+                .not.toContain('Named-argument syntax detected');
+        }
+    });
 });
