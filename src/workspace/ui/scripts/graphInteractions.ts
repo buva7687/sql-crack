@@ -421,7 +421,6 @@ export function getGraphInteractionsScriptFragment(): string {
                 pathEndNodeId: pathEndNodeId || null
             });
         }
-
         function setPathEndpoint(kind, nodeId) {
             if (!nodeId) {
                 return;
@@ -1741,11 +1740,17 @@ export function getGraphInteractionsScriptFragment(): string {
             ? getPersistedGraphUiState()
             : null;
         if (persistedGraphUiState && typeof persistedGraphUiState === 'object') {
-            if (persistedGraphUiState.pathStartNodeId) {
+            const graphHasNode = nodeId => !!nodeId && Array.from(document.querySelectorAll('.node[data-id]'))
+                .some(node => node.getAttribute('data-id') === nodeId);
+            if (graphHasNode(persistedGraphUiState.pathStartNodeId)) {
                 pathStartNodeId = persistedGraphUiState.pathStartNodeId;
             }
-            if (persistedGraphUiState.pathEndNodeId) {
+            if (graphHasNode(persistedGraphUiState.pathEndNodeId)) {
                 pathEndNodeId = persistedGraphUiState.pathEndNodeId;
+            }
+            if ((persistedGraphUiState.pathStartNodeId && !pathStartNodeId)
+                || (persistedGraphUiState.pathEndNodeId && !pathEndNodeId)) {
+                persistActiveGraphUiState();
             }
             if (persistedGraphUiState.focusModeEnabled && selectedNodeId) {
                 setFocusMode(true);

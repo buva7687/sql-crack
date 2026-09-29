@@ -1,6 +1,17 @@
 import { getWebviewScript } from '../../../../src/workspace/ui/clientScripts';
 
 describe('workspace clientScripts navigation context', () => {
+    it('clears saved path endpoints on graph mode switches and rejects nodes missing from the new graph', () => {
+        const script = getWebviewScript({
+            nonce: 'test', graphData: '{"nodes":[]}', searchFilterQuery: '', initialView: 'graph', currentGraphMode: 'tables',
+        });
+
+        expect(script).toMatch(/function switchGraphModeFromAction\(mode\)[\s\S]*?clearPathState\(\)/);
+        expect(script).toMatch(/graphModeSwitcherContainer\.addEventListener\('click'[\s\S]*?clearPathState\(\)/);
+        expect(script).toContain("document.querySelectorAll('.node[data-id]')");
+        expect(script).toContain('graphHasNode(persistedGraphUiState.pathStartNodeId)');
+        expect(script).toContain('graphHasNode(persistedGraphUiState.pathEndNodeId)');
+    });
     it('stores and restores graph zoom/pan/selection state', () => {
         const script = getWebviewScript({
             nonce: 'test',

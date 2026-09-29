@@ -301,6 +301,7 @@ export function getWorkspaceShellScriptFragment(): string {
 
         function switchGraphModeFromAction(mode) {
             if (!mode) return;
+            if (typeof clearPathState === 'function') { clearPathState(); }
             vscode.postMessage({ command: 'switchGraphMode', mode });
         }
 
