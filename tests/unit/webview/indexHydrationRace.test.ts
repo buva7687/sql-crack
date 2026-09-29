@@ -521,6 +521,28 @@ describe('webview refresh query state (H11, M15)', () => {
         }));
     });
 
+    it('does not save defaults while the restored query is hydrating', async () => {
+        const viewState = { scale: 0.72, offsetX: -90, offsetY: 350 };
+        const { batchCalls, send, settle, fireWindowEvent, saves } = bootWebview({
+            initialUiState: {
+                version: 1, currentDialect: 'MySQL', currentQueryIndex: 2, userExplicitlySetDialect: false,
+                compareModeActive: false, activeTabId: null, queryViewStates: [{ queryIndex: 2, viewState }],
+                renderer: {
+                    viewState, layout: 'horizontal', legendVisible: true, hintsVisible: true, sqlPreviewVisible: false,
+                    columnFlowsVisible: false, focusMode: 'all', focusModeEnabled: false, layoutHistory: null,
+                },
+            },
+        });
+        send({ command: 'refresh', sql: 'A', options: { dialect: 'MySQL', fileName: 'a.sql' }, documentKey: 'file:///a.sql' });
+        await settle();
+        batchCalls[0].result.resolve(makeBatch('a', 60));
+        await settle();
+        expect(batchCalls.some(call => call.sql === 'SELECT a2 FROM t;')).toBe(true);
+
+        fireWindowEvent('beforeunload');
+        expect(saves()).toHaveLength(0);
+    });
+
     it('saves the outgoing document before a refresh resets it for another document', async () => {
         const { batchCalls, send, settle, saves } = bootWebview();
         const waitForDebounce = () => new Promise(resolve => setTimeout(resolve, 200));

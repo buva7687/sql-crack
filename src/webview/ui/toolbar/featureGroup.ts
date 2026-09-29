@@ -102,15 +102,13 @@ export function createFeatureGroupElement(deps: FeatureGroupDeps): HTMLElement {
         pinBtn.dataset.compareSafe = 'true';
         featureGroup.appendChild(pinBtn);
 
-        if (options.persistedPinnedTabs.length > 0) {
-            const pinsBtn = createPinnedTabsButton(callbacks, options.persistedPinnedTabs, {
-                documentListeners,
-                getListenerOptions,
-                getBtnStyle,
-            });
-            pinsBtn.dataset.compareSafe = 'true';
-            featureGroup.appendChild(pinsBtn);
-        }
+        const pinsBtn = createPinnedTabsButton(callbacks, options.persistedPinnedTabs, {
+            documentListeners,
+            getListenerOptions,
+            getBtnStyle,
+        });
+        pinsBtn.dataset.compareSafe = 'true';
+        featureGroup.appendChild(pinsBtn);
     } else {
         const pinnedContainer = document.createElement('div');
         pinnedContainer.style.cssText = `

@@ -380,6 +380,37 @@ describe('featureMenus toolbar ui', () => {
         expect(pinItem?.remove).toHaveBeenCalled();
     });
 
+    it('shows and refreshes Pins when the host changes the pin list', () => {
+        const { body, emitDocument } = setupDomHarness();
+        const button = createPinnedTabsButton({
+            isDarkTheme: () => false,
+            onFocusModeChange: jest.fn(),
+            getFocusMode: () => 'all',
+            onChangeViewLocation: jest.fn(),
+            onOpenPinnedTab: jest.fn(),
+            onUnpinTab: jest.fn(),
+        }, [], {
+            documentListeners: [],
+            getListenerOptions: () => undefined,
+            getBtnStyle: () => 'background: transparent;',
+        }) as unknown as FakeElement;
+        const dropdown = body.children.find(child => child.id === 'pinned-tabs-dropdown');
+        expect(button.style.display).toBe('none');
+        emitDocument('theme-change', { detail: { dark: true } });
+        expect(button.style.display).toBe('none');
+
+        emitDocument('pinned-tabs-changed', { detail: { pins: [
+            { id: 'pin-2', name: 'New Query', sql: 'select 2', dialect: 'MySQL', timestamp: Date.UTC(2026, 1, 28) },
+        ] } });
+        expect(button.style.display).not.toBe('none');
+        expect(button.title).toBe('Open pinned tabs (1)');
+        expect(dropdown?.querySelectorAll('[data-role="pin-item"]')).toHaveLength(1);
+
+        emitDocument('pinned-tabs-changed', { detail: { pins: [] } });
+        expect(button.style.display).toBe('none');
+        expect(dropdown?.querySelectorAll('[data-role="pin-item"]')).toHaveLength(0);
+    });
+
     it('escapes pinned visualization labels before inserting menu markup', () => {
         const { body } = setupDomHarness();
 

@@ -761,8 +761,6 @@ async function applyInitialUiStateIfAvailable(): Promise<void> {
         return;
     }
 
-    applyInitialStatePending = false;
-
     currentDialect = state.userExplicitlySetDialect
         ? state.currentDialect
         : (lastParsedDialect || currentDialect);
@@ -795,6 +793,10 @@ async function applyInitialUiStateIfAvailable(): Promise<void> {
         // viewport is newer; apply it last.
         if (activeQueryViewState) {
             setViewState(activeQueryViewState);
+        }
+        applyInitialStatePending = false;
+        if (persistStateDirty) {
+            schedulePersistUiState();
         }
     };
     if (state.renderer.layout !== getCurrentLayout()) {
@@ -1120,6 +1122,9 @@ function setupVSCodeMessageListener(): void {
                     // captured when this page was built.
                     if (Array.isArray(message.pinnedTabs)) {
                         window.persistedPinnedTabs = message.pinnedTabs;
+                        document.dispatchEvent(new CustomEvent('pinned-tabs-changed', {
+                            detail: { pins: message.pinnedTabs },
+                        }));
                     }
                     break;
             }

@@ -502,9 +502,21 @@ export function createPinnedTabsButton(
     pinsBtn.title = `Open pinned tabs (${pins.length})`;
     pinsBtn.dataset.overflowIcon = ICONS.clipboard;
     pinsBtn.style.cssText = context.getBtnStyle(dark) + `border-left: 1px solid ${borderColor};`;
+    pinsBtn.style.display = pins.length > 0 ? '' : 'none';
 
     const dropdown = createPinnedTabsDropdown(callbacks, pins, context);
     document.body.appendChild(dropdown);
+
+    const pinnedTabsChangedHandler = ((event: CustomEvent<{ pins: typeof pins }>) => {
+        if (!Array.isArray(event.detail?.pins)) {return;}
+        const nextPins = event.detail.pins;
+        pinsBtn.title = `Open pinned tabs (${nextPins.length})`;
+        pinsBtn.style.display = nextPins.length > 0 ? '' : 'none';
+        dropdown.style.display = 'none';
+        populatePinnedTabsDropdown(dropdown, callbacks, nextPins, context, () => dark);
+    }) as EventListener;
+    document.addEventListener('pinned-tabs-changed', pinnedTabsChangedHandler, listenerOptions);
+    context.documentListeners.push({ type: 'pinned-tabs-changed', handler: pinnedTabsChangedHandler });
 
     pinsBtn.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -547,6 +559,7 @@ export function createPinnedTabsButton(
     const pinnedTabsThemeHandler = ((event: CustomEvent<{ dark: boolean }>) => {
         dark = Boolean(event.detail?.dark);
         pinsBtn.style.cssText = context.getBtnStyle(dark) + `border-left: 1px solid ${getMenuBorderColor(dark)};`;
+        pinsBtn.style.display = dropdown.querySelectorAll('[data-role="pin-item"]').length > 0 ? '' : 'none';
         applyPinnedTabsDropdownTheme(dropdown, dark);
     }) as EventListener;
     document.addEventListener('theme-change', pinnedTabsThemeHandler, listenerOptions);
@@ -603,6 +616,27 @@ function createPinnedTabsDropdown(
     `;
     dropdown.appendChild(header);
 
+    populatePinnedTabsDropdown(dropdown, callbacks, pins, context, () => dark);
+
+    const pinnedTabsDropdownThemeHandler = ((event: CustomEvent<{ dark: boolean }>) => {
+        dark = Boolean(event.detail?.dark);
+    }) as EventListener;
+    document.addEventListener('theme-change', pinnedTabsDropdownThemeHandler, listenerOptions);
+    context.documentListeners.push({ type: 'theme-change', handler: pinnedTabsDropdownThemeHandler });
+
+    return dropdown;
+}
+
+function populatePinnedTabsDropdown(
+    dropdown: HTMLElement,
+    callbacks: ToolbarMenuCallbacks,
+    pins: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>,
+    context: MenuListenerContext,
+    isDark: () => boolean
+): void {
+    const listenerOptions = context.getListenerOptions();
+    const dark = isDark();
+    dropdown.querySelectorAll('[data-role="pin-item"]').forEach(item => item.remove());
     pins.forEach(pin => {
         const item = document.createElement('div');
         item.dataset.role = 'pin-item';
@@ -645,7 +679,7 @@ function createPinnedTabsDropdown(
             deleteBtn.style.color = '#ef4444';
         }, listenerOptions);
         deleteBtn.addEventListener('mouseleave', () => {
-            deleteBtn.style.color = getMutedTextColor(dark);
+            deleteBtn.style.color = getMutedTextColor(isDark());
         }, listenerOptions);
         item.appendChild(deleteBtn);
 
@@ -664,12 +698,4 @@ function createPinnedTabsDropdown(
 
         dropdown.appendChild(item);
     });
-
-    const pinnedTabsDropdownThemeHandler = ((event: CustomEvent<{ dark: boolean }>) => {
-        dark = Boolean(event.detail?.dark);
-    }) as EventListener;
-    document.addEventListener('theme-change', pinnedTabsDropdownThemeHandler, listenerOptions);
-    context.documentListeners.push({ type: 'theme-change', handler: pinnedTabsDropdownThemeHandler });
-
-    return dropdown;
 }
