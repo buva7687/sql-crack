@@ -115,7 +115,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added regressions for the second audit round: definition identity and per-statement locations, linear statement splitting, procedural and `DELIMITER` boundaries, clause-scoped line numbers for nested nodes and edges, Cartesian and WHERE hints, joined query switches, compare and pin updates, batch error counts, undo and viewport restore, and procedure variables in the fallback parser.
 - Added follow-up regressions for literal declaration text, background hydration failures after switching queries, dragged positions in partially collapsed graphs, and one shared SQL mask across CTE analysis.
 - Added regressions for self-join alias attribution, live Pins menu updates, graph path endpoint restoration, shared dialect syntax, and deferred saved-query hydration.
-- Branch validation: 301 suites and 4,108 tests pass, plus 18 performance tests; source and test type checks, lint, the production dependency audit, production build, VSIX packaging, and `git diff --check` pass.
+- Workspace reference timing checks now run in the dedicated serial performance gate, away from parallel coverage workers; unit tests retain the structural regression checks.
+- Branch validation: 301 suites and 4,106 tests pass, plus 20 performance tests; source and test type checks, lint, the production dependency audit, production build, VSIX packaging, and `git diff --check` pass.
 
 ## [0.9.3] - 2026-09-09
 

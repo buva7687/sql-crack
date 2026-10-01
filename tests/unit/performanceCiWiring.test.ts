@@ -14,7 +14,7 @@ describe('performance CI wiring', () => {
 
     it('keeps the perf gate out of default Jest runs and exposes a dedicated script', () => {
         const perfIgnorePatterns = [
-            'testPathIgnorePatterns=/tests/benchmark/ciParsePerformance.test.ts',
+            'testPathIgnorePatterns=/tests/benchmark/',
             'testPathIgnorePatterns=/tests/webview/perfBaseline.test.ts',
         ];
 
@@ -26,7 +26,7 @@ describe('performance CI wiring', () => {
         }
 
         expect(packageJson.scripts?.['test:perf']).toBe(
-            'node scripts/runJest.js --sql-crack-expose-gc --runInBand --runTestsByPath tests/benchmark/ciParsePerformance.test.ts tests/webview/perfBaseline.test.ts'
+            'node scripts/runJest.js --sql-crack-expose-gc --runInBand --runTestsByPath tests/benchmark/ciParsePerformance.test.ts tests/benchmark/workspaceReferencePerformance.test.ts tests/webview/perfBaseline.test.ts'
         );
     });
 
