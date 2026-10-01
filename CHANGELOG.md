@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.9.4] - Unreleased
+## [0.9.4] - 2026-10-01
 
 ### Added
 
@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Production dependency advisory**: Updated the pinned DOMPurify release to 3.4.16, clearing the remaining production dependency audit finding.
 - **Workspace self-joins and graph paths**: Qualified columns stay with their own table alias in a self-join. Switching graph modes clears saved path endpoints, and a rebuilt graph rejects endpoints whose nodes are absent.
 - **Pinned tabs menu**: The Pins button appears when the first pin is created, and its dropdown follows later pin and unpin updates without reopening SQL Flow.
 - **Deferred query restoration**: Closing SQL Flow while a saved query is still hydrating no longer overwrites its saved layout and viewport with defaults.
@@ -113,7 +114,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added regressions for all audit findings above, including declined-workspace indexing, edits during the initial build, worker start/queue deadlines and replay, request-local worker errors, per-statement fallback reset, dialect-specific quotes and brackets, restored state, graph navigation, macOS Alt shortcuts, non-vertical fitting, panel-close persistence, literal-safe fallback function delimiters, watcher recreation, keyboard focus, high-fanout lineage rendering, foreign-key extraction, fullscreen coverage, and Unicode truncation.
 - Added regressions for the second audit round: definition identity and per-statement locations, linear statement splitting, procedural and `DELIMITER` boundaries, clause-scoped line numbers for nested nodes and edges, Cartesian and WHERE hints, joined query switches, compare and pin updates, batch error counts, undo and viewport restore, and procedure variables in the fallback parser.
 - Added follow-up regressions for literal declaration text, background hydration failures after switching queries, dragged positions in partially collapsed graphs, and one shared SQL mask across CTE analysis.
-- Branch validation: 300 suites and 4,096 tests pass, plus 18 performance tests; source and test type checks, lint, and `git diff --check` pass.
+- Added regressions for self-join alias attribution, live Pins menu updates, graph path endpoint restoration, shared dialect syntax, and deferred saved-query hydration.
+- Branch validation: 301 suites and 4,108 tests pass, plus 18 performance tests; source and test type checks, lint, the production dependency audit, production build, VSIX packaging, and `git diff --check` pass.
 
 ## [0.9.3] - 2026-09-09
 
