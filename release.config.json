@@ -1,4 +1,3 @@
 {
-  "channel": "pre-release",
-  "candidateFor": "1.0.0"
+  "channel": "stable"
 }

@@ -10,7 +10,7 @@ describe('performance CI wiring', () => {
     const releaseWorkflowSource = readFileSync(join(__dirname, '../../.github/workflows/release.yml'), 'utf8');
     const releaseConfig = JSON.parse(
         readFileSync(join(__dirname, '../../release.config.json'), 'utf8')
-    ) as { channel?: string; candidateFor?: string };
+    ) as { channel?: string };
 
     it('keeps the perf gate out of default Jest runs and exposes a dedicated script', () => {
         const perfIgnorePatterns = [
@@ -93,8 +93,8 @@ describe('performance CI wiring', () => {
         expect(releaseWorkflowSource).toContain("env.RELEASE_MODE == 'open-vsx'");
     });
 
-    it('publishes 0.9.4 as a reproducible 1.0 pre-release candidate', () => {
-        expect(releaseConfig).toEqual({ channel: 'pre-release', candidateFor: '1.0.0' });
+    it('publishes 0.9.4 as a stable release with reproducible channel handling', () => {
+        expect(releaseConfig).toEqual({ channel: 'stable' });
         expect(releaseWorkflowSource).toContain('release_channel: ${{ steps.check.outputs.release_channel }}');
         expect(releaseWorkflowSource).toContain('RELEASE_CHANNEL: ${{ needs.check.outputs.release_channel }}');
         expect(releaseWorkflowSource).toContain('PRERELEASE_ARGS+=(--pre-release)');

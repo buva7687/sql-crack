@@ -19,12 +19,10 @@
 - [ ] Confirm the GitHub release contains `sql-crack-vX.Y.Z.vsix`.
 - [ ] Confirm the version appears on the VS Code Marketplace and Open VSX.
 
-## 1.0 Candidate Flow
+## 0.9.4 Stable Release
 
-- Marketplace extension versions must stay numeric. Use `0.9.4` with the pre-release channel instead of `1.0.0-rc.1`.
-- Keep `release.config.json` set to `pre-release` while validating the candidate. The workflow marks GitHub, Marketplace, and Open VSX publications as pre-release.
-- Promote only blocker fixes during the candidate soak. For the stable release, change the package version to `1.0.0`, set the channel to `stable`, and finalize the changelog.
-- Confirm both a clean install and an update from the latest stable extension before promotion.
+- Keep `package.json` at `0.9.4` and `release.config.json` set to `stable`. The workflow publishes the GitHub, Marketplace, and Open VSX artifacts as stable releases.
+- Confirm both a clean install and an update from the previous stable extension before publication.
 
 ## Resume a Partial Release
 

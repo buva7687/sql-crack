@@ -366,7 +366,7 @@ If the extension behaves unexpectedly:
 
 ## Support
 
-SQL Crack supports the latest stable release and the current Marketplace pre-release candidate on VS Code `1.85` or newer. SQL parsing and optimization guidance are static, best-effort analysis; vendor-specific syntax may use compatibility rewrites or partial fallback results, which are identified in the UI.
+SQL Crack supports the latest stable release on VS Code `1.85` or newer. When a Marketplace pre-release is available, it is intended for testing an upcoming version. SQL parsing and optimization guidance are static, best-effort analysis; vendor-specific syntax may use compatibility rewrites or partial fallback results, which are identified in the UI.
 
 For ordinary bugs and feature requests, use [GitHub Issues](https://github.com/buva7687/sql-crack/issues) and include the extension version, VS Code version, selected dialect, reproduction steps, and a minimal redacted SQL sample. Report security-sensitive problems privately as described in [SECURITY.md](SECURITY.md).
 
@@ -439,7 +439,7 @@ src/
 - ✅ **Phase 6** — Large-file modular refactor (parser/renderer/workspace UI split into focused modules)
 - ✅ **Phase 7** — Export preview with PDF support
 
-`0.9.4` is the pre-release candidate for `1.0.0`: a scope-frozen stabilization release focused on consistent Workspace Graph navigation, explicit index trust signals, reproducible publishing, cross-platform smoke testing, and release documentation. New dialect and parser features resume after the 1.0 stabilization window.
+`0.9.4` is a stable release focused on consistent Workspace Graph navigation, explicit index trust signals, reproducible publishing, cross-platform smoke testing, and release documentation. New dialect and parser features resume in later releases.
 
 `0.9.0`: Security & reliability hardening — production dependency upgrades (`npm audit --omit=dev` reports 0 advisories), cryptographically strong CSP nonces and collision-free pin/tab IDs, stricter HTML-attribute / DOT / Mermaid export escaping, source-scoped auto-refresh and cursor-follow, a workspace index cache keyed by scope/dialect/config, and a non-blocking parser-worker timeout.
 

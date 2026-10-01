@@ -11,8 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **1.0 candidate release channel**: Added explicit stable/pre-release metadata so the same validated VSIX is marked as a pre-release on GitHub, the VS Code Marketplace, and Open VSX. Targeted retries recover the channel from the requested tag, while older tags remain stable by default.
-- **Support policy**: Documented the supported stable/candidate releases, VS Code baseline, best-effort parser contract, and the information needed for actionable issue reports.
+- **Release channel metadata**: Added explicit stable/pre-release metadata. Version 0.9.4 is configured to publish as stable on GitHub, the VS Code Marketplace, and Open VSX. Targeted retries recover the channel from the requested tag, while older tags remain stable by default.
+- **Support policy**: Documented the supported stable release, VS Code baseline, best-effort parser contract, and the information needed for actionable issue reports.
 
 ### Changed
 
@@ -110,7 +110,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Tests
 
-- Added regression coverage for cross-platform file-to-table routing, primary Graph actions, index timestamp validation, the 4 MiB bundle budget, pinned release tools, Node support, and pre-release channel propagation.
+- Added regression coverage for cross-platform file-to-table routing, primary Graph actions, index timestamp validation, the 4 MiB bundle budget, pinned release tools, Node support, and stable release channel propagation.
 - Added regressions for all audit findings above, including declined-workspace indexing, edits during the initial build, worker start/queue deadlines and replay, request-local worker errors, per-statement fallback reset, dialect-specific quotes and brackets, restored state, graph navigation, macOS Alt shortcuts, non-vertical fitting, panel-close persistence, literal-safe fallback function delimiters, watcher recreation, keyboard focus, high-fanout lineage rendering, foreign-key extraction, fullscreen coverage, and Unicode truncation.
 - Added regressions for the second audit round: definition identity and per-statement locations, linear statement splitting, procedural and `DELIMITER` boundaries, clause-scoped line numbers for nested nodes and edges, Cartesian and WHERE hints, joined query switches, compare and pin updates, batch error counts, undo and viewport restore, and procedure variables in the fallback parser.
 - Added follow-up regressions for literal declaration text, background hydration failures after switching queries, dragged positions in partially collapsed graphs, and one shared SQL mask across CTE analysis.
