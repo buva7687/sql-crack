@@ -7,6 +7,85 @@ describe('SchemaExtractor.extractDefinitions', () => {
         extractor = new SchemaExtractor();
     });
 
+    it('finds definitions after a MySQL procedure using DELIMITER $$', () => {
+        const sql = [
+            'CREATE TABLE src (id INT);',
+            'DELIMITER $$',
+            'CREATE PROCEDURE p() BEGIN SELECT id FROM src; END $$',
+            'DELIMITER ;',
+            'CREATE VIEW v_audit AS SELECT id FROM audit;',
+        ].join('\n');
+        const definitions = extractor.extractDefinitions(sql, '/sql/migration.sql', 'MySQL');
+        expect(definitions.map(definition => definition.name)).toEqual(['src', 'v_audit']);
+        expect(definitions[1]).toEqual(expect.objectContaining({
+            lineNumber: 5,
+            sql: expect.stringMatching(/^CREATE VIEW v_audit AS/),
+        }));
+    });
+
+    it('finds a definition after a MySQL comment containing a glob path', () => {
+        const sql = 'CREATE TABLE a (id INT); /* /backups/*.sql */ CREATE VIEW b AS SELECT id FROM a;';
+        expect(extractor.extractDefinitions(sql, '/sql/migration.sql', 'MySQL')
+            .map(definition => definition.name)).toEqual(['a', 'b']);
+    });
+
+    it('keeps the full name of an unquoted Unicode definition', () => {
+        const sql = 'CREATE VIEW café AS SELECT 1; CREATE TABLE größe (id INT);';
+        const definitions = extractor.extractDefinitions(sql, '/sql/unicode.sql', 'PostgreSQL');
+        expect(definitions.map(definition => definition.name)).toEqual(['café', 'größe']);
+    });
+
+    it('parses large files one statement at a time instead of using the quadratic batch path', () => {
+        const astifySpy = jest.spyOn((extractor as any).parser, 'astify');
+        const sql = Array.from({ length: 200 }, (_, index) =>
+            `CREATE TABLE table_${index} (id INT);`
+        ).join('\n');
+
+        const definitions = extractor.extractDefinitions(sql, '/sql/large.sql', 'MySQL');
+
+        expect(definitions).toHaveLength(200);
+        expect(astifySpy).toHaveBeenCalledTimes(200);
+        expect(Math.max(...astifySpy.mock.calls.map(call => String(call[0]).length))).toBeLessThan(80);
+    });
+
+    it('scans CREATE headers once per file instead of once per definition', () => {
+        const headerRegexSpy = jest.spyOn(extractor as any, 'createHeaderRegex');
+        const sql = Array.from({ length: 200 }, (_, index) =>
+            index % 2 === 0
+                ? `CREATE TABLE s.table_${index} (\n  id INT\n);`
+                : `CREATE VIEW view_${index} AS\nSELECT id FROM s.table_${index - 1};`
+        ).join('\n');
+
+        const definitions = extractor.extractDefinitions(sql, '/sql/schema.sql', 'MySQL');
+
+        expect(definitions).toHaveLength(200);
+        expect(definitions[198]).toEqual(expect.objectContaining({
+            type: 'table', name: 'table_198', schema: 's', statementIndex: 198, lineNumber: 496,
+        }));
+        expect(definitions[199]).toEqual(expect.objectContaining({
+            type: 'view', name: 'view_199', statementIndex: 199, lineNumber: 499,
+        }));
+        // Whole-file header scans happen once per (type, text) view. The only
+        // per-definition regex is the quote-flag probe over that definition's
+        // own SQL; the old lookups built ~5 whole-file regexes per definition.
+        expect(headerRegexSpy.mock.calls.length).toBeLessThan(definitions.length / 2 + 20);
+    });
+
+    it('extracts thousands of definitions from one file in linear time', () => {
+        const sql = Array.from({ length: 2000 }, (_, index) =>
+            `CREATE TABLE t${index} (\n  id INT,\n  name VARCHAR(10)\n);`
+        ).join('\n');
+
+        const start = Date.now();
+        const definitions = extractor.extractDefinitions(sql, '/sql/dump.sql', 'MySQL');
+        const elapsed = Date.now() - start;
+
+        expect(definitions).toHaveLength(2000);
+        expect(definitions[1999]).toEqual(expect.objectContaining({ name: 't1999', lineNumber: 7997 }));
+        // Previously ~18 s (cubic prefix rescans); now well under a second.
+        expect(elapsed).toBeLessThan(5000);
+    });
+
     describe('CREATE TABLE via AST parser', () => {
         it('extracts a simple CREATE TABLE', () => {
             const sql = 'CREATE TABLE orders (id INT, customer_id INT, amount DECIMAL(10,2));';
@@ -113,6 +192,36 @@ describe('SchemaExtractor.extractDefinitions', () => {
 
             expect(defs).toHaveLength(1);
             expect(defs[0].columns.map(col => col.name)).toEqual(['id', 'name']);
+        });
+
+        it('extracts inline foreign-key metadata from the AST path', () => {
+            const defs = extractor.extractDefinitions(
+                'CREATE TABLE child (id INT, parent_id INT REFERENCES public.parent(id));',
+                '/sql/child.sql',
+                'PostgreSQL'
+            );
+
+            expect(defs[0].columns.find(column => column.name === 'parent_id')?.foreignKey).toEqual({
+                referencedTable: 'public.parent',
+                referencedColumn: 'id',
+            });
+        });
+
+        it('applies table-level composite foreign keys to their local columns', () => {
+            const defs = extractor.extractDefinitions(
+                'CREATE TABLE child (parent_id INT, parent_tenant INT, CONSTRAINT fk_parent FOREIGN KEY (parent_id, parent_tenant) REFERENCES parent(id, tenant_id));',
+                '/sql/child.sql',
+                'PostgreSQL'
+            );
+
+            expect(defs[0].columns.find(column => column.name === 'parent_id')?.foreignKey).toEqual({
+                referencedTable: 'parent',
+                referencedColumn: 'id',
+            });
+            expect(defs[0].columns.find(column => column.name === 'parent_tenant')?.foreignKey).toEqual({
+                referencedTable: 'parent',
+                referencedColumn: 'tenant_id',
+            });
         });
     });
 
@@ -597,5 +706,70 @@ CREATE TABLE accounts (real_id INT);
             const byName = new Map(definitions.map(d => [d.name, d.statementIndex]));
             expect(byName.get('after_it')).toBe((byName.get('we;ird') as number) + 1);
         });
+    });
+});
+
+describe('SchemaExtractor definition identity and location', () => {
+    const extract = (sql: string, dialect: Parameters<SchemaExtractor['extractDefinitions']>[2]) =>
+        new SchemaExtractor().extractDefinitionsWithStatus(sql, '/sql/defs.sql', dialect).definitions;
+
+    it('keeps quoted view and CTAS names instead of capturing the AS keyword', () => {
+        const [mysqlView] = extract('CREATE VIEW `active_users` AS SELECT id FROM users;', 'MySQL');
+        expect(mysqlView).toEqual(expect.objectContaining({ type: 'view', name: 'active_users', nameQuoted: true }));
+
+        const pg = extract([
+            'CREATE VIEW "ActiveUsers" AS SELECT id FROM users;',
+            'CREATE TABLE "daily_totals" AS SELECT 1 AS n;',
+            'CREATE VIEW analytics."Revenue" AS SELECT 1 AS n;',
+        ].join('\n'), 'PostgreSQL');
+        expect(pg.map(d => [d.type, d.schema, d.name, d.lineNumber])).toEqual([
+            ['view', undefined, 'ActiveUsers', 1],
+            ['table', undefined, 'daily_totals', 2],
+            ['view', 'analytics', 'Revenue', 3],
+        ]);
+        expect(pg[1].sql).toBe('CREATE TABLE "daily_totals" AS SELECT 1 AS n;');
+    });
+
+    it('keeps distinct BigQuery backtick views as separate definitions', () => {
+        const defs = extract([
+            'CREATE VIEW `proj.ds.v1` AS SELECT 1 AS a;',
+            'CREATE VIEW `proj.ds.v2` AS SELECT 2 AS b;',
+        ].join('\n'), 'BigQuery');
+        expect(defs.map(d => d.name)).toEqual(['proj.ds.v1', 'proj.ds.v2']);
+    });
+
+    it('locates same-name definitions in different schemas at their own statement', () => {
+        const sql = [
+            'CREATE TABLE staging.orders (id INT);',               // 1
+            '',                                                    // 2
+            'CREATE TABLE mart.orders AS SELECT id FROM raw_orders;', // 3
+        ].join('\n');
+
+        const defs = extract(sql, 'PostgreSQL');
+
+        expect(defs.map(d => [d.schema, d.name, d.statementIndex, d.lineNumber])).toEqual([
+            ['staging', 'orders', 0, 1],
+            ['mart', 'orders', 1, 3],
+        ]);
+        expect(defs[1].sql).toBe('CREATE TABLE mart.orders AS SELECT id FROM raw_orders;');
+    });
+
+    it('locates same-name definitions at their own statement on the regex fallback path', () => {
+        // The unterminated CASE forces the AST parser to fail for this file.
+        const sql = [
+            'CREATE TABLE staging.orders (id INT);',
+            'SELECT CASE WHEN FROM;',
+            'CREATE TABLE mart.orders (id INT, total INT);',
+        ].join('\n');
+
+        const { definitions, warnings } = new SchemaExtractor()
+            .extractDefinitionsWithStatus(sql, '/sql/defs.sql', 'PostgreSQL');
+
+        expect(warnings.length).toBeGreaterThan(0);
+        expect(definitions.map(d => [d.schema, d.name, d.lineNumber, d.columns.length])).toEqual([
+            ['staging', 'orders', 1, 1],
+            ['mart', 'orders', 3, 2],
+        ]);
+        expect(definitions[1].sql).toContain('mart.orders');
     });
 });

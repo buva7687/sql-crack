@@ -1,6 +1,6 @@
 import type { FlowNode, ViewState } from '../../../src/webview/types';
 import { selectNodeFeature } from '../../../src/webview/interaction/nodeSelection';
-import { EDGE_COLORS, UI_COLORS } from '../../../src/webview/constants';
+import { EDGE_COLORS, UI_COLORS, getComponentUiColors } from '../../../src/webview/constants';
 
 type FakeRect = {
     setAttribute: jest.Mock<void, [string, string]>;
@@ -182,6 +182,30 @@ describe('nodeSelection', () => {
         expect(edgeB.setAttribute).toHaveBeenCalledWith('stroke', EDGE_COLORS.default);
     });
 
+    it('uses a visible accent selection border in the light theme', () => {
+        const selectedRect = createRect();
+        const mainGroup = {
+            querySelectorAll: jest.fn((selector: string) =>
+                selector === '.node' ? [createNodeGroup('n1', selectedRect)] : []),
+        };
+
+        selectNodeFeature({
+            nodeId: 'n1',
+            state: createState({ isDarkTheme: false }),
+            mainGroup: mainGroup as any,
+            currentNodes: [],
+            currentSql: '',
+            highlightConnectedEdges: jest.fn(),
+            onUpdateDetailsPanel: jest.fn(),
+            onUpdateBreadcrumb: jest.fn(),
+        });
+
+        expect(selectedRect.setAttribute).toHaveBeenCalledWith(
+            'stroke',
+            getComponentUiColors(false).accent
+        );
+    });
+
     it('preserves every search-match border when navigating between results', () => {
         const selectedRect = createRect();
         const previousMatchRect = createRect();
@@ -214,7 +238,7 @@ describe('nodeSelection', () => {
         expect(otherMatchRect.removeAttribute).not.toHaveBeenCalledWith('stroke');
     });
 
-    it('finds nested nodes for navigation and falls back to SQL line lookup for tables', () => {
+    it('navigates to an assigned child line', () => {
         const postMessage = jest.fn();
         (global as { window?: unknown }).window = {
             vscodeApi: { postMessage },
@@ -238,6 +262,7 @@ describe('nodeSelection', () => {
                             id: 'child_table',
                             type: 'table',
                             label: 'orders',
+                            startLine: 3,
                             x: 0,
                             y: 0,
                             width: 120,
@@ -253,5 +278,21 @@ describe('nodeSelection', () => {
         });
 
         expect(postMessage).toHaveBeenCalledWith({ command: 'goToLine', line: 3 });
+    });
+
+    it('does not guess a file line from query text when a node has no line', () => {
+        const postMessage = jest.fn();
+        (global as { window?: unknown }).window = { vscodeApi: { postMessage } };
+        selectNodeFeature({
+            nodeId: 'table',
+            state: createState(),
+            mainGroup: null,
+            currentNodes: [{ id: 'table', type: 'table', label: 'orders', x: 0, y: 0, width: 100, height: 40 }],
+            currentSql: '-- orders pipeline\nSELECT * FROM orders',
+            highlightConnectedEdges: jest.fn(),
+            onUpdateDetailsPanel: jest.fn(),
+            onUpdateBreadcrumb: jest.fn(),
+        });
+        expect(postMessage).not.toHaveBeenCalled();
     });
 });

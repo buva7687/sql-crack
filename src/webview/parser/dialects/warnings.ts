@@ -1,7 +1,7 @@
 import type { SqlDialect } from '../../types';
 import type { ParserContext } from '../context';
 import { detectDialectSyntaxPatterns } from './detection';
-import { stripSqlComments } from './preprocessing';
+import { maskStringsAndComments, stripSqlComments } from './preprocessing';
 
 function getSwitchDialectAction(dialect: SqlDialect): { label: string; command: string } {
     return {
@@ -16,17 +16,52 @@ function getSwitchDialectAction(dialect: SqlDialect): { label: string; command: 
  */
 export function detectDialectSpecificSyntax(context: ParserContext, sql: string, currentDialect: SqlDialect): void {
     const strippedSql = stripSqlComments(sql);
+    const maskedSql = maskStringsAndComments(strippedSql);
     const syntax = detectDialectSyntaxPatterns(strippedSql);
 
+    // These constructs are shared by several engines, so warn only for
+    // dialects where the corresponding syntax is not supported.
+    const oracleFunctionWarningDialects: SqlDialect[] = ['MySQL', 'MariaDB', 'SQLite', 'TransactSQL'];
+    if (oracleFunctionWarningDialects.includes(currentDialect)
+        && /\b(?:NVL2?|DECODE)\s*\(/i.test(maskedSql)) {
+        context.hints.push({
+            type: 'warning',
+            message: 'Oracle-compatible functions detected',
+            suggestion: 'NVL and Oracle-style DECODE are supported by Oracle, Snowflake, and Redshift. Use the equivalent function for the selected dialect, or switch dialects.',
+            category: 'best-practice',
+            severity: 'medium',
+        });
+    }
+
+    if (currentDialect === 'TransactSQL' && /\b[\w$]+\s*->>/.test(maskedSql)) {
+        context.hints.push({
+            type: 'warning',
+            message: 'JSON arrow syntax detected',
+            suggestion: 'The ->> operator is used by PostgreSQL and MySQL for JSON extraction. Use JSON_VALUE for SQL Server.',
+            category: 'best-practice',
+            severity: 'medium',
+        });
+    }
+
+    const namedArgumentWarningDialects: SqlDialect[] = ['MySQL', 'MariaDB', 'SQLite', 'TransactSQL'];
+    if (namedArgumentWarningDialects.includes(currentDialect) && /\b[\w$]+\s*=>/.test(maskedSql)) {
+        context.hints.push({
+            type: 'warning',
+            message: 'Named-argument syntax detected',
+            suggestion: 'The => named-argument syntax is used by PostgreSQL, Snowflake, and BigQuery. Check the selected dialect for its argument syntax.',
+            category: 'best-practice',
+            severity: 'medium',
+        });
+    }
+
     const hasSnowflakePathOperator = syntax.hasSnowflakePathOperator;
-    const hasSnowflakeNamedArgs = syntax.hasSnowflakeNamedArgs;
     const hasFlatten = syntax.hasFlatten;
-    if ((hasSnowflakePathOperator || hasSnowflakeNamedArgs || hasFlatten) && currentDialect !== 'Snowflake') {
+    if ((hasSnowflakePathOperator || hasFlatten) && currentDialect !== 'Snowflake') {
         context.hints.push({
             type: 'warning',
             message: 'Snowflake-specific syntax detected',
             suggestion: currentDialect === 'MySQL' || currentDialect === 'PostgreSQL'
-                ? 'This query uses Snowflake syntax (e.g., : path operator or => named arguments). Try Snowflake dialect for full support.'
+                ? 'This query uses Snowflake syntax (e.g., : path operator or FLATTEN). Try Snowflake dialect for full support.'
                 : 'This query uses Snowflake-specific syntax. Consider switching to Snowflake dialect.',
             category: 'best-practice',
             severity: 'medium',
@@ -100,13 +135,12 @@ export function detectDialectSpecificSyntax(context: ParserContext, sql: string,
     const hasOracleConnectBy = syntax.hasOracleConnectBy;
     const hasOracleRownum = syntax.hasOracleRownum;
     const hasOracleOuterJoinOperator = syntax.hasOracleOuterJoinOperator;
-    const hasOracleNvlDecode = syntax.hasOracleNvlDecode;
-    if ((hasOracleConnectBy || hasOracleRownum || hasOracleOuterJoinOperator || hasOracleNvlDecode)
+    if ((hasOracleConnectBy || hasOracleRownum || hasOracleOuterJoinOperator)
         && currentDialect !== 'Oracle') {
         context.hints.push({
             type: 'warning',
             message: 'Oracle-specific syntax detected',
-            suggestion: 'This query uses Oracle syntax (e.g., CONNECT BY, ROWNUM, (+) joins, or NVL/DECODE). Try Oracle dialect.',
+            suggestion: 'This query uses Oracle syntax (e.g., CONNECT BY, ROWNUM, or (+) joins). Try Oracle dialect.',
             category: 'best-practice',
             severity: 'medium',
             action: getSwitchDialectAction('Oracle'),

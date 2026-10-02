@@ -12,6 +12,12 @@ describe('parser preprocessing transforms', () => {
             );
         });
 
+        it('does not re-quote already delimited hash temp-table identifiers', () => {
+            expect(preprocessHashTempTableIdentifiers('SELECT * FROM [#tmp]', 'TransactSQL')).toBeNull();
+            expect(preprocessHashTempTableIdentifiers('SELECT * FROM "#tmp"', 'TransactSQL')).toBeNull();
+            expect(preprocessHashTempTableIdentifiers('SELECT * FROM `#tmp`', 'TransactSQL')).toBeNull();
+        });
+
         it('finds the outer close parenthesis past backtick and bracket identifiers', () => {
             const sql = '(SELECT `a)b`, [order) items] FROM t) trailing';
             expect(findMatchingParen(sql, 0)).toBe(sql.indexOf(') trailing'));
@@ -132,6 +138,10 @@ describe('parser preprocessing transforms', () => {
             expect(rewritten).not.toContain('(+)');
             expect(rewritten).toContain('a.id = b.id');
             expect(rewritten).toContain('a.type = b.type');
+        });
+
+        it('does not remove (+) text inside string literals', () => {
+            expect(preprocessOracleSyntax("SELECT '(+)' AS marker FROM dual", 'Oracle')).toBeNull();
         });
 
         it('rewrites MINUS to EXCEPT', () => {
@@ -524,6 +534,18 @@ SELECT * FROM OPENJSON((SELECT val FROM cte FOR JSON PATH)) AS j`;
             expect(rewritten).not.toMatch(/\bPCTFREE\b/i);
             expect(rewritten).toMatch(/\bAS\s+SELECT\b/i);
             expect(rewritten).toContain('FROM sales_source');
+        });
+
+        it('does not treat an aggregate call in CTAS as a column-definition list', () => {
+            const sql = 'CREATE TABLE totals AS SELECT COUNT(*) AS count FROM sales_source';
+
+            expect(preprocessOracleSyntax(sql, 'Oracle')).toBeNull();
+
+            const { parseSql } = require('../../../src/webview/sqlParser');
+            const result = parseSql(sql, 'Oracle');
+            expect(result.nodes).toEqual(expect.arrayContaining([
+                expect.objectContaining({ type: 'table', label: 'sales_source' }),
+            ]));
         });
 
         it('parses Oracle CREATE TABLE with physical options without partial fallback', () => {

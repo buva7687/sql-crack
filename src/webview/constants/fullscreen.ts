@@ -15,6 +15,7 @@ export const FULLSCREEN_HIDE_IDS = [
     'sql-crack-error-badge',
     'sql-crack-breadcrumb-bar',
     'sql-crack-toolbar-wrapper',
+    'sql-crack-legend-bar',
 ] as const;
 
 /** CSS class selectors for panels to hide in fullscreen mode. */
@@ -23,6 +24,5 @@ export const FULLSCREEN_HIDE_SELECTORS = [
     '.details-panel',
     '.stats-panel',
     '.hints-panel',
-    '.legend-panel',
     '.sql-preview-panel',
 ] as const;

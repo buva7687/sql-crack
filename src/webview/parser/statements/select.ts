@@ -336,7 +336,6 @@ function processSelect(
                         target: joinId,
                         sqlClause: joinConditionSql, // SQL clause for edge click display
                         clauseType: 'join',         // Type of clause for styling
-                        startLine: fromItem.on?.location?.start?.line // Line number for navigation
                     });
                 }
 
@@ -348,7 +347,6 @@ function processSelect(
                         target: joinId,
                         sqlClause: joinConditionSql, // SQL clause for edge click display
                         clauseType: 'on',           // Type of clause for styling
-                        startLine: fromItem.on?.location?.start?.line // Line number for navigation
                     });
                 }
 
@@ -441,7 +439,6 @@ function processSelect(
                 target: whereId,
                 sqlClause: whereClauseSql, // SQL clause for edge click display
                 clauseType: 'where',      // Type of clause for styling
-                startLine: stmt.where?.location?.start?.line // Line number for navigation
             });
         }
         previousId = whereId;
@@ -746,9 +743,19 @@ function processSelect(
         ctx.stats.unions++;
         const nextResultId = processStatement(runtime, stmt._next, nodes, edges);
         if (nextResultId) {
-            const unionId = genId(runtime, 'union');
             const setOp = stmt.set_op || 'UNION';
             maybeAddSetOperationColumnCountHint(ctx, setOp, stmt, stmt._next);
+            const lastNode = nodes[nodes.length - 1];
+            const nextNode = lastNode?.id === nextResultId ? lastNode : undefined;
+            // UNION ALL is associative. Reuse the merge node from the next
+            // branch instead of building a merge chain one level per branch.
+            if (setOp.toUpperCase() === 'UNION ALL' && nextNode?.type === 'union' && nextNode.label === 'UNION ALL') {
+                const existingCount = /^(\d+) branches$/.exec(nextNode.details?.[0] ?? '');
+                nextNode.details = [`${(existingCount ? Number(existingCount[1]) : 2) + 1} branches`];
+                edges.push({ id: genId(runtime, 'e'), source: resultId, target: nextResultId });
+                return nextResultId;
+            }
+            const unionId = genId(runtime, 'union');
 
             // Collect tables from both sides for details
             const leftTables = extractTablesFromStatement(stmt, ctx.dialect);

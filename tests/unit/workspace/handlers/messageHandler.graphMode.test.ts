@@ -64,6 +64,62 @@ function createContext(overrides: Record<string, unknown> = {}) {
 }
 
 describe('MessageHandler - graph mode switching', () => {
+    it('keeps the live graph document when returning from lineage', async () => {
+        const { context } = createContext({
+            getCurrentView: jest.fn(() => 'lineage'),
+        });
+        const handler = new MessageHandler(context);
+
+        await handler.handleMessage({ command: 'switchView', view: 'graph' });
+
+        expect(context.setCurrentView).toHaveBeenCalledWith('graph');
+        expect(context.renderCurrentView).not.toHaveBeenCalled();
+    });
+
+    it('re-renders when leaving the standalone issues document', async () => {
+        const { context } = createContext({
+            getCurrentView: jest.fn(() => 'issues'),
+        });
+        const handler = new MessageHandler(context);
+
+        await handler.handleMessage({ command: 'switchView', view: 'graph' });
+
+        expect(context.renderCurrentView).toHaveBeenCalledTimes(1);
+    });
+
+    it('atomically switches a file selection to tables mode with a file-name search', async () => {
+        const { context } = createContext({
+            getCurrentGraphMode: jest.fn(() => 'files'),
+        });
+        const handler = new MessageHandler(context);
+
+        await handler.handleMessage({
+            command: 'showFileTables',
+            filePath: '/workspace/models/orders.sql',
+        });
+
+        expect(context.setCurrentGraphMode).toHaveBeenCalledWith('tables');
+        expect(context.setCurrentSearchFilter).toHaveBeenCalledWith({
+            query: 'orders.sql',
+            nodeTypes: undefined,
+            useRegex: false,
+            caseSensitive: false,
+        });
+        expect(context.setCurrentView).toHaveBeenCalledWith('graph');
+        expect(context.trackUxEvent).toHaveBeenCalledWith('graph_show_file_tables', { fromMode: 'files' });
+        expect(context.rebuildAndRenderGraph).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignores a file-to-tables request without a usable path', async () => {
+        const { context } = createContext();
+        const handler = new MessageHandler(context);
+
+        await handler.handleMessage({ command: 'showFileTables', filePath: '' });
+
+        expect(context.setCurrentGraphMode).not.toHaveBeenCalled();
+        expect(context.rebuildAndRenderGraph).not.toHaveBeenCalled();
+    });
+
     it('should clear search filter when switching graph modes', async () => {
         const { context } = createContext();
         const handler = new MessageHandler(context);

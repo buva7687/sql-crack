@@ -105,10 +105,12 @@ import {
 import {
     applyClusteringFeature,
     preCalculateExpandableDimensionsFeature,
+    preserveProjectedNodePositions,
 } from './rendering/clusterProjection';
 import { getScrollbarColors, getComponentUiColors, COLUMN_LINEAGE_BANNER_THEME } from './constants/colors';
 import type { ColorblindMode } from '../shared/theme';
 import { escapeHtml } from '../shared/stringUtils';
+import { truncateCodePoints } from '../shared/stringUtils';
 import type { GridStyle } from '../shared/themeTokens';
 import { MONO_FONT_STACK } from '../shared/themeTokens';
 import { EDGE_THEME } from '../shared/themeTokens';
@@ -209,6 +211,7 @@ import {
 import { setupEventListeners as setupRendererEventListeners } from './interaction/eventListeners';
 import { pulseNodeFeature, pulseNodeInCloudFeature } from './interaction/nodePulse';
 import { selectNodeFeature } from './interaction/nodeSelection';
+import { findNodeAtLine } from './interaction/lineNodeLookup';
 import { restoreNodeBorderState } from './nodeBorderState';
 import type { RendererContext } from './types/rendererContext';
 import {
@@ -292,6 +295,40 @@ const cloudViewStates: Map<string, CloudViewState> = new Map();
 const documentListeners: Array<{ type: string; handler: EventListener }> = [];
 let spinnerStyleElement: HTMLStyleElement | null = null;
 let reducedMotionStyleElement: HTMLStyleElement | null = null;
+let focusRingStyleElement: HTMLStyleElement | null = null;
+
+/**
+ * Keyboard focus rings, regenerated on theme change so the ring keeps 3:1
+ * contrast against the current background. `!important` beats inline
+ * `outline: none` on the search box, command bar, dialect select, and canvas.
+ */
+function applyFocusRingStyles(dark: boolean): void {
+    const focusRingColor = dark ? '#93c5fd' : '#1d4ed8';
+    const focusRingBackground = dark ? 'rgba(147, 197, 253, 0.16)' : 'rgba(29, 78, 216, 0.1)';
+    if (!focusRingStyleElement) {
+        focusRingStyleElement = document.createElement('style');
+        focusRingStyleElement.id = 'sql-crack-focus-ring-styles';
+        document.head.appendChild(focusRingStyleElement);
+    }
+    focusRingStyleElement.textContent = `
+        #sql-crack-skip-to-graph:focus-visible,
+        #root button:focus-visible,
+        #root input:focus-visible,
+        #root select:focus-visible,
+        #root [role="button"]:focus-visible,
+        #sql-crack-command-bar input:focus-visible,
+        #node-context-menu:focus-visible,
+        .ctx-menu-item:focus-visible,
+        [role="menu"] [tabindex="-1"]:focus-visible,
+        [role="listbox"] [tabindex="-1"]:focus-visible,
+        svg[tabindex="0"]:focus-visible,
+        .node[tabindex="0"]:focus-visible {
+            outline: 2px solid ${focusRingColor} !important;
+            outline-offset: 2px;
+            box-shadow: 0 0 0 3px ${focusRingBackground};
+        }
+    `;
+}
 let zeroGravityModeActive = false;
 let zeroGravityAnimationFrameId: number | null = null;
 let zeroGravityLastFrameAt = 0;
@@ -934,6 +971,10 @@ function restoreLayoutHistorySnapshot(snapshot: LayoutHistorySnapshot): void {
     } else {
         clearFocusMode();
     }
+    // The snapshot can change the layout and focus direction; the layout
+    // picker, Focus Direction button, and persisted state follow this event.
+    // applyFocusMode() does not dispatch it, so a focus snapshot went unseen.
+    notifyRendererStateChanged();
 }
 
 function syncUndoRedoUiState(): void {
@@ -1094,12 +1135,13 @@ export function initRenderer(container: HTMLElement): void {
         requestAnimationFrame(() => adjustPanelBottoms(getLegendBarHeight()));
     }
 
-    // Create command bar (Ctrl+Shift+P palette)
+    // Create command bar (Alt+P avoids intercepting VS Code's Command Palette)
     createCommandBar(container, () => state.isDarkTheme);
     registerCommandBarActions([
         { id: 'zoom-in', label: 'Zoom In', shortcut: '+', action: () => zoomIn() },
         { id: 'zoom-out', label: 'Zoom Out', shortcut: '-', action: () => zoomOut() },
-        { id: 'fit-view', label: 'Refresh Visualization', shortcut: 'R', action: () => resetView() },
+        { id: 'refresh', label: 'Refresh Visualization', shortcut: 'R', action: () => refreshVisualization() },
+        { id: 'fit-view', label: 'Fit to View', shortcut: 'Esc', action: () => resetView() },
         { id: 'toggle-theme', label: 'Toggle Theme', shortcut: 'T', category: 'View', action: () => toggleTheme() },
         { id: 'toggle-fullscreen', label: 'Toggle Fullscreen', shortcut: 'F', category: 'View', action: () => toggleFullscreen() },
         { id: 'toggle-legend', label: 'Toggle Legend', shortcut: 'L', category: 'View', action: () => toggleLegend() },
@@ -1148,8 +1190,7 @@ export function initRenderer(container: HTMLElement): void {
     // Accessibility: reduced motion and high contrast support
     reducedMotionStyleElement?.remove();
     reducedMotionStyleElement = document.createElement('style');
-    const focusRingColor = state.isDarkTheme ? '#93c5fd' : '#1d4ed8';
-    const focusRingBackground = state.isDarkTheme ? 'rgba(147, 197, 253, 0.16)' : 'rgba(29, 78, 216, 0.1)';
+    applyFocusRingStyles(state.isDarkTheme);
     const hcStyles = state.isHighContrast ? `
         /* VS Code High Contrast mode overrides */
         .node-rect { stroke-width: 2px !important; }
@@ -1167,19 +1208,6 @@ export function initRenderer(container: HTMLElement): void {
         text { font-weight: 600 !important; }
     ` : '';
     reducedMotionStyleElement.textContent = `
-        #sql-crack-skip-to-graph:focus-visible,
-        #sql-crack-toolbar button:focus-visible,
-        #sql-crack-toolbar input:focus-visible,
-        #sql-crack-toolbar select:focus-visible,
-        #sql-crack-command-bar input:focus-visible,
-        #node-context-menu:focus-visible,
-        .ctx-menu-item:focus-visible,
-        svg[tabindex="0"]:focus-visible,
-        .node[tabindex="0"]:focus-visible {
-            outline: 2px solid ${focusRingColor};
-            outline-offset: 2px;
-            box-shadow: 0 0 0 3px ${focusRingBackground};
-        }
         @media (prefers-reduced-motion: reduce) {
             *, *::before, *::after {
                 animation-duration: 0.01ms !important;
@@ -1238,6 +1266,9 @@ export function initRenderer(container: HTMLElement): void {
             updateTransform,
             updateZoomIndicator,
             recordLayoutHistorySnapshot,
+            // Wheel zoom, pan, and drags change persisted view state without a
+            // layout change; index.ts marks its UI state dirty on this event.
+            onViewStateChanged: () => document.dispatchEvent(new CustomEvent('view-state-changed')),
             selectNode,
             clearFocusMode,
             fitView,
@@ -1247,6 +1278,7 @@ export function initRenderer(container: HTMLElement): void {
             hideContextMenu,
             clearSearch,
             resetView,
+            refreshVisualization,
             undoLayoutChange,
             redoLayoutChange,
             toggleCommandBar,
@@ -1283,7 +1315,18 @@ export function initRenderer(container: HTMLElement): void {
         clearTimeout(resizeObserverDebounceTimer);
         resizeObserverDebounceTimer = null;
     }
-    rendererResizeObserver = new ResizeObserver(() => {
+    let observedContainerSize: string | null = null;
+    rendererResizeObserver = new ResizeObserver((entries) => {
+        const rect = entries[0]?.contentRect;
+        const size = rect ? `${Math.round(rect.width)}x${Math.round(rect.height)}` : '';
+        // ResizeObserver also reports the initial size when observation
+        // starts. Fitting then would override a viewport restored from
+        // persisted state; render() already fits new graphs itself.
+        if (observedContainerSize === null || size === observedContainerSize) {
+            observedContainerSize = size;
+            return;
+        }
+        observedContainerSize = size;
         // Debounce resize events
         if (resizeObserverDebounceTimer) {
             clearTimeout(resizeObserverDebounceTimer);
@@ -1646,6 +1689,8 @@ export function render(result: ParseResult, options?: RenderOptions): void {
         clearSearch();
         clearBreadcrumbBar();
         highlightedLineNodeId = null;
+        // Focus mode and column lineage were reset above; let toolbar toggles resync.
+        notifyRendererStateChanged();
     }
 
     currentNodes = result.nodes;
@@ -1697,6 +1742,10 @@ export function render(result: ParseResult, options?: RenderOptions): void {
         renderError(result.error, result.errorSourceLine);
         updateStatsPanel();
         updateHintsPanel();
+        refreshVisibleSqlPreview();
+        hideTooltip();
+        hideContextMenu();
+        updateMinimap();
         // Reset viewport to center so error message is visible
         resetViewportToCenter();
         return;
@@ -1716,6 +1765,10 @@ export function render(result: ParseResult, options?: RenderOptions): void {
         renderError('No visualization data');
         updateStatsPanel();
         updateHintsPanel();
+        refreshVisibleSqlPreview();
+        hideTooltip();
+        hideContextMenu();
+        updateMinimap();
         // Reset viewport to center so error message is visible
         resetViewportToCenter();
         return;
@@ -1729,13 +1782,42 @@ export function render(result: ParseResult, options?: RenderOptions): void {
     preCalculateExpandableDimensions(result.nodes);
 
     const clustered = applyClustering(result.nodes, result.edges);
+    const reRendersSameGraph = !shouldResetCloudState
+        && preserveProjectedNodePositions(clustered.nodes, clustered.edges, renderNodes, renderEdges);
     renderNodes = clustered.nodes;
     renderEdges = clustered.edges;
     renderNodeMap = new Map(renderNodes.map(node => [node.id, node]));
 
+    // Parser coordinates are vertical. Apply the configured layout to the data
+    // before choosing the first visible subset so non-vertical layouts do not
+    // create hundreds of off-screen DOM nodes only to prune them a frame later.
+    // Re-rendering the same graph (theme or grid/accent setting changes) keeps
+    // its positions, which already carry this layout and any dragged nodes;
+    // switchLayout() lays out currentNodes itself. Rebuilt cluster nodes keep
+    // their positions too; expanding or collapsing changes the projection
+    // and still applies the selected layout.
+    const initialLayout = state.layoutType || 'vertical';
+    if (initialLayout !== 'vertical' && !reRendersSameGraph) {
+        const bottomUp = window.flowDirection === 'bottom-up';
+        switch (initialLayout) {
+            case 'horizontal':
+                layoutGraphHorizontal(renderNodes, renderEdges, bottomUp);
+                break;
+            case 'compact':
+                layoutGraphCompact(renderNodes, renderEdges, bottomUp);
+                break;
+            case 'force':
+                layoutGraphForce(renderNodes, renderEdges);
+                break;
+            case 'radial':
+                layoutGraphRadial(renderNodes, renderEdges);
+                break;
+        }
+    }
+
     // Determine if we should use virtualization
     const useVirtualization = virtualizationEnabled && shouldVirtualize(renderNodes.length);
-    const canVirtualizeOnFirstPaint = useVirtualization && (state.layoutType || 'vertical') === 'vertical';
+    const canVirtualizeOnFirstPaint = useVirtualization;
 
     // Get nodes and edges to render (all or visible subset)
     let nodesToRender = renderNodes;
@@ -1777,19 +1859,11 @@ export function render(result: ParseResult, options?: RenderOptions): void {
     updateStatsPanel();
     updateHintsPanel();
 
-    // Update SQL preview if visible
-    if (sqlPreviewPanel && sqlPreviewPanel.style.visibility !== 'hidden') {
-        updateSqlPreview();
-    }
+    refreshVisibleSqlPreview();
 
     // Fit view
-    if (!canVirtualizeOnFirstPaint && (!state.layoutType || state.layoutType === 'vertical')) {
+    if (!canVirtualizeOnFirstPaint) {
         fitView();
-    }
-
-    // Apply non-default layout if configured (parser positions are always vertical)
-    if (state.layoutType && state.layoutType !== 'vertical') {
-        switchLayout(state.layoutType);
     }
 
     // Update minimap for complex queries
@@ -2568,8 +2642,20 @@ export function setViewState(viewState: TabViewState): void {
     updateZoomIndicator();
 }
 
+/**
+ * Fit the graph to the viewport. Used by Escape, the ⊡ toolbar button, the
+ * context menu, and the breadcrumb root — it must never re-parse, which would
+ * reset the active query, node positions, and undo history.
+ */
 export function resetView(): void {
-    document.dispatchEvent(new CustomEvent('sql-crack-reset-view'));
+    fitView();
+    updateZoomIndicator();
+    recordLayoutHistorySnapshot();
+}
+
+/** Re-parse and re-render the current document (R key and command bar). */
+export function refreshVisualization(): void {
+    document.dispatchEvent(new CustomEvent('sql-crack-refresh-visualization'));
 }
 
 export function undoLayoutChange(): void {
@@ -2867,8 +2953,7 @@ function getWarningColor(severity: string): string {
 }
 
 function truncate(str: string, maxLen: number): string {
-    if (str.length <= maxLen) { return str; }
-    return str.substring(0, maxLen - 1) + '…';
+    return truncateCodePoints(str, maxLen);
 }
 
 function lightenColor(hex: string, percent: number): string {
@@ -3007,8 +3092,15 @@ export function toggleLayout(): void {
     switchLayout(LAYOUT_ORDER[nextIndex]);
 }
 
-export function switchLayout(layoutType: LayoutType): void {
+export function switchLayout(
+    layoutType: LayoutType,
+    options: { recordHistory?: boolean; onComplete?: () => void } = {}
+): void {
+    const previousLayout = state.layoutType;
+    state.layoutType = layoutType;
     if (!currentNodes || currentNodes.length === 0 || !svg || !mainGroup) {
+        options.onComplete?.();
+        notifyRendererStateChanged();
         return;
     }
     stopZeroGravityMode({ silent: true });
@@ -3023,10 +3115,7 @@ export function switchLayout(layoutType: LayoutType): void {
     // Use requestAnimationFrame to allow UI to update before heavy computation
     requestAnimationFrame(() => {
         if (switchGeneration !== layoutSwitchGeneration) { return; }
-        const previousLayout = state.layoutType;
         try {
-            state.layoutType = layoutType;
-
             // Re-run layout with selected algorithm
             const bottomUp = window.flowDirection === 'bottom-up';
             switch (layoutType) {
@@ -3097,7 +3186,9 @@ export function switchLayout(layoutType: LayoutType): void {
 
             fitView();
             announceLiveRegionMessage(`Layout switched to ${layoutType}`);
-            recordLayoutHistorySnapshot();
+            if (options.recordHistory !== false) {
+                recordLayoutHistorySnapshot();
+            }
 
             // Notify index.ts that layout state changed (covers keyboard shortcut paths)
             notifyRendererStateChanged();
@@ -3105,6 +3196,7 @@ export function switchLayout(layoutType: LayoutType): void {
             console.error('[SQL Crack] Layout switch failed:', e);
             state.layoutType = previousLayout;
         } finally {
+            options.onComplete?.();
             if (showLoadingIndicator) {
                 requestAnimationFrame(() => { hideGlobalLoading(); });
             }
@@ -3163,6 +3255,10 @@ function applyFocusMode(nodeId: string): void {
 
 function clearFocusMode(): void {
     clearFocusModeFeature({ mainGroup, state });
+    // Escape and "clear" paths turn focus off without toggleFocusMode(); keep
+    // the Focus chip and toolbar button in sync with the renderer state.
+    removeBreadcrumbSegment('focus-mode');
+    notifyRendererStateChanged();
 }
 
 export function setFocusMode(mode: FocusMode): void {
@@ -3236,6 +3332,13 @@ export function isSqlPreviewVisible(): boolean {
         return false;
     }
     return !(sqlPreviewPanel.style.visibility === 'hidden' || sqlPreviewPanel.style.opacity === '0');
+}
+
+/** Keep an open SQL preview on the statement being rendered, including error renders. */
+function refreshVisibleSqlPreview(): void {
+    if (sqlPreviewPanel && sqlPreviewPanel.style.visibility !== 'hidden') {
+        updateSqlPreview();
+    }
 }
 
 function updateSqlPreview(): void {
@@ -3423,6 +3526,8 @@ export function isDarkTheme(): boolean {
 
 function applyTheme(dark: boolean): void {
     if (!svg) {return;}
+
+    applyFocusRingStyles(dark);
 
     const colors = dark ? {
         bg: UI_COLORS.background,
@@ -3759,6 +3864,11 @@ export function toggleColumnFlows(show?: boolean): void {
 
     if (state.showColumnFlows) {
         if (!shouldEnableColumnLineage(currentColumnFlows?.length || 0)) {
+            if (currentNodes.length === 0) {
+                // Keep the persisted preference through an error/empty render;
+                // a later successful render will apply it once flows exist.
+                return;
+            }
             state.showColumnFlows = false;
             setColumnLineageBannerVisible(true, {
                 text: COLUMN_LINEAGE_UNAVAILABLE_BANNER_TEXT,
@@ -3907,7 +4017,7 @@ export function highlightNodeAtLine(line: number): void {
                 if (node) {
                     restoreNodeBorderState(rect);
                     if (state.selectedNodeId === highlightedLineNodeId) {
-                        rect.setAttribute('stroke', UI_COLORS.white);
+                        rect.setAttribute('stroke', state.isDarkTheme ? UI_COLORS.white : UI_COLORS.focusTextLight);
                         rect.setAttribute('stroke-width', '3');
                         rect.setAttribute('filter', 'url(#glow)');
                     }
@@ -3918,7 +4028,7 @@ export function highlightNodeAtLine(line: number): void {
     }
 
     // Find node that contains this line
-    const node = findNodeAtLine(line);
+    const node = findNodeAtLine(currentNodes, line);
     if (!node) {return;}
 
     // Highlight the node
@@ -3935,35 +4045,6 @@ export function highlightNodeAtLine(line: number): void {
         // Optionally zoom to the node
         // zoomToNode(node);
     }
-}
-
-function findNodeAtLine(line: number): FlowNode | null {
-    // Find node whose line range contains the cursor line
-    for (const node of currentNodes) {
-        if (node.startLine && node.endLine) {
-            if (line >= node.startLine && line <= node.endLine) {
-                return node;
-            }
-        } else if (node.startLine && line === node.startLine) {
-            return node;
-        }
-    }
-
-    // Fallback: find closest node by start line
-    let closest: FlowNode | null = null;
-    let minDist = Infinity;
-
-    for (const node of currentNodes) {
-        if (node.startLine) {
-            const dist = Math.abs(node.startLine - line);
-            if (dist < minDist) {
-                minDist = dist;
-                closest = node;
-            }
-        }
-    }
-
-    return minDist <= 5 ? closest : null;
 }
 
 // ============================================================

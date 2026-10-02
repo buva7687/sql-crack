@@ -273,12 +273,9 @@ export function getViewModeScriptFragment(): string {
             if (previousView === 'graph') {
                 if (typeof clearTraceMode === 'function') { clearTraceMode(); }
                 if (typeof clearFocusMode === 'function') { clearFocusMode(); }
-                if (typeof clearPathHighlight === 'function') { clearPathHighlight(); }
+                if (typeof clearPathState === 'function') { clearPathState(); }
                 traceMode = null;
                 focusModeEnabled = false;
-                pathStartNodeId = null;
-                pathEndNodeId = null;
-                pathStatusMessage = '';
                 document.querySelectorAll('.node-selected').forEach(function(el) { el.classList.remove('node-selected'); });
                 if (selectionDetails) selectionDetails.style.display = 'none';
                 if (selectionEdgeDetails) selectionEdgeDetails.style.display = 'none';
@@ -502,11 +499,7 @@ export function getViewModeScriptFragment(): string {
                     // highlights from the old mode being visible while the server regenerates HTML.
                     // clearSelection() also hides the selection panel so stale details don't persist.
                     if (typeof clearSelection === 'function') { clearSelection(); }
-                    if (typeof clearPathHighlight === 'function') { clearPathHighlight(); }
-                    pathStartNodeId = null;
-                    pathEndNodeId = null;
-                    pathStatusMessage = '';
-                    if (typeof updatePathBuilderUi === 'function') { updatePathBuilderUi(); }
+                    if (typeof clearPathState === 'function') { clearPathState(); }
                     currentGraphMode = mode;
                     if (typeof syncGraphContextUi === 'function') {
                         syncGraphContextUi();

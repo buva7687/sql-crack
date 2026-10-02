@@ -12,6 +12,7 @@ import {
     cancelPendingParse,
     getWorkerStatus,
     isCancelledBatchParseResult,
+    configureParseTimeout,
 } from '../../../src/webview/parserClient';
 import { SqlDialect } from '../../../src/webview/types';
 
@@ -30,6 +31,7 @@ describe('parserClient', () => {
     `;
 
     afterEach(() => {
+        configureParseTimeout();
         terminateWorker();
         delete (global as Record<string, unknown>).window;
         delete (global as Record<string, unknown>).Worker;
@@ -70,6 +72,29 @@ describe('parserClient', () => {
                 expect(olderResult.error).toBe('Parse cancelled');
                 expect(newerResult.error).toBeUndefined();
                 expect(newerResult.nodes.length).toBeGreaterThan(0);
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+
+        it('does not let an independent compare parse cancel the active visualization parse', async () => {
+            jest.useFakeTimers();
+            try {
+                const visualization = parseAsync('SELECT * FROM current_query', 'MySQL');
+                const comparison = parseAsync(
+                    'SELECT * FROM baseline_query',
+                    'MySQL',
+                    {},
+                    'independent'
+                );
+
+                jest.runOnlyPendingTimers();
+                const [visualizationResult, comparisonResult] = await Promise.all([visualization, comparison]);
+
+                expect(visualizationResult.error).toBeUndefined();
+                expect(comparisonResult.error).toBeUndefined();
+                expect(visualizationResult.tableUsage.has('current_query')).toBe(true);
+                expect(comparisonResult.tableUsage.has('baseline_query')).toBe(true);
             } finally {
                 jest.useRealTimers();
             }
@@ -494,6 +519,50 @@ describe('parserClient', () => {
             }
         });
 
+        it('keeps queued requests alive after a worker-reported parser error', async () => {
+            jest.useFakeTimers();
+            try {
+                const { workerInstances } = installWorkerEnvironment();
+                const first = parseBatchAsync('SELECT 1', 'MySQL', undefined, {}, 'independent');
+                const second = parseBatchAsync('SELECT 2', 'MySQL', undefined, {}, 'independent');
+
+                jest.advanceTimersByTime(0);
+                await Promise.resolve();
+
+                const worker = workerInstances[0];
+                const firstRequest = worker.postMessage.mock.calls[0][0];
+                const secondRequest = worker.postMessage.mock.calls[1][0];
+                worker.emitMessage({ type: 'started', requestId: firstRequest.requestId });
+                worker.emitMessage({
+                    type: 'error',
+                    requestId: firstRequest.requestId,
+                    error: 'request-local parser failure',
+                });
+
+                await expect(first).resolves.toEqual(expect.objectContaining({ errorCount: 0 }));
+                expect(worker.terminate).not.toHaveBeenCalled();
+
+                worker.emitMessage({ type: 'started', requestId: secondRequest.requestId });
+                worker.emitMessage({
+                    type: 'parseBatch',
+                    requestId: secondRequest.requestId,
+                    result: {
+                        queries: [],
+                        totalStats: { tables: 0, joins: 0, subqueries: 0, ctes: 0, aggregations: 0, windowFunctions: 0, unions: 0, conditions: 0, complexity: 'Simple', complexityScore: 0 },
+                        successCount: 1,
+                        errorCount: 0,
+                    },
+                });
+
+                await expect(second).resolves.toEqual(expect.objectContaining({
+                    successCount: 1,
+                    errorCount: 0,
+                }));
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+
         it('returns a lightweight result on worker timeout instead of parsing synchronously', async () => {
             jest.useFakeTimers();
             try {
@@ -515,6 +584,52 @@ describe('parserClient', () => {
                 expect(result.nodes).toHaveLength(0);
                 expect(result.error).toContain('timed out');
                 expect(workerInstances[0].terminate).toHaveBeenCalled();
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+
+        it('retries queued requests after the active worker request times out', async () => {
+            jest.useFakeTimers();
+            try {
+                const { workerInstances } = installWorkerEnvironment();
+                const first = parseBatchAsync('SELECT 1', 'MySQL', undefined, {}, 'independent');
+                const second = parseBatchAsync('SELECT 2', 'MySQL', undefined, {}, 'independent');
+
+                jest.advanceTimersByTime(0);
+                await Promise.resolve();
+                expect(workerInstances).toHaveLength(1);
+                expect(workerInstances[0].postMessage).toHaveBeenCalledTimes(2);
+
+                const firstRequest = workerInstances[0].postMessage.mock.calls[0][0];
+                workerInstances[0].emitMessage({ type: 'started', requestId: firstRequest.requestId });
+
+                jest.advanceTimersByTime(5000);
+                const firstResult = await first;
+                expect(firstResult.parseErrors?.[0]?.message).toContain('timed out');
+                expect(workerInstances[0].terminate).toHaveBeenCalledTimes(1);
+
+                expect(workerInstances).toHaveLength(2);
+                const replacementWorker = workerInstances[1];
+                const request = replacementWorker.postMessage.mock.calls[0][0];
+                expect(request.payload.sql).toBe('SELECT 2');
+                replacementWorker.emitMessage({ type: 'started', requestId: request.requestId });
+                replacementWorker.emitMessage({
+                    type: 'parseBatch',
+                    requestId: request.requestId,
+                    result: {
+                        queries: [],
+                        totalStats: { tables: 0, joins: 0, subqueries: 0, ctes: 0, aggregations: 0, windowFunctions: 0, unions: 0, conditions: 0, complexity: 'Simple', complexityScore: 0 },
+                        successCount: 1,
+                        errorCount: 0,
+                    },
+                });
+
+                await expect(second).resolves.toEqual(expect.objectContaining({
+                    successCount: 1,
+                    errorCount: 0,
+                }));
+                expect(replacementWorker.terminate).not.toHaveBeenCalled();
             } finally {
                 jest.useRealTimers();
             }
@@ -575,6 +690,37 @@ describe('parserClient', () => {
                 expect(workerInstances).toHaveLength(2);
                 expect(olderResult.error).toBe('Parse cancelled');
                 expect(newerResult.nodes).toEqual([{ id: 'n2' }]);
+            } finally {
+                jest.useRealTimers();
+            }
+        });
+
+        it('uses the configured parse timeout for the worker watchdog and request payload', async () => {
+            jest.useFakeTimers();
+            try {
+                configureParseTimeout(30000);
+                const { workerInstances } = installWorkerEnvironment();
+                let settled = false;
+                const pending = parseBatchAsync('SELECT 1; SELECT 2;', 'MySQL').then(result => {
+                    settled = true;
+                    return result;
+                });
+
+                jest.runOnlyPendingTimers();
+                await Promise.resolve();
+                const [request] = workerInstances[0].postMessage.mock.calls[0];
+                expect(request.payload.parseTimeoutMs).toBe(30000);
+
+                workerInstances[0].emitMessage({ type: 'started', requestId: request.requestId });
+                jest.advanceTimersByTime(29000);
+                await Promise.resolve();
+                expect(settled).toBe(false);
+                expect(workerInstances[0].terminate).not.toHaveBeenCalled();
+
+                jest.advanceTimersByTime(1000);
+                const result = await pending;
+                expect(result.parseErrors?.[0]?.message).toContain('timed out');
+                expect(workerInstances[0].terminate).toHaveBeenCalled();
             } finally {
                 jest.useRealTimers();
             }

@@ -2,7 +2,7 @@
 
 import { BatchParseResult } from '../sqlParser';
 import { ICONS } from '../../shared/icons';
-import { escapeHtml, stripSqlComments } from '../../shared/stringUtils';
+import { escapeHtml, stripSqlComments, truncateCodePoints } from '../../shared/stringUtils';
 import { Z_INDEX } from '../../shared/zIndex';
 
 export interface BatchTabsCallbacks {
@@ -422,8 +422,7 @@ export function updateBatchTabs(
 
 function truncateSql(sql: string, maxLen: number): string {
     const normalized = sql.replace(/\s+/g, ' ').trim();
-    if (normalized.length <= maxLen) { return normalized; }
-    return normalized.substring(0, maxLen - 3) + '...';
+    return truncateCodePoints(normalized, maxLen, '...');
 }
 
 /**
@@ -452,10 +451,7 @@ export function extractQueryLabel(sql: string, fallbackIndex?: number): string {
         const match = normalized.match(regex);
         if (match) {
             const label = format(match);
-            if (label.length > 20) {
-                return label.substring(0, 19) + '\u2026';
-            }
-            return label;
+            return truncateCodePoints(label, 20);
         }
     }
 

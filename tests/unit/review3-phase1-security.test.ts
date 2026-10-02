@@ -117,7 +117,7 @@ describe('XSS: batchTabs label escaping', () => {
     const source = readFileSync(join(__dirname, '../../src/webview/ui/batchTabs.ts'), 'utf8');
 
     it('should use the canonical shared escapeHtml function', () => {
-        expect(source).toContain("import { escapeHtml, stripSqlComments } from '../../shared/stringUtils';");
+        expect(source).toMatch(/import \{[^}]*escapeHtml[^}]*stripSqlComments[^}]*\} from '\.\.\/\.\.\/shared\/stringUtils';/);
         expect(source).not.toContain('function escapeHtml(');
     });
 

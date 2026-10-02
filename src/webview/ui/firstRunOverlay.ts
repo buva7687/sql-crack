@@ -72,7 +72,7 @@ export function showFirstRunOverlay(
     const tips = [
         { icon: ICONS.help, title: 'Keyboard shortcuts', desc: 'Press ? to see all shortcuts. Use 1-5 for quick layouts.' },
         { icon: ICONS.columnLineage, title: 'Column lineage', desc: 'Press C to trace how columns flow through your query.' },
-        { icon: ICONS.search, title: 'Command palette', desc: 'Ctrl+Shift+P opens the command palette for quick actions.' },
+        { icon: ICONS.search, title: 'Command palette', desc: 'Alt+P opens SQL Crack quick actions.' },
         { icon: ICONS.layout, title: 'Legend bar', desc: 'Press L to toggle the color legend at the bottom.' },
     ];
 

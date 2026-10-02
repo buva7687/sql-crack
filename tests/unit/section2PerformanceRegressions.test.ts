@@ -5,7 +5,7 @@ describe('audit section 2 performance regression guards', () => {
     it('P2: caches statement line counts instead of repeatedly splitting per loop iteration', () => {
         const source = readFileSync(join(__dirname, '../../src/webview/sqlParser.ts'), 'utf8');
         expect(source).toContain('const stmtLineCount = countLines(stmt);');
-        expect(source).toContain('currentLine = stmtStartLine + stmtLineCount;');
+        expect(source).toContain('const stmtStartLine = countStartsAtOrBefore(lineStarts, stmtStartOffset);');
         expect(source).not.toContain("stmt.split('\\n').length");
     });
 
@@ -36,7 +36,7 @@ describe('audit section 2 performance regression guards', () => {
         expect(source).toContain('function compactBatchResultMemory(result: BatchParseResult, activeIndex: number, deferredQueryThreshold: number = DEFERRED_QUERY_THRESHOLD): void');
         expect(source).toContain('window.sqlCrackConfig?.deferredQueryThreshold ?? window.deferredQueryThreshold');
         expect(source).toContain("import { applyLineOffsetToResult } from './state/lineOffsets';");
-        expect(source).toContain('const lineRange = batchResult.queryLineRanges?.[queryIndex];');
+        expect(source).toContain('const lineRange = owningBatch.queryLineRanges?.[queryIndex];');
         expect(source).toContain('applyLineOffsetToResult(hydratedQuery, lineOffset);');
         expect(source).toContain('async function hydrateQueryIfNeeded(queryIndex: number): Promise<void>');
         expect(source).toContain('deferredQueryIndexes.has(newIndex)');

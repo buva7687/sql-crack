@@ -9,13 +9,13 @@ import {
     ExtractionOptions,
     DEFAULT_EXTRACTION_OPTIONS,
 } from './types';
-import { escapeRegex, getDollarQuoteDelimiterAt, maskSqlCommentsPreservingPositions, stripSqlComments, unwrapIdentifierValue } from '../../shared';
+import { dialectSupportsBackslashEscapes, dialectSupportsHashComments, escapeRegex, getDollarQuoteDelimiterAt, isPostgresJsonPathOperatorAt, maskSqlCommentsPreservingPositions, quotedStringAllowsBackslashEscapes, stripSqlComments, TextOffsetIndex, unwrapIdentifierValue } from '../../shared';
 import { preprocessSqlForWorkspaceParsing } from '../parserConfig';
 import { getIdentifierSemantics } from '../identifiers';
 import { SCHEMA_SQL_RESERVED_WORDS } from './constants';
 
 const SQL_IDENTIFIER_PATTERN =
-    '(?:"(?:[^"]|"")*"|`(?:[^`]|``)*`|\\[(?:[^\\]]|\\]\\])*\\]|[\\w$#@]+)';
+    '(?:"(?:[^"]|"")*"|`(?:[^`]|``)*`|\\[(?:[^\\]]|\\]\\])*\\]|[\\p{L}\\p{M}\\p{N}_$#@]+)';
 
 interface SqlSearchViews {
     searchableSql: string;
@@ -37,12 +37,47 @@ interface QualifiedIdentifierParts {
     rawCatalog?: string;
 }
 
+interface HeaderMatch {
+    index: number;
+    parts: QualifiedIdentifierParts;
+}
+
+type DefinitionType = 'table' | 'view';
+
 /**
  * Extracts schema definitions (CREATE TABLE/VIEW) from SQL
  */
 export class SchemaExtractor {
     private parser: Parser;
     private options: ExtractionOptions;
+    /**
+     * Per-extraction lookup caches. Every definition asks for its header
+     * match, statement index, and line number; recomputing those from the
+     * start of the file made large schema dumps cubic. Cleared after each
+     * extraction so file text is not retained between calls.
+     */
+    private readonly offsets = new TextOffsetIndex();
+    /**
+     * Whether `\` escapes inside quotes for the dialect being extracted. In
+     * PostgreSQL, SQL Server, Oracle, and Teradata `'\'` is a complete literal.
+     */
+    private backslashEscapes = true;
+    /** Whether `#` starts a line comment (MySQL, MariaDB, BigQuery) for this extraction. */
+    private hashComments = true;
+    private dollarQuotes = true;
+    private nestedBlockComments = true;
+    private readonly headerMatchCache: Record<DefinitionType, Map<string, HeaderMatch[]>> = {
+        table: new Map(),
+        view: new Map(),
+    };
+    private readonly headerMatchesByStatementCache: Record<DefinitionType, Map<string, Map<number, HeaderMatch[]>>> = {
+        table: new Map(),
+        view: new Map(),
+    };
+    private readonly firstHeaderIndexByNameCache: Record<DefinitionType, Map<string, Map<string, number>>> = {
+        table: new Map(),
+        view: new Map(),
+    };
 
     constructor(options: Partial<ExtractionOptions> = {}) {
         this.parser = new Parser();
@@ -70,48 +105,85 @@ export class SchemaExtractor {
         filePath: string,
         dialect: SqlDialect = this.options.dialect
     ): { definitions: SchemaDefinition[]; warnings: string[] } {
+        try {
+            return this.extractDefinitionsUncached(sql, filePath, dialect);
+        } finally {
+            this.clearLookupCaches();
+        }
+    }
+
+    private clearLookupCaches(): void {
+        this.offsets.clear();
+        for (const type of ['table', 'view'] as const) {
+            this.headerMatchCache[type].clear();
+            this.headerMatchesByStatementCache[type].clear();
+            this.firstHeaderIndexByNameCache[type].clear();
+        }
+    }
+
+    private extractDefinitionsUncached(
+        sql: string,
+        filePath: string,
+        dialect: SqlDialect
+    ): { definitions: SchemaDefinition[]; warnings: string[] } {
         const definitions: SchemaDefinition[] = [];
         const warnings: string[] = [];
+        this.backslashEscapes = dialectSupportsBackslashEscapes(dialect);
+        this.hashComments = dialectSupportsHashComments(dialect);
+        this.dollarQuotes = dialect !== 'MySQL' && dialect !== 'MariaDB';
+        this.nestedBlockComments = dialect !== 'MySQL' && dialect !== 'MariaDB';
         const { sql: normalizedSql } = preprocessSqlForWorkspaceParsing(sql, dialect);
         const sourceViews = this.createSqlSearchViews(sql);
+        const normalizedViews = normalizedSql === sql
+            ? sourceViews
+            : this.createSqlSearchViews(normalizedSql);
 
         try {
             const dbDialect = this.mapDialect(dialect);
-            const ast = this.parser.astify(normalizedSql, { database: dbDialect });
-            const statements = Array.isArray(ast) ? ast : [ast];
+            const statementStarts = [0];
+            for (let index = 0; index < normalizedViews.structuralSql.length; index++) {
+                if (normalizedViews.structuralSql[index] === ';') {
+                    statementStarts.push(index + 1);
+                }
+            }
 
-            for (let statementIndex = 0; statementIndex < statements.length; statementIndex++) {
-                const stmt = statements[statementIndex];
-                if (!stmt) {continue;}
+            for (let statementIndex = 0; statementIndex < statementStarts.length; statementIndex++) {
+                const start = statementStarts[statementIndex];
+                const end = statementStarts[statementIndex + 1] ?? normalizedSql.length;
+                const structuralStatement = normalizedViews.structuralSql.slice(start, end).replace(/;\s*$/, '');
+                if (!structuralStatement.trim()) {continue;}
 
-                if (this.isCreateTable(stmt)) {
-                    const def = this.parseCreateTable(
-                        stmt,
-                        filePath,
-                        sql,
-                        statementIndex,
-                        sourceViews
-                    );
-                    if (def) {definitions.push(def);}
-                } else if (this.isCreateView(stmt)) {
-                    const def = this.parseCreateView(
-                        stmt,
-                        filePath,
-                        sql,
-                        statementIndex,
-                        sourceViews
-                    );
-                    if (def) {definitions.push(def);}
+                const ast = this.parser.astify(normalizedSql.slice(start, end), { database: dbDialect });
+                const statements = Array.isArray(ast) ? ast : [ast];
+                for (const stmt of statements) {
+                    if (!stmt) {continue;}
+
+                    if (this.isCreateTable(stmt)) {
+                        const def = this.parseCreateTable(
+                            stmt,
+                            filePath,
+                            sql,
+                            statementIndex,
+                            sourceViews
+                        );
+                        if (def) {definitions.push(def);}
+                    } else if (this.isCreateView(stmt)) {
+                        const def = this.parseCreateView(
+                            stmt,
+                            filePath,
+                            sql,
+                            statementIndex,
+                            sourceViews
+                        );
+                        if (def) {definitions.push(def);}
+                    }
                 }
             }
         } catch (error) {
             // Fallback to regex-based extraction for unsupported dialects or parse errors
             warnings.push(this.formatParserWarning('Schema', error));
             definitions.length = 0;
-            const fallbackViews = normalizedSql === sql
-                ? sourceViews
-                : this.createSqlSearchViews(normalizedSql);
-            definitions.push(...this.extractWithRegex(normalizedSql, filePath, fallbackViews));
+            definitions.push(...this.extractWithRegex(normalizedSql, filePath, normalizedViews));
         }
 
         // SELECT ... INTO is a table-producing statement in SQL Server,
@@ -160,7 +232,12 @@ export class SchemaExtractor {
         const result = new Map<string, boolean>();
         if (!definition.sql || definition.columns.length === 0) {return result;}
 
-        const searchableSql = maskSqlCommentsPreservingPositions(definition.sql);
+        const searchableSql = maskSqlCommentsPreservingPositions(definition.sql, {
+            backslashEscapes: this.backslashEscapes,
+            hashComments: this.hashComments,
+            dollarQuotes: this.dollarQuotes,
+            nestedBlockComments: this.nestedBlockComments,
+        });
         const header = this.createHeaderRegex(definition.type).exec(searchableSql);
         if (!header) {return result;}
         const openingIndex = searchableSql.indexOf('(', header.index + header[0].length);
@@ -180,7 +257,7 @@ export class SchemaExtractor {
                 /^(?:PRIMARY\s+KEY|FOREIGN\s+KEY|UNIQUE|CHECK|CONSTRAINT)\b/i.test(trimmed))) {
                 continue;
             }
-            const match = new RegExp(`^(${SQL_IDENTIFIER_PATTERN})(?:\\s|$)`).exec(trimmed);
+            const match = new RegExp(`^(${SQL_IDENTIFIER_PATTERN})(?:\\s|$)`, 'u').exec(trimmed);
             if (!match) {continue;}
             result.set(this.unquoteIdentifier(match[1]), this.isQuotedIdentifier(match[1]));
         }
@@ -242,19 +319,10 @@ export class SchemaExtractor {
     ): SchemaDefinition | null {
         try {
             const astIdentifier = this.extractTableName(stmt);
-            const sourceIdentifier = this.findDefinitionIdentifierParts(
-                sourceViews.structuralSql,
-                'table',
-                statementIndex
-            );
-            const { name: tableName, schema, catalog } = sourceIdentifier || astIdentifier;
+            const header = this.findDefinitionHeader(sourceViews, 'table', statementIndex, astIdentifier.name);
+            const { name: tableName, schema, catalog } = header?.parts || astIdentifier;
             const columns = this.extractColumns(stmt);
-            const identifierMetadata = this.findDefinitionIdentifierMetadata(
-                sourceViews.searchableSql,
-                tableName,
-                'table',
-                statementIndex
-            );
+            const identifierMetadata = this.getIdentifierMetadata(header);
 
             return {
                 type: 'table',
@@ -265,18 +333,12 @@ export class SchemaExtractor {
                 statementIndex,
                 columns,
                 filePath,
-                lineNumber: this.findLineNumber(
-                    originalSql,
-                    tableName,
-                    'table',
-                    sourceViews.searchableSql
-                ),
-                sql: this.extractStatementSql(
-                    originalSql,
-                    tableName,
-                    'table',
-                    sourceViews
-                )
+                lineNumber: header
+                    ? this.getLineNumberAtIndex(originalSql, header.index)
+                    : this.findLineNumber(originalSql, tableName, 'table', sourceViews.searchableSql),
+                sql: header
+                    ? this.extractStatementFromIndex(originalSql, header.index, sourceViews.structuralSql, true)
+                    : this.extractStatementSql(originalSql, tableName, 'table', sourceViews)
             };
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -296,19 +358,10 @@ export class SchemaExtractor {
     ): SchemaDefinition | null {
         try {
             const astIdentifier = this.extractTableName(stmt);
-            const sourceIdentifier = this.findDefinitionIdentifierParts(
-                sourceViews.structuralSql,
-                'view',
-                statementIndex
-            );
-            const { name: viewName, schema, catalog } = sourceIdentifier || astIdentifier;
+            const header = this.findDefinitionHeader(sourceViews, 'view', statementIndex, astIdentifier.name);
+            const { name: viewName, schema, catalog } = header?.parts || astIdentifier;
             const columns = this.extractViewColumns(stmt);
-            const identifierMetadata = this.findDefinitionIdentifierMetadata(
-                sourceViews.searchableSql,
-                viewName,
-                'view',
-                statementIndex
-            );
+            const identifierMetadata = this.getIdentifierMetadata(header);
 
             return {
                 type: 'view',
@@ -319,18 +372,12 @@ export class SchemaExtractor {
                 statementIndex,
                 columns,
                 filePath,
-                lineNumber: this.findLineNumber(
-                    originalSql,
-                    viewName,
-                    'view',
-                    sourceViews.searchableSql
-                ),
-                sql: this.extractStatementSql(
-                    originalSql,
-                    viewName,
-                    'view',
-                    sourceViews
-                )
+                lineNumber: header
+                    ? this.getLineNumberAtIndex(originalSql, header.index)
+                    : this.findLineNumber(originalSql, viewName, 'view', sourceViews.searchableSql),
+                sql: header
+                    ? this.extractStatementFromIndex(originalSql, header.index, sourceViews.structuralSql, true)
+                    : this.extractStatementSql(originalSql, viewName, 'view', sourceViews)
                 // Note: sourceQuery will be populated by lineage builder
             };
         } catch (error) {
@@ -387,16 +434,60 @@ export class SchemaExtractor {
      */
     private extractColumns(stmt: any): ColumnInfo[] {
         const columns: ColumnInfo[] = [];
+        const tableForeignKeys = new Map<string, ForeignKeyRef>();
         const createDefinitions = stmt.create_definitions || stmt.columns || [];
 
         for (const colDef of createDefinitions) {
             if (colDef.resource === 'column' || colDef.column) {
                 const column = this.parseColumnDefinition(colDef);
                 if (column) {columns.push(column);}
+            } else if (colDef.resource === 'constraint'
+                && String(colDef.constraint_type || '').toUpperCase() === 'FOREIGN KEY') {
+                const localColumns = Array.isArray(colDef.definition)
+                    ? colDef.definition
+                    : [colDef.definition];
+                localColumns.forEach((localColumn: any, index: number) => {
+                    const localName = unwrapIdentifierValue(localColumn?.column)
+                        || unwrapIdentifierValue(localColumn);
+                    const foreignKey = this.parseAstForeignKey(colDef.reference_definition, index);
+                    if (localName && foreignKey) {
+                        tableForeignKeys.set(localName.toLowerCase(), foreignKey);
+                    }
+                });
+            }
+        }
+
+        for (const column of columns) {
+            if (!column.foreignKey) {
+                column.foreignKey = tableForeignKeys.get(column.name.toLowerCase());
             }
         }
 
         return columns;
+    }
+
+    private parseAstForeignKey(reference: any, columnIndex: number = 0): ForeignKeyRef | undefined {
+        if (!reference) {return undefined;}
+        const tableEntry = Array.isArray(reference.table) ? reference.table[0] : reference.table;
+        const tableName = unwrapIdentifierValue(tableEntry?.table)
+            || unwrapIdentifierValue(tableEntry?.name)
+            || unwrapIdentifierValue(tableEntry);
+        if (!tableName) {return undefined;}
+
+        const schema = unwrapIdentifierValue(tableEntry?.db)
+            || unwrapIdentifierValue(tableEntry?.schema);
+        const referencedTable = schema ? `${schema}.${tableName}` : tableName;
+        const definitions = Array.isArray(reference.definition)
+            ? reference.definition
+            : Array.isArray(reference.columns)
+                ? reference.columns
+                : [reference.definition ?? reference.column];
+        const referencedDefinition = definitions[columnIndex] ?? definitions[0];
+        const referencedColumn = unwrapIdentifierValue(referencedDefinition?.column)
+            || unwrapIdentifierValue(referencedDefinition);
+        if (!referencedColumn) {return undefined;}
+
+        return { referencedTable, referencedColumn };
     }
 
     /**
@@ -464,14 +555,8 @@ export class SchemaExtractor {
                 colDef.constraint?.type === 'primary key';
 
             // Extract foreign key if present
-            let foreignKey: ForeignKeyRef | undefined;
-            if (colDef.reference || colDef.references) {
-                const ref = colDef.reference || colDef.references;
-                foreignKey = {
-                    referencedTable: ref.table || 'unknown',
-                    referencedColumn: ref.column || ref.columns?.[0] || 'unknown'
-                };
-            }
+            const ref = colDef.reference_definition || colDef.reference || colDef.references;
+            const foreignKey: ForeignKeyRef | undefined = this.parseAstForeignKey(ref);
 
             return {
                 name,
@@ -515,30 +600,16 @@ export class SchemaExtractor {
             || (trimmed.startsWith('[') && trimmed.endsWith(']'));
     }
 
-    private findDefinitionIdentifierMetadata(
-        searchableSql: string,
-        identifier: string,
-        type: 'table' | 'view',
-        statementIndex: number
-    ): IdentifierMetadata {
-        const regex = this.createHeaderRegex(type);
-        let match: RegExpExecArray | null;
-        while ((match = regex.exec(searchableSql)) !== null) {
-            const parts = this.getQualifiedIdentifierParts(match);
-            if (parts.name.toLowerCase() !== identifier.toLowerCase()) {
-                continue;
-            }
-            const matchStatementIndex = searchableSql.slice(0, match.index).split(';').length - 1;
-            if (matchStatementIndex !== statementIndex) {
-                continue;
-            }
-            return {
-                nameQuoted: this.isQuotedIdentifier(parts.rawName),
-                schemaQuoted: this.isQuotedIdentifier(parts.rawSchema),
-                catalogQuoted: this.isQuotedIdentifier(parts.rawCatalog),
-            };
+    private getIdentifierMetadata(header: HeaderMatch | null): IdentifierMetadata {
+        if (!header) {
+            return { nameQuoted: false, schemaQuoted: false, catalogQuoted: false };
         }
-        return { nameQuoted: false, schemaQuoted: false, catalogQuoted: false };
+        const { parts } = header;
+        return {
+            nameQuoted: this.isQuotedIdentifier(parts.rawName),
+            schemaQuoted: this.isQuotedIdentifier(parts.rawSchema),
+            catalogQuoted: this.isQuotedIdentifier(parts.rawCatalog),
+        };
     }
 
     /**
@@ -547,23 +618,65 @@ export class SchemaExtractor {
      * cannot inflate the count.
      */
     private getStatementIndexAt(structuralSql: string, charIndex: number): number {
-        return structuralSql.slice(0, charIndex).split(';').length - 1;
+        return this.offsets.semicolonSegmentAt(structuralSql, charIndex);
     }
 
-    private findDefinitionIdentifierParts(
-        structuralSql: string,
+    /**
+     * The CREATE header of the definition parsed from statement
+     * `statementIndex`. When a statement holds several headers, the one whose
+     * name matches the AST wins; otherwise the first.
+     */
+    private findDefinitionHeader(
+        sourceViews: SqlSearchViews,
         type: 'table' | 'view',
-        statementIndex: number
-    ): QualifiedIdentifierParts | null {
+        statementIndex: number,
+        astName: string
+    ): HeaderMatch | null {
+        const headers = this.getHeaderMatchesByStatement(sourceViews, type).get(statementIndex);
+        if (!headers || headers.length === 0) {return null;}
+        const astKey = astName.toLowerCase();
+        return headers.find(header => header.parts.name.toLowerCase() === astKey) ?? headers[0];
+    }
+
+    /** All CREATE TABLE/VIEW header matches in `text`, in source order. */
+    private getHeaderMatches(text: string, type: DefinitionType): HeaderMatch[] {
+        const cached = this.headerMatchCache[type].get(text);
+        if (cached) {return cached;}
+
+        const matches: HeaderMatch[] = [];
         const regex = this.createHeaderRegex(type);
         let match: RegExpExecArray | null;
-        while ((match = regex.exec(structuralSql)) !== null) {
-            const matchStatementIndex = this.getStatementIndexAt(structuralSql, match.index);
-            if (matchStatementIndex === statementIndex) {
-                return this.getQualifiedIdentifierParts(match);
+        while ((match = regex.exec(text)) !== null) {
+            matches.push({ index: match.index, parts: this.getQualifiedIdentifierParts(match) });
+        }
+        this.headerMatchCache[type].set(text, matches);
+        return matches;
+    }
+
+    /**
+     * Header matches grouped by the `;`-delimited statement they start in.
+     * Headers are matched in `searchableSql`, which keeps quoted identifiers
+     * (`structuralSql` blanks them, so `CREATE VIEW "v" AS` would capture
+     * `AS`), while statements are counted in `structuralSql` so semicolons
+     * inside quoted identifiers cannot shift the index. Both views preserve
+     * offsets, so a match index is valid in either.
+     */
+    private getHeaderMatchesByStatement(sourceViews: SqlSearchViews, type: DefinitionType): Map<number, HeaderMatch[]> {
+        const cached = this.headerMatchesByStatementCache[type].get(sourceViews.searchableSql);
+        if (cached) {return cached;}
+
+        const byStatement = new Map<number, HeaderMatch[]>();
+        for (const match of this.getHeaderMatches(sourceViews.searchableSql, type)) {
+            const statementIndex = this.getStatementIndexAt(sourceViews.structuralSql, match.index);
+            const matches = byStatement.get(statementIndex);
+            if (matches) {
+                matches.push(match);
+            } else {
+                byStatement.set(statementIndex, [match]);
             }
         }
-        return null;
+        this.headerMatchesByStatementCache[type].set(sourceViews.searchableSql, byStatement);
+        return byStatement;
     }
 
     private getQualifiedIdentifierParts(match: RegExpExecArray): QualifiedIdentifierParts {
@@ -587,7 +700,7 @@ export class SchemaExtractor {
             `(?:MATERIALIZED\\s+)?${keyword}\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?` +
             `(${SQL_IDENTIFIER_PATTERN})(?:\\s*\\.\\s*(${SQL_IDENTIFIER_PATTERN})?)?`
                 + `(?:\\s*\\.\\s*(${SQL_IDENTIFIER_PATTERN}))?`,
-            'gi'
+            'giu'
         );
     }
 
@@ -634,7 +747,13 @@ export class SchemaExtractor {
             );
             const parenStart = afterHeader.indexOf('(');
             const asQueryIndex = /\bAS\s*(?:\(\s*)?(?:WITH|SELECT)\b/i.exec(afterHeader)?.index ?? -1;
+            // Teradata preprocessing rewrites `CREATE TABLE x AS (SELECT ...)
+            // WITH DATA` to `CREATE TABLE x (SELECT ...)`; that parenthesis
+            // holds a query, not column definitions.
+            const parenHoldsQuery = parenStart !== -1
+                && /^\(\s*(?:WITH|SELECT)\b/i.test(afterHeader.slice(parenStart));
             const hasColumnBody = parenStart !== -1
+                && !parenHoldsQuery
                 && (asQueryIndex === -1 || parenStart < asQueryIndex);
 
             if (hasColumnBody) {
@@ -642,15 +761,7 @@ export class SchemaExtractor {
                 const tableBody = this.extractBalancedParens(afterHeader, parenStart + 1);
                 const columns = this.extractColumnsFromBody(tableBody);
 
-                // Use findCreateStatementLocation on ORIGINAL sql (not sqlNoComments) to get correct line number
-                // Previous bug: used match.index from sqlNoComments with getLineNumberAtIndex(originalSql, ...)
-                // causing character index misalignment and wrong line numbers
-                const loc = this.findCreateStatementLocation(
-                    sql,
-                    tableName,
-                    'table',
-                    sourceViews.searchableSql
-                );
+                const loc = this.getHeaderLocation(sql, match.index);
                 definitions.push({
                     type: 'table',
                     name: tableName,
@@ -671,13 +782,7 @@ export class SchemaExtractor {
                 });
             } else {
                 // No parenthesis - might be CREATE TABLE AS SELECT
-                // Use findCreateStatementLocation on ORIGINAL sql to get correct line number and char index
-                const loc = this.findCreateStatementLocation(
-                    sql,
-                    tableName,
-                    'table',
-                    sourceViews.searchableSql
-                );
+                const loc = this.getHeaderLocation(sql, match.index);
                 definitions.push({
                     type: 'table',
                     name: tableName,
@@ -715,13 +820,7 @@ export class SchemaExtractor {
                 continue;
             }
 
-            // Use findCreateStatementLocation on ORIGINAL sql (not sqlNoComments) to get correct line number
-            const loc = this.findCreateStatementLocation(
-                sql,
-                viewName,
-                'view',
-                sourceViews.searchableSql
-            );
+            const loc = this.getHeaderLocation(sql, match.index);
             definitions.push({
                 type: 'view',
                 name: viewName,
@@ -759,7 +858,7 @@ export class SchemaExtractor {
             `\\bINTO\\s+(?:(?:TEMP(?:ORARY)?|UNLOGGED)(?:\\s+TABLE)?\\s+|TABLE\\s+)?`
                 + `(${SQL_IDENTIFIER_PATTERN})(?:\\s*\\.\\s*(${SQL_IDENTIFIER_PATTERN})?)?`
                 + `(?:\\s*\\.\\s*(${SQL_IDENTIFIER_PATTERN}))?`,
-            'gi'
+            'giu'
         );
         let match: RegExpExecArray | null;
 
@@ -848,7 +947,7 @@ export class SchemaExtractor {
                     `FOREIGN\\s+KEY\\s*\\(([^)]+)\\)\\s*REFERENCES\\s+` +
                     `(${SQL_IDENTIFIER_PATTERN})(?:\\s*\\.\\s*(${SQL_IDENTIFIER_PATTERN}))?` +
                     `\\s*\\(([^)]+)\\)`,
-                    'i'
+                    'iu'
                 ).exec(trimmed);
                 if (fkMatch) {
                     const columnList = this.splitColumnDefinitions(fkMatch[1])
@@ -878,7 +977,7 @@ export class SchemaExtractor {
             // Match: column_name DATA_TYPE(args) or column_name DATA_TYPE
             const colMatch = new RegExp(
                 `^(${SQL_IDENTIFIER_PATTERN})\\s+(\\w+)(?:\\s*\\([^)]*\\))?([\\s\\S]*)$`,
-                'i'
+                'iu'
             ).exec(trimmed);
             if (colMatch) {
                 const name = this.unquoteIdentifier(colMatch[1]);
@@ -888,7 +987,7 @@ export class SchemaExtractor {
                 // Check for type with precision like VARCHAR(255) or DECIMAL(10,2)
                 const typeWithPrecision = new RegExp(
                     `^${SQL_IDENTIFIER_PATTERN}\\s+(\\w+\\s*\\([^)]+\\))`,
-                    'i'
+                    'iu'
                 ).exec(trimmed);
                 if (typeWithPrecision) {
                     dataType = typeWithPrecision[1].replace(/\s+/g, '');
@@ -901,7 +1000,7 @@ export class SchemaExtractor {
                     `REFERENCES\\s+(${SQL_IDENTIFIER_PATTERN})` +
                     `(?:\\s*\\.\\s*(${SQL_IDENTIFIER_PATTERN}))?` +
                     `\\s*\\(\\s*(${SQL_IDENTIFIER_PATTERN})\\s*\\)`,
-                    'i'
+                    'iu'
                 ).exec(rest);
 
                 const column: ColumnInfo = {
@@ -955,7 +1054,7 @@ export class SchemaExtractor {
             const char = sql[i];
             if (quote) {
                 const closing = quote === ']' ? ']' : quote;
-                if (char === '\\' && quote !== ']' && i + 1 < sql.length) {
+                if (char === '\\' && quote !== ']' && this.backslashEscapes && i + 1 < sql.length) {
                     i += 2;
                     continue;
                 }
@@ -1006,7 +1105,7 @@ export class SchemaExtractor {
             if (quote) {
                 current += char;
                 const closing = quote === ']' ? ']' : quote;
-                if (char === '\\' && quote !== ']' && i + 1 < body.length) {
+                if (char === '\\' && quote !== ']' && this.backslashEscapes && i + 1 < body.length) {
                     current += body[++i];
                     continue;
                 }
@@ -1080,7 +1179,7 @@ export class SchemaExtractor {
                 continue;
             }
 
-            if (maskStrings && char === '$') {
+            if (maskStrings && this.dollarQuotes && char === '$') {
                 const delimiter = getDollarQuoteDelimiterAt(sql, i);
                 if (delimiter) {
                     const start = i;
@@ -1094,9 +1193,11 @@ export class SchemaExtractor {
             if (char === "'" || char === '"' || char === '`' || char === '[') {
                 const start = i;
                 const closing = char === '[' ? ']' : char;
+                const escapesAllowed = closing !== ']'
+                    && quotedStringAllowsBackslashEscapes(sql, i, this.backslashEscapes);
                 i++;
                 while (i < sql.length) {
-                    if (sql[i] === '\\' && closing !== ']' && i + 1 < sql.length) {
+                    if (escapesAllowed && sql[i] === '\\' && i + 1 < sql.length) {
                         i += 2;
                         continue;
                     }
@@ -1121,7 +1222,7 @@ export class SchemaExtractor {
                 let depth = 1;
                 i += 2;
                 while (i < sql.length && depth > 0) {
-                    if (sql[i] === '/' && sql[i + 1] === '*') {
+                    if (this.nestedBlockComments && sql[i] === '/' && sql[i + 1] === '*') {
                         depth++;
                         i += 2;
                     } else if (sql[i] === '*' && sql[i + 1] === '/') {
@@ -1137,7 +1238,7 @@ export class SchemaExtractor {
 
             const isDashComment = char === '-' && sql[i + 1] === '-';
             let isHashComment = false;
-            if (char === '#') {
+            if (char === '#' && this.hashComments && !isPostgresJsonPathOperatorAt(sql, i)) {
                 const tempIdentifier = /^#?[A-Za-z0-9_][\w$@]*/.exec(sql.slice(i + 1));
                 const prefix = masked.slice(0, i).join('');
                 const followsTempTarget = /(?:\bCREATE\s+(?:OR\s+REPLACE\s+)?(?:TEMP(?:ORARY)?\s+)?TABLE(?:\s+IF\s+NOT\s+EXISTS)?|\bINTO(?:\s+TEMP(?:ORARY)?(?:\s+TABLE)?)?)\s*$/i
@@ -1176,17 +1277,19 @@ export class SchemaExtractor {
         identifier: string,
         type: 'table' | 'view'
     ): number | null {
-        const re = this.createHeaderRegex(type);
-        let match: RegExpExecArray | null;
-
-        while ((match = re.exec(searchableSql)) !== null) {
-            const matchedName = this.getQualifiedIdentifierParts(match).name;
-            if (matchedName.toLowerCase() === identifier.toLowerCase()) {
-                return match.index;
+        let firstIndexByName = this.firstHeaderIndexByNameCache[type].get(searchableSql);
+        if (!firstIndexByName) {
+            firstIndexByName = new Map<string, number>();
+            for (const match of this.getHeaderMatches(searchableSql, type)) {
+                const key = match.parts.name.toLowerCase();
+                if (!firstIndexByName.has(key)) {
+                    firstIndexByName.set(key, match.index);
+                }
             }
+            this.firstHeaderIndexByNameCache[type].set(searchableSql, firstIndexByName);
         }
 
-        return null;
+        return firstIndexByName.get(identifier.toLowerCase()) ?? null;
     }
 
     /**
@@ -1225,6 +1328,15 @@ export class SchemaExtractor {
         return { lineNumber: 1, charIndex: 0 };
     }
 
+    /**
+     * Location of a header matched in `sql`'s offset-preserving masked view.
+     * Using the match itself (not a lookup by name) keeps same-name
+     * definitions in different schemas at their own statements.
+     */
+    private getHeaderLocation(sql: string, charIndex: number): { lineNumber: number; charIndex: number } {
+        return { lineNumber: this.getLineNumberAtIndex(sql, charIndex), charIndex };
+    }
+
     private findLineNumber(
         sql: string,
         identifier: string,
@@ -1251,7 +1363,7 @@ export class SchemaExtractor {
      * @returns Line number (1-based) where the character index falls
      */
     private getLineNumberAtIndex(sql: string, charIndex: number): number {
-        return sql.substring(0, charIndex).split('\n').length;
+        return this.offsets.lineNumberAt(sql, charIndex);
     }
 
     /**
@@ -1304,7 +1416,10 @@ export class SchemaExtractor {
         let match: RegExpExecArray | null;
         while ((match = intoRegex.exec(sql)) !== null) {
             const statementStart = sql.lastIndexOf(';', Math.max(0, match.index - 1)) + 1;
-            const statementPrefix = stripSqlComments(sql.slice(statementStart, match.index)).toUpperCase();
+            const statementPrefix = stripSqlComments(sql.slice(statementStart, match.index), {
+                dollarQuotes: this.dollarQuotes,
+                nestedBlockComments: this.nestedBlockComments,
+            }).toUpperCase();
             if (!/\bSELECT\b/.test(statementPrefix)) {
                 continue;
             }

@@ -12,6 +12,7 @@ describe('parser.worker', () => {
     let parseSqlMock: jest.Mock;
     let parseSqlBatchMock: jest.Mock;
     let validateSqlMock: jest.Mock;
+    let setParseTimeoutMock: jest.Mock;
 
     function loadWorkerModule(): void {
         jest.resetModules();
@@ -19,6 +20,7 @@ describe('parser.worker', () => {
         parseSqlMock = jest.fn();
         parseSqlBatchMock = jest.fn();
         validateSqlMock = jest.fn();
+        setParseTimeoutMock = jest.fn();
 
         postMessageMock = jest.fn();
         addEventListenerMock = jest.fn((type: string, handler: MessageHandler) => {
@@ -34,6 +36,7 @@ describe('parser.worker', () => {
             parseSql: parseSqlMock,
             parseSqlBatch: parseSqlBatchMock,
             validateSql: validateSqlMock,
+            setParseTimeout: setParseTimeoutMock,
             DEFAULT_VALIDATION_LIMITS,
         }));
 
@@ -80,12 +83,29 @@ describe('parser.worker', () => {
             },
         });
 
+        expect(postMessageMock).toHaveBeenNthCalledWith(1, { type: 'started', requestId: 7 });
         expect(parseSqlMock).toHaveBeenCalledWith('SELECT 1', 'PostgreSQL', { allowDialectFallback: false });
         expect(postMessageMock).toHaveBeenCalledWith({
             type: 'parse',
             requestId: 7,
             result,
         });
+    });
+
+    it('applies the configured parse timeout before parsing in the worker realm', () => {
+        loadWorkerModule();
+        parseSqlBatchMock.mockImplementation(() => {
+            expect(setParseTimeoutMock).toHaveBeenCalledWith(30000);
+            return { queries: [], totalStats: {}, successCount: 0, errorCount: 0 };
+        });
+
+        dispatchMessage({
+            type: 'parseBatch',
+            requestId: 12,
+            payload: { sql: 'SELECT 1;', dialect: 'MySQL', parseTimeoutMs: 30000 },
+        });
+
+        expect(parseSqlBatchMock).toHaveBeenCalledTimes(1);
     });
 
     it('dispatches batch parse requests to parseSqlBatch and posts the result', () => {

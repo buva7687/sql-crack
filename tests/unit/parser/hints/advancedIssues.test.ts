@@ -1,5 +1,7 @@
 import { detectAdvancedIssues } from '../../../../src/webview/parser/hints/advancedIssues';
 import { createFreshContext } from '../../../../src/webview/parser/context';
+import { parseSql } from '../../../../src/webview/sqlParser';
+import * as preprocessing from '../../../../src/webview/parser/dialects/preprocessing';
 import type { FlowNode } from '../../../../src/webview/types';
 
 function makeNode(overrides: Partial<FlowNode>): FlowNode {
@@ -61,6 +63,12 @@ describe('detectAdvancedIssues', () => {
     });
 
     describe('duplicate subquery detection', () => {
+        it('does not group unrelated derived tables by a generic node description', () => {
+            const sql = 'SELECT * FROM (SELECT id FROM a) x JOIN (SELECT id FROM b) y ON x.id = y.id';
+            const result = parseSql(sql, 'PostgreSQL');
+            expect(result.hints.some(hint => hint.message.includes('similar subqueries'))).toBe(false);
+        });
+
         it('detects duplicate subqueries in WHERE clause', () => {
             const ctx = createFreshContext('PostgreSQL');
             const nodes = [
@@ -113,6 +121,29 @@ describe('detectAdvancedIssues', () => {
     });
 
     describe('dead column detection', () => {
+        it('masks the normalized statement once across many CTE SELECTs', () => {
+            const nodes = Array.from({ length: 40 }, (_, index) => makeNode({
+                id: `cte${index}`,
+                type: 'cte',
+                label: `WITH cte_${index}`,
+                children: [makeNode({
+                    id: `select${index}`,
+                    type: 'select',
+                    parentId: `cte${index}`,
+                    columns: [{ name: 'id', expression: 'id' }],
+                })],
+            }));
+            const sql = `WITH ${nodes.map((_, index) => `cte_${index} AS (SELECT id FROM orders WHERE id > ${index})`).join(',\n')} SELECT * FROM cte_39`;
+            const normalizedSql = sql.replace(/\s+/g, ' ').trim();
+            const mask = jest.spyOn(preprocessing, 'maskStringsAndComments');
+            try {
+                detectAdvancedIssues(createFreshContext('PostgreSQL'), nodes, sql);
+                expect(mask.mock.calls.filter(([input]) => input === normalizedSql)).toHaveLength(1);
+            } finally {
+                mask.mockRestore();
+            }
+        });
+
         it('does not flag CTE outputs consumed by the outer query', () => {
             const ctx = createFreshContext('PostgreSQL');
             const selectNode = makeNode({

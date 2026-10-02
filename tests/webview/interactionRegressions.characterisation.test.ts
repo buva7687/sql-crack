@@ -129,27 +129,33 @@ describe('Search clear on empty input', () => {
     });
 });
 
-describe('Reset view triggers full refresh via custom event', () => {
+describe('Fit-to-view and refresh stay separate', () => {
     const indexSource = readFileSync(join(srcDir, 'index.ts'), 'utf8');
 
-    it('resetView dispatches sql-crack-reset-view custom event', () => {
+    it('resetView fits the graph locally instead of requesting a re-parse', () => {
         const resetMatch = rendererSource.match(
             /function resetView\(\)[\s\S]*?^}/m
         );
         expect(resetMatch).not.toBeNull();
         const fnBody = resetMatch![0];
 
-        expect(fnBody).toContain("sql-crack-reset-view");
-        expect(fnBody).toContain('CustomEvent');
+        expect(fnBody).toContain('fitView();');
+        expect(fnBody).toContain('recordLayoutHistorySnapshot();');
+        expect(fnBody).not.toContain('CustomEvent');
     });
 
-    it('index.ts listens for sql-crack-reset-view and triggers refresh', () => {
-        expect(indexSource).toContain("addEventListener('sql-crack-reset-view'");
-        expect(indexSource).toMatch(/sql-crack-reset-view[\s\S]*?requestRefresh/);
+    it('refreshVisualization dispatches the refresh event that index.ts turns into requestRefresh', () => {
+        const refreshMatch = rendererSource.match(
+            /function refreshVisualization\(\)[\s\S]*?^}/m
+        );
+        expect(refreshMatch).not.toBeNull();
+        expect(refreshMatch![0]).toContain('sql-crack-refresh-visualization');
+        expect(indexSource).toContain("addEventListener('sql-crack-refresh-visualization'");
+        expect(indexSource).toMatch(/sql-crack-refresh-visualization[\s\S]*?requestRefresh/);
     });
 
     it('command bar labels R as Refresh Visualization', () => {
-        expect(rendererSource).toContain("label: 'Refresh Visualization', shortcut: 'R'");
+        expect(rendererSource).toContain("label: 'Refresh Visualization', shortcut: 'R', action: () => refreshVisualization()");
     });
 
     it('restoreLayoutHistorySnapshot mutates cloudOffsets instead of replacing the map', () => {

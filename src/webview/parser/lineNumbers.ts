@@ -1,59 +1,15 @@
 // Line number extraction and assignment for nodes
 
-import { FlowNode } from '../types';
-import { escapeRegex } from '../../shared';
-
-function stripCommentsPreserveLineNumbers(sql: string): string {
-    const chars = sql.split('');
-    let i = 0;
-
-    while (i < chars.length) {
-        if (chars[i] === '/' && i + 1 < chars.length && chars[i + 1] === '*') {
-            chars[i] = ' ';
-            chars[i + 1] = ' ';
-            i += 2;
-            while (i < chars.length) {
-                if (chars[i] === '*' && i + 1 < chars.length && chars[i + 1] === '/') {
-                    chars[i] = ' ';
-                    chars[i + 1] = ' ';
-                    i += 2;
-                    break;
-                }
-                if (chars[i] !== '\n' && chars[i] !== '\r') {
-                    chars[i] = ' ';
-                }
-                i++;
-            }
-            continue;
-        }
-
-        if (chars[i] === '-' && i + 1 < chars.length && chars[i + 1] === '-') {
-            while (i < chars.length && chars[i] !== '\n' && chars[i] !== '\r') {
-                chars[i] = ' ';
-                i++;
-            }
-            continue;
-        }
-
-        if (chars[i] === '#') {
-            const next = i + 1 < chars.length ? chars[i + 1] : '';
-            const isIdentChar = /[a-zA-Z0-9_]/.test(next);
-            if (!isIdentChar) {
-                while (i < chars.length && chars[i] !== '\n' && chars[i] !== '\r') {
-                    chars[i] = ' ';
-                    i++;
-                }
-                continue;
-            }
-        }
-        i++;
-    }
-
-    return chars.join('');
-}
+import { FlowEdge, FlowNode } from '../types';
+import {
+    escapeRegex,
+    getDollarQuotedTokenEnd,
+    maskSqlCommentsPreservingPositions,
+    quotedStringAllowsBackslashEscapes,
+} from '../../shared';
 
 export function extractKeywordLineNumbers(sql: string): Map<string, number[]> {
-    const lines = stripCommentsPreserveLineNumbers(sql).split('\n');
+    const lines = maskSqlCommentsPreservingPositions(sql).split('\n');
     const keywordLines = new Map<string, number[]>();
 
     const keywords = [
@@ -86,35 +42,379 @@ export function extractKeywordLineNumbers(sql: string): Map<string, number[]> {
     return keywordLines;
 }
 
-export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
+/**
+ * Where a character sits relative to the statement's outer query.
+ *
+ * `depth` counts enclosing parentheses, except parens that only wrap a whole
+ * query or set-operation branch (`(SELECT ...) UNION (SELECT ...)`,
+ * `CREATE VIEW v AS (SELECT ...)`), so every branch of the outer query is at
+ * depth 0 while CTE bodies, derived tables, scalar subqueries, and `OVER (...)`
+ * specs are deeper. `group` is the offset of the innermost enclosing paren
+ * (-1 outside all parens), so siblings in one list share a group.
+ */
+interface NestingInfo {
+    depth: Int32Array;
+    group: Int32Array;
+    closingParen: Map<number, number>;
+    inCteBody: Uint8Array;
+    inQuotes: Uint8Array;
+}
+
+interface SqlOccurrence {
+    key: string;
+    offset: number;
+    line: number;
+    depth: number;
+    inCteBody: boolean;
+    inQuotes: boolean;
+}
+
+interface KeywordOccurrence extends SqlOccurrence {
+    keyword: string;
+}
+
+type OccurrencePredicate<T extends SqlOccurrence> = (occurrence: T) => boolean;
+
+const OCCURRENCE_KEYWORDS: ReadonlyArray<[string, RegExp]> = [
+    'SELECT', 'WHERE', 'HAVING', 'GROUP BY', 'ORDER BY', 'LIMIT', 'JOIN', 'WITH',
+    'UNION', 'INTERSECT', 'EXCEPT', 'MINUS', 'MERGE', 'INSERT', 'UPDATE', 'DELETE',
+    'OVER', 'CASE', 'ON',
+].map(keyword => [keyword, new RegExp(`\\b${keyword.replace(' ', '\\s+')}\\b`, 'gi')]);
+
+const TRANSPARENT_PAREN_BODY = /^\s*(?:SELECT|WITH|VALUES|\()/i;
+const SET_OPERATOR_BEFORE = /\b(?:UNION|INTERSECT|EXCEPT|MINUS)(?:\s+(?:ALL|DISTINCT))?\s*$/i;
+const CTE_BODY_BEFORE = /\bAS\s*(?:NOT\s+)?(?:MATERIALIZED\s*)?$/i;
+const JOIN_MODIFIER_BEFORE = /\b(?:LEFT|RIGHT|FULL|CROSS|NATURAL|OUTER|SEMI|ANTI|ASOF|POSITIONAL)\s+$/i;
+const TABLE_KEYWORD_CONTEXT = /\b(?:FROM|JOIN|INTO|USING|UPDATE|TABLE|ONLY|DELETE|MERGE|VIEW|EXISTS)\s+(?:(?:[\w$#]+|"[^"]*"|`[^`]*`|\[[^\]]*\])\s*\.\s*)*["`[]?$/i;
+const CTE_DEFINITION_AFTER = /^["`\]]?\s*(?:\([^()]*\)\s*)?AS\s*(?:NOT\s+)?(?:MATERIALIZED\s*)?\(/i;
+const TABLE_COMMA_CONTEXT = /,\s*(?:(?:[\w$#]+|"[^"]*"|`[^`]*`|\[[^\]]*\])\s*\.\s*)*["`[]?$/i;
+const CLAUSE_KEYWORD = /\b(?:SELECT|FROM|WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|LIMIT|QUALIFY|WINDOW|ON|USING|JOIN|SET|VALUES|RETURNING|UPDATE|DELETE|INTO|UNION|INTERSECT|EXCEPT|MINUS)\b/gi;
+/** Clauses whose comma-separated items are table references. */
+const TABLE_LIST_CLAUSES: ReadonlySet<string> = new Set(['FROM', 'JOIN', 'ON', 'USING', 'UPDATE', 'DELETE']);
+
+function analyzeNesting(sql: string): NestingInfo {
+    // Comments are masked string-aware so parens and quotes inside them are ignored.
+    const code = maskSqlCommentsPreservingPositions(sql);
+    const depth = new Int32Array(code.length);
+    const inCteBody = new Uint8Array(code.length);
+    const inQuotes = new Uint8Array(code.length);
+    const group = new Int32Array(code.length);
+    const closingParen = new Map<number, number>();
+    // `withSeen` tracks a WITH clause per paren level, so CTE bodies nested
+    // in a derived table (`FROM (WITH c AS (...) SELECT ...) s`) are found too.
+    const topLevel = { withSeen: false };
+    const stack: Array<{ counts: boolean; cteBody: boolean; open: number; withSeen: boolean }> = [];
+    const firstCodeOffset = code.search(/\S/);
+    let currentDepth = 0;
+    let openCteBodies = 0;
+    const currentLevel = (): { withSeen: boolean } => stack[stack.length - 1] ?? topLevel;
+
+    const fill = (start: number, end: number, quoted: boolean): void => {
+        const enclosing = stack.length > 0 ? stack[stack.length - 1].open : -1;
+        for (let p = start; p < end && p < code.length; p++) {
+            depth[p] = currentDepth;
+            group[p] = enclosing;
+            inCteBody[p] = openCteBodies > 0 ? 1 : 0;
+            inQuotes[p] = quoted ? 1 : 0;
+        }
+    };
+
+    let i = 0;
+    while (i < code.length) {
+        const ch = code[i];
+
+        const dollarQuotedEnd = getDollarQuotedTokenEnd(code, i);
+        if (dollarQuotedEnd !== null) {
+            fill(i, dollarQuotedEnd, true);
+            i = dollarQuotedEnd;
+            continue;
+        }
+
+        // Mirrors maskSqlCommentsPreservingPositions so both agree on quote boundaries.
+        if (ch === "'" || ch === '"' || ch === '`' || ch === '[') {
+            const closingQuote = ch === '[' ? ']' : ch;
+            const escapesAllowed = ch !== '[' && quotedStringAllowsBackslashEscapes(code, i, true);
+            let end = i + 1;
+            while (end < code.length) {
+                if (escapesAllowed && code[end] === '\\' && end + 1 < code.length) {
+                    end += 2;
+                    continue;
+                }
+                if (code[end] === closingQuote) {
+                    if (code[end + 1] === closingQuote) {
+                        end += 2;
+                        continue;
+                    }
+                    end++;
+                    break;
+                }
+                end++;
+            }
+            fill(i, end, true);
+            i = end;
+            continue;
+        }
+
+        if (ch === '(') {
+            const before = code.slice(Math.max(0, i - 48), i);
+            const wrapsQuery = TRANSPARENT_PAREN_BODY.test(code.slice(i + 1, i + 64)) && (
+                i === firstCodeOffset
+                || /;\s*$/.test(before)
+                || SET_OPERATOR_BEFORE.test(before)
+                || (/\(\s*$/.test(before) && stack.length > 0 && !stack[stack.length - 1].counts)
+                || (currentDepth === 0 && !currentLevel().withSeen && /\bAS\s*$/i.test(before))
+            );
+            const cteBody = !wrapsQuery && currentLevel().withSeen && CTE_BODY_BEFORE.test(before);
+            fill(i, i + 1, false);
+            stack.push({ counts: !wrapsQuery, cteBody, open: i, withSeen: false });
+            if (!wrapsQuery) { currentDepth++; }
+            if (cteBody) { openCteBodies++; }
+            i++;
+            continue;
+        }
+
+        if (ch === ')') {
+            const open = stack.pop();
+            if (open) { closingParen.set(open.open, i); }
+            if (open?.counts) { currentDepth--; }
+            if (open?.cteBody) { openCteBodies--; }
+            fill(i, i + 1, false);
+            i++;
+            continue;
+        }
+
+        if ((ch === 'W' || ch === 'w')
+            && !/[\w$#]/.test(code[i - 1] || '') && /^WITH\b/i.test(code.slice(i, i + 5))) {
+            currentLevel().withSeen = true;
+        }
+
+        fill(i, i + 1, false);
+        i++;
+    }
+
+    return { depth, group, closingParen, inCteBody, inQuotes };
+}
+
+export function assignLineNumbers(nodes: FlowNode[], sql: string, edges: FlowEdge[] = []): void {
+    const onLineByJoin = assignScopedLineNumbers(nodes, sql, false);
+    const nodesById = new Map(nodes.map(node => [node.id, node]));
+    const lastSourceByJoin = new Map<string, string>();
+    for (const edge of edges) {
+        if (nodesById.get(edge.target)?.type === 'join') {
+            lastSourceByJoin.set(edge.target, edge.source);
+        }
+    }
+    for (const node of nodes) {
+        if (node.type === 'join' && node.description?.startsWith('Implicit join with ')) {
+            // The parser's last incoming edge comes from the comma-listed table.
+            node.startLine = nodesById.get(lastSourceByJoin.get(node.id) ?? '')?.startLine;
+        }
+    }
+    for (const edge of edges) {
+        if (edge.startLine === undefined
+            && (edge.clauseType === 'join' || edge.clauseType === 'on' || edge.clauseType === 'where')) {
+            edge.startLine = edge.clauseType === 'on'
+                ? (onLineByJoin.get(edge.target) ?? nodesById.get(edge.target)?.startLine)
+                : nodesById.get(edge.target)?.startLine;
+        }
+    }
+}
+
+function assignScopedLineNumbers(nodes: FlowNode[], sql: string, childScope: boolean): Map<string, number> {
     const keywordLines = extractKeywordLineNumbers(sql);
     const sqlLines = sql.split('\n');
-    const commentStrippedLines = stripCommentsPreserveLineNumbers(sql).split('\n');
+    const commentStripped = maskSqlCommentsPreservingPositions(sql);
+    const commentStrippedLines = commentStripped.split('\n');
     const clauseRegex = /\b(from|join|into|using|update|delete)\b/i;
+    // DDL and utility statements (CREATE, DROP, ALTER, RENAME, TRUNCATE, ...)
+    // have no SELECT/DML anchor; their nodes fall back to the statement's
+    // first code line so click-to-source still works.
+    const firstCodeLineIndex = commentStrippedLines.findIndex(line => line.trim() !== '');
+    const firstCodeLine = firstCodeLineIndex >= 0 ? firstCodeLineIndex + 1 : undefined;
 
-    // Track used lines per keyword type so each node gets the next unused occurrence
-    const usedLines = new Map<string, number[]>();
+    const nesting = analyzeNesting(sql);
+    const lineStarts = [0];
+    for (let p = 0; p < commentStripped.length; p++) {
+        if (commentStripped[p] === '\n') { lineStarts.push(p + 1); }
+    }
+    const lineAt = (offset: number): number => {
+        let lo = 0;
+        let hi = lineStarts.length - 1;
+        while (lo < hi) {
+            const mid = (lo + hi + 1) >> 1;
+            if (lineStarts[mid] <= offset) { lo = mid; } else { hi = mid - 1; }
+        }
+        return lo + 1;
+    };
+    const occurrenceAt = (key: string, offset: number): SqlOccurrence => ({
+        key,
+        offset,
+        line: lineAt(offset),
+        depth: nesting.depth[offset] ?? 0,
+        inCteBody: nesting.inCteBody[offset] === 1,
+        inQuotes: nesting.inQuotes[offset] === 1,
+    });
 
-    /** Get the next unused line for a keyword, marking it as used. */
-    function claimNextLine(...keywords: string[]): number | undefined {
-        for (const kw of keywords) {
-            const lines = keywordLines.get(kw) || [];
-            const used = usedLines.get(kw) || [];
-            for (const line of lines) {
-                if (!used.includes(line)) {
-                    if (!usedLines.has(kw)) { usedLines.set(kw, []); }
-                    usedLines.get(kw)!.push(line);
-                    return line;
-                }
+    const occurrencesByKeyword = new Map<string, KeywordOccurrence[]>();
+    for (const [keyword, pattern] of OCCURRENCE_KEYWORDS) {
+        const found: KeywordOccurrence[] = [];
+        pattern.lastIndex = 0;
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(commentStripped)) !== null) {
+            found.push({ ...occurrenceAt(`${keyword}@${match.index}`, match.index), keyword });
+        }
+        occurrencesByKeyword.set(keyword, found);
+    }
+    const occurrencesOf = (...keywords: string[]): KeywordOccurrence[] => keywords
+        .flatMap(keyword => occurrencesByKeyword.get(keyword) || [])
+        .sort((a, b) => a.offset - b.offset);
+
+    // Child nodes carry their depth relative to their CTE or derived-table
+    // container. The sliced body starts one level inside that container.
+    let targetDepth = 0;
+    const isOuter = (occurrence: SqlOccurrence): boolean =>
+        occurrence.depth === targetDepth && !occurrence.inQuotes;
+    const textBefore = (offset: number, length = 64): string =>
+        commentStripped.slice(Math.max(0, offset - length), offset);
+
+    const clauses: Array<{ offset: number; keyword: string }> = [];
+    CLAUSE_KEYWORD.lastIndex = 0;
+    let clauseMatch: RegExpExecArray | null;
+    while ((clauseMatch = CLAUSE_KEYWORD.exec(commentStripped)) !== null) {
+        if (nesting.inQuotes[clauseMatch.index] !== 1) {
+            clauses.push({ offset: clauseMatch.index, keyword: clauseMatch[0].split(/\s/)[0].toUpperCase() });
+        }
+    }
+    /** Whether the nearest clause before `offset` in its paren group lists tables. */
+    const inTableList = (offset: number): boolean => {
+        const offsetGroup = nesting.group[offset];
+        for (let c = clauses.length - 1; c >= 0; c--) {
+            if (clauses[c].offset < offset && nesting.group[clauses[c].offset] === offsetGroup) {
+                return TABLE_LIST_CLAUSES.has(clauses[c].keyword);
+            }
+        }
+        return false;
+    };
+
+    // Occurrences already attributed to a node, so same-type nodes (one per
+    // UNION branch, say) each get their own clause.
+    const used = new Set<string>();
+
+    /**
+     * Earliest occurrence satisfying the first predicate that matches any,
+     * falling back to any occurrence at all. `claim` marks it used.
+     */
+    function pick<T extends SqlOccurrence>(
+        candidates: T[],
+        predicates: OccurrencePredicate<T>[],
+        claim: boolean
+    ): T | undefined {
+        for (const predicate of [...predicates, () => true]) {
+            const hit = candidates.find(c => (!claim || !used.has(c.key)) && predicate(c));
+            if (hit) {
+                if (claim) { used.add(hit.key); }
+                return hit;
             }
         }
         return undefined;
     }
 
+    /** Get the next unused line for a keyword, preferring the outer query. */
+    function claimNextLine(keywords: string[], ...predicates: OccurrencePredicate<KeywordOccurrence>[]): number | undefined {
+        return pick(occurrencesOf(...keywords), predicates.length > 0 ? predicates : [isOuter], true)?.line;
+    }
+
+    function peekLine(keywords: string[]): number | undefined {
+        return pick(occurrencesOf(...keywords), [isOuter], false)?.line;
+    }
+
+    type TableOccurrence = SqlOccurrence & { keywordContext: boolean; commaContext: boolean };
+    const tableOccurrences = new Map<string, TableOccurrence[]>();
+    function findTableLine(tableName: string): number | undefined {
+        const key = tableName.toLowerCase();
+        let candidates = tableOccurrences.get(key);
+        if (!candidates) {
+            candidates = [];
+            const pattern = new RegExp(`(?<![\\w$#])${escapeRegex(tableName)}(?![\\w$#])`, 'gi');
+            let match: RegExpExecArray | null;
+            while ((match = pattern.exec(commentStripped)) !== null) {
+                const after = commentStripped.slice(match.index + match[0].length, match.index + match[0].length + 160);
+                // `orders.id` is a column qualifier and `, recent AS (` a CTE
+                // definition; neither is a reference to the table.
+                if (/^["`\]]?\s*\./.test(after) || CTE_DEFINITION_AFTER.test(after)) {
+                    continue;
+                }
+                const before = textBefore(match.index, 160);
+                const occurrence = occurrenceAt(`table:${key}@${match.index}`, match.index);
+                // A whole quoted identifier ("orders", `orders`, [orders]) is a
+                // reference, not quoted text.
+                const opener = commentStripped[match.index - 1];
+                const closer = commentStripped[match.index + match[0].length];
+                if ((opener === '"' || opener === '`' || opener === '[')
+                    && closer === (opener === '[' ? ']' : opener)) {
+                    occurrence.inQuotes = false;
+                }
+                candidates.push({
+                    ...occurrence,
+                    keywordContext: TABLE_KEYWORD_CONTEXT.test(before),
+                    commaContext: TABLE_COMMA_CONTEXT.test(before) && inTableList(match.index),
+                });
+            }
+            tableOccurrences.set(key, candidates);
+        }
+        const predicates: OccurrencePredicate<typeof candidates[number]>[] = [
+            c => isOuter(c) && c.keywordContext,
+            c => isOuter(c) && c.commaContext,
+            c => !c.inQuotes && !c.inCteBody && c.keywordContext,
+            c => !c.inQuotes && c.keywordContext,
+            c => !c.inQuotes && c.commaContext,
+        ];
+        // Only clause references count; anything else defers to the line
+        // heuristic in the caller. Reuse an occurrence when every one is taken.
+        const inClause = candidates.filter(c => c.keywordContext || c.commaContext);
+        return (pick(inClause, predicates, true) ?? pick(inClause, predicates, false))?.line;
+    }
+
+    function findCteDefinition(cteName: string): { line: number; open: number } | undefined {
+        const pattern = new RegExp(
+            `(?<![\\w$#])["\`[]?${escapeRegex(cteName)}["\`\\]]?\\s*(?:\\([^()]*\\)\\s*)?AS\\s*(?:NOT\\s+)?(?:MATERIALIZED\\s*)?\\(`,
+            'gi'
+        );
+        const candidates: Array<SqlOccurrence & { open: number }> = [];
+        let match: RegExpExecArray | null;
+        while ((match = pattern.exec(commentStripped)) !== null) {
+            candidates.push({
+                ...occurrenceAt(`cte@${match.index}`, match.index),
+                open: match.index + match[0].length - 1,
+            });
+        }
+        return pick(candidates, [isOuter], false);
+    }
+
+    function matchesJoinType(label: string): OccurrencePredicate<KeywordOccurrence> {
+        const modifier = label.toUpperCase().replace(/\bJOIN\b.*$/, '').trim().split(/\s+/)[0] || 'INNER';
+        return occurrence => {
+            const before = textBefore(occurrence.offset, 40);
+            return modifier === 'INNER'
+                ? !JOIN_MODIFIER_BEFORE.test(before)
+                : new RegExp(`\\b${escapeRegex(modifier)}\\s+(?:\\w+\\s+)?$`, 'i').test(before);
+        };
+    }
+
+    const childBodies = new Map<FlowNode, number>();
+    const onLineByJoin = new Map<string, number>();
     for (const node of nodes) {
+        targetDepth = childScope ? Math.max(0, (node.depth ?? 1) - 1) : 0;
         switch (node.type) {
             case 'table': {
-                const tableName = node.label.toLowerCase().trim();
+                // RENAME targets are labeled "old → new"; locate the old name.
+                const tableName = node.label.split(' → ')[0].trim();
+                const clauseLine = tableName ? findTableLine(tableName) : undefined;
+                if (clauseLine !== undefined) {
+                    node.startLine = clauseLine;
+                    break;
+                }
+
                 const fromLines = keywordLines.get('FROM') || [];
                 const joinLines = [
                     ...(keywordLines.get('JOIN') || []),
@@ -140,7 +440,7 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
 
                 let foundLine: number | undefined;
                 const searchStartLine = anchorLines.length > 0 ? Math.min(...anchorLines) : 1;
-                const tableRegex = new RegExp(`\\b${escapeRegex(tableName)}\\b`, 'i');
+                const tableRegex = new RegExp(`\\b${escapeRegex(tableName.toLowerCase())}\\b`, 'i');
 
                 for (let i = 0; i < sqlLines.length; i++) {
                     const line = commentStrippedLines[i].toLowerCase();
@@ -155,78 +455,110 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string): void {
                     }
                 }
 
-                node.startLine = foundLine || (fromLines.length > 0 ? fromLines[0] : undefined);
+                node.startLine = foundLine || (fromLines.length > 0 ? fromLines[0] : firstCodeLine);
                 break;
             }
             case 'join': {
-                const joinTypes = ['INNER JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'FULL JOIN',
-                    'LEFT OUTER JOIN', 'RIGHT OUTER JOIN', 'FULL OUTER JOIN',
-                    'CROSS JOIN', 'JOIN'];
-                for (const jt of joinTypes) {
-                    if (node.label.toUpperCase().includes(jt.replace(' JOIN', ''))) {
-                        node.startLine = claimNextLine(jt, 'JOIN');
-                        if (node.startLine) {break;}
-                    }
+                if (node.description?.startsWith('Implicit join with ')) { break; }
+                const typeMatches = matchesJoinType(node.label);
+                const selected = pick(occurrencesOf('JOIN'), [
+                    o => isOuter(o) && typeMatches(o),
+                    isOuter,
+                    typeMatches
+                ], true);
+                node.startLine = selected?.line;
+                if (selected) {
+                    const nextJoin = occurrencesOf('JOIN').find(o => o.offset > selected.offset && isOuter(o));
+                    const on = occurrencesOf('ON').find(o =>
+                        o.offset > selected.offset && o.offset < (nextJoin?.offset ?? Infinity) && isOuter(o));
+                    if (on) { onLineByJoin.set(node.id, on.line); }
                 }
                 break;
             }
             case 'filter': {
                 if (node.label === 'WHERE') {
-                    node.startLine = claimNextLine('WHERE');
+                    node.startLine = claimNextLine(['WHERE']);
                 } else if (node.label === 'HAVING') {
-                    node.startLine = claimNextLine('HAVING');
+                    node.startLine = claimNextLine(['HAVING']);
                 }
                 break;
             }
             case 'aggregate': {
-                node.startLine = claimNextLine('GROUP BY');
+                node.startLine = claimNextLine(['GROUP BY'])
+                    ?? (node.label === 'AGGREGATE' ? peekLine(['SELECT']) : undefined);
                 break;
             }
             case 'sort': {
-                node.startLine = claimNextLine('ORDER BY');
+                node.startLine = claimNextLine(['ORDER BY']);
                 break;
             }
             case 'limit': {
-                node.startLine = claimNextLine('LIMIT');
+                node.startLine = claimNextLine(['LIMIT']);
                 break;
             }
             case 'select': {
-                node.startLine = claimNextLine('SELECT');
+                node.startLine = claimNextLine(['SELECT']);
                 break;
             }
             case 'cte': {
-                node.startLine = claimNextLine('WITH');
+                const cteName = node.label.replace(/^WITH\s+(?:RECURSIVE\s+)?/i, '').trim();
+                const definition = cteName ? findCteDefinition(cteName) : undefined;
+                node.startLine = definition?.line ?? claimNextLine(['WITH']);
+                if (definition) { childBodies.set(node, definition.open); }
                 break;
             }
             case 'union': {
-                node.startLine = claimNextLine('UNION', 'INTERSECT', 'EXCEPT');
+                const operator = node.label.trim().split(/\s+/)[0].toUpperCase();
+                node.startLine = claimNextLine(
+                    ['UNION', 'INTERSECT', 'EXCEPT', 'MINUS'],
+                    o => isOuter(o) && o.keyword === operator,
+                    isOuter,
+                    o => o.keyword === operator
+                );
                 break;
             }
-            case 'subquery':
-            case 'window':
+            case 'subquery': {
+                // A derived table's own SELECT: nested, but not a CTE body.
+                const nested = (o: KeywordOccurrence): boolean => o.depth > 0 && !o.inCteBody && !o.inQuotes;
+                const selected = pick(occurrencesOf('SELECT'), [
+                    o => nested(o) && /\(\s*$/.test(textBefore(o.offset)),
+                    nested
+                ], true);
+                node.startLine = selected?.line;
+                if (selected) { childBodies.set(node, nesting.group[selected.offset]); }
+                break;
+            }
+            case 'window': {
+                node.startLine = claimNextLine(['OVER']) ?? peekLine(['SELECT']);
+                break;
+            }
             case 'case': {
-                // These node types use SELECT as their closest keyword anchor
-                node.startLine = claimNextLine('SELECT');
+                node.startLine = claimNextLine(['CASE']) ?? peekLine(['SELECT']);
                 break;
             }
             case 'result': {
-                const selectLines = keywordLines.get('SELECT') || [];
-                const mergeLines = keywordLines.get('MERGE') || [];
-                const insertLines = keywordLines.get('INSERT') || [];
-                const updateLines = keywordLines.get('UPDATE') || [];
-                const deleteLines = keywordLines.get('DELETE') || [];
-                const candidateLines = [
-                    ...selectLines,
-                    ...mergeLines,
-                    ...insertLines,
-                    ...updateLines,
-                    ...deleteLines,
-                ];
-                if (candidateLines.length > 0) {
-                    node.startLine = Math.min(...candidateLines);
-                }
+                node.startLine = peekLine(['SELECT', 'MERGE', 'INSERT', 'UPDATE', 'DELETE'])
+                    ?? firstCodeLine;
                 break;
             }
         }
     }
+
+    for (const [node, open] of childBodies) {
+        const close = nesting.closingParen.get(open);
+        if (!node.children?.length || close === undefined) { continue; }
+        node.endLine = lineAt(close);
+        const bodySql = sql.slice(open + 1, close);
+        assignScopedLineNumbers(node.children, bodySql, true);
+        const lineOffset = lineAt(open + 1) - 1;
+        const offsetChildren = (children: FlowNode[]): void => {
+            for (const child of children) {
+                if (child.startLine !== undefined) { child.startLine += lineOffset; }
+                if (child.endLine !== undefined) { child.endLine += lineOffset; }
+                if (child.children) { offsetChildren(child.children); }
+            }
+        };
+        offsetChildren(node.children);
+    }
+    return onLineByJoin;
 }

@@ -311,6 +311,21 @@ describe('Dialect Support', () => {
         expect(result).toContain("'2024-01-01'");
       });
 
+      it('removes the SQL-standard unit after an interval literal', () => {
+        const sql = "SELECT * FROM events WHERE created_at > CURRENT_TIMESTAMP - INTERVAL '1' DAY";
+        const rewritten = preprocessPostgresSyntax(sql, 'PostgreSQL');
+
+        expect(rewritten).not.toBeNull();
+        expect(rewritten).not.toMatch(/\bINTERVAL\b/i);
+        expect(rewritten).not.toMatch(/'1'\s+DAY\b/i);
+
+        const parsed = parseSql(sql, 'PostgreSQL', { allowDialectFallback: false });
+        expect(parsed.partial).not.toBe(true);
+        expect(parsed.nodes).toEqual(expect.arrayContaining([
+          expect.objectContaining({ type: 'table', label: 'events' }),
+        ]));
+      });
+
       it('returns null for non-PostgreSQL dialect', () => {
         const result = preprocessPostgresSyntax(
           "SELECT created_at AT TIME ZONE 'UTC' FROM events",

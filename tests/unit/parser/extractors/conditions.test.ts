@@ -173,7 +173,7 @@ describe('Condition Extractors', () => {
             expect(conditions).toEqual(['x = 1', 'y = 2']);
         });
 
-        it('stops at depth 3', () => {
+        it('keeps the first five predicates in a deep AND chain', () => {
             const conditions: string[] = [];
             // Create deeply nested structure
             const deepExpr = {
@@ -225,8 +225,9 @@ describe('Condition Extractors', () => {
 
             formatConditionRecursive(deepExpr, conditions);
 
-            // Should not include conditions from depth > 3
-            expect(conditions.length).toBeLessThanOrEqual(4);
+            expect(conditions).toEqual([
+                'deep = 1', 'too_deep = 2', 'c = 3', 'b = 2', 'a = 1',
+            ]);
         });
 
         it('handles null expression', () => {
@@ -262,7 +263,9 @@ describe('Condition Extractors', () => {
 
             const conditions = extractConditions(expr);
 
-            expect(conditions.length).toBeLessThanOrEqual(5);
+            expect(conditions).toEqual([
+                'c1 = 1', 'c2 = 2', 'c3 = 3', 'c4 = 4', 'c5 = 5',
+            ]);
         });
 
         it('returns empty array for null', () => {

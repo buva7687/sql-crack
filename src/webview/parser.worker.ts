@@ -2,6 +2,7 @@ import {
     parseSql,
     parseSqlBatch,
     validateSql,
+    setParseTimeout,
     DEFAULT_VALIDATION_LIMITS,
     type ParseOptions,
     type BatchParseOptions,
@@ -22,6 +23,7 @@ type ParserWorkerRequest =
             sql: string;
             dialect?: SqlDialect;
             options?: ParseOptions;
+            parseTimeoutMs?: number;
         };
     }
     | {
@@ -32,6 +34,7 @@ type ParserWorkerRequest =
             dialect?: SqlDialect;
             limits?: ValidationLimits;
             options?: BatchParseOptions;
+            parseTimeoutMs?: number;
         };
     }
     | {
@@ -45,6 +48,7 @@ type ParserWorkerRequest =
     };
 
 type ParserWorkerResponse =
+    | { type: 'started'; requestId: number }
     | { type: 'parse'; requestId: number; result: ParseResult }
     | { type: 'parseBatch'; requestId: number; result: BatchParseResult }
     | { type: 'validate'; requestId: number; result: ValidationError | null }
@@ -63,8 +67,16 @@ function postWorkerMessage(message: ParserWorkerResponse): void {
 
 addEventListener('message', (event: MessageEvent<ParserWorkerRequest>) => {
     const message = event.data;
+    postWorkerMessage({ type: 'started', requestId: message.requestId });
 
     try {
+        // The worker has its own sqlParser module instance, so the main
+        // thread's configured timeout must travel with each request.
+        if ((message.type === 'parse' || message.type === 'parseBatch')
+            && typeof message.payload.parseTimeoutMs === 'number') {
+            setParseTimeout(message.payload.parseTimeoutMs);
+        }
+
         if (message.type === 'parse') {
             postWorkerMessage({
                 type: 'parse',

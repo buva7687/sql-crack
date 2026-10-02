@@ -7,15 +7,15 @@ export function extractConditions(where: any): string[] {
     return conditions.slice(0, 5); // Limit to first 5
 }
 
-export function formatConditionRecursive(expr: any, conditions: string[], depth = 0): void {
-    if (!expr || depth > 3) { return; }
-
-    if (expr.type === 'binary_expr') {
-        if (expr.operator === 'AND' || expr.operator === 'OR') {
-            formatConditionRecursive(expr.left, conditions, depth + 1);
-            formatConditionRecursive(expr.right, conditions, depth + 1);
+export function formatConditionRecursive(expr: any, conditions: string[]): void {
+    const pending = [expr];
+    while (pending.length > 0 && conditions.length < 5) {
+        const current = pending.pop();
+        if (!current) { continue; }
+        if (current.type === 'binary_expr' && (current.operator === 'AND' || current.operator === 'OR')) {
+            pending.push(current.right, current.left);
         } else {
-            conditions.push(formatCondition(expr));
+            conditions.push(formatCondition(current));
         }
     }
 }
@@ -29,7 +29,8 @@ export function formatCondition(expr: any): string {
         return `${left} ${expr.operator} ${right}`;
     }
 
-    if (expr.type === 'function' || expr.type === 'aggr_func' || expr.type === 'unary_expr') {
+    if (expr.type === 'function' || expr.type === 'aggr_func' || expr.type === 'unary_expr'
+        || expr.type === 'column_ref' || expr.type === 'bool') {
         return formatConditionOperand(expr);
     }
 
@@ -71,7 +72,12 @@ function formatConditionOperand(operand: any): string {
         return formatCondition(operand);
     }
     if (operand.type === 'unary_expr') {
-        return `${operand.operator || ''}${formatConditionOperand(operand.expr ?? operand.value)}`;
+        const operator = String(operand.operator || '');
+        const inner = formatConditionOperand(operand.expr ?? operand.value);
+        if (operator.toUpperCase() === 'NOT EXISTS') {
+            return `${operator} (${inner})`;
+        }
+        return `${operator}${/[A-Za-z]$/.test(operator) ? ' ' : ''}${inner}`;
     }
     if (operand.type === 'function' || operand.type === 'aggr_func') {
         const funcName = getAstString(operand.name) || (operand.type === 'aggr_func' ? 'AGG' : 'FUNC');

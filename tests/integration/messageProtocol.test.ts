@@ -80,6 +80,7 @@ describe('Message Protocol Contracts', () => {
         it('WebviewMessage covers file operation commands', () => {
             expect(source).toContain("command: 'openFile'");
             expect(source).toContain("command: 'openFileAtLine'");
+            expect(source).toContain("command: 'showFileTables'");
             expect(source).toContain("command: 'visualizeFile'");
         });
 
@@ -103,7 +104,7 @@ describe('Message Protocol Contracts', () => {
             const criticalCommands = [
                 'switchView', 'refresh', 'switchGraphMode',
                 'search', 'clearSearch', 'export',
-                'openFile', 'openFileAtLine',
+                'openFile', 'openFileAtLine', 'showFileTables',
                 'getLineage', 'analyzeImpact', 'exploreTable',
                 'getUpstream', 'getDownstream',
             ];
@@ -293,6 +294,22 @@ describe('MessageHandler runtime dispatch', () => {
     it('switchGraphMode normalizes invalid mode to tables', async () => {
         await handler.handleMessage({ command: 'switchGraphMode', mode: 'bogus' } as any);
         expect(ctx.setCurrentGraphMode).toHaveBeenCalledWith('tables');
+    });
+
+    it('showFileTables applies mode and search together before rebuilding', async () => {
+        (ctx.getCurrentGraphMode as jest.Mock).mockReturnValue('files');
+
+        await handler.handleMessage({
+            command: 'showFileTables',
+            filePath: 'C:\\workspace\\models\\orders.sql',
+        } as any);
+
+        expect(ctx.setCurrentGraphMode).toHaveBeenCalledWith('tables');
+        expect(ctx.setCurrentSearchFilter).toHaveBeenCalledWith(
+            expect.objectContaining({ query: 'orders.sql' })
+        );
+        expect(ctx.setCurrentView).toHaveBeenCalledWith('graph');
+        expect(ctx.rebuildAndRenderGraph).toHaveBeenCalled();
     });
 
     it('search updates filter without re-rendering the workspace webview', async () => {

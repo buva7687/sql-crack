@@ -17,7 +17,9 @@ import {
 } from './types';
 import { ColumnExtractor } from './columnExtractor';
 import { TransformExtractor } from './transformExtractor';
-import { escapeRegex, getDollarQuoteDelimiterAt, maskSqlCommentsPreservingPositions, unwrapIdentifierValue } from '../../shared';
+import { countStartsAtOrBefore, dialectSupportsBackslashEscapes, dialectSupportsHashComments, escapeRegex, getDollarQuoteDelimiterAt, maskSqlCommentsPreservingPositions, quotedStringAllowsBackslashEscapes, TextOffsetIndex, unwrapIdentifierValue } from '../../shared';
+import type { StripSqlCommentsOptions } from '../../shared';
+import { selectMultiTableUpdateTargets } from '../../shared/dmlTargets';
 import { preprocessSqlForWorkspaceParsing } from '../parserConfig';
 import { getIdentifierSemantics, getQualifiedKey } from '../identifiers';
 import { REFERENCE_SQL_RESERVED_WORDS, TERADATA_RESERVED_WORDS } from './constants';
@@ -33,7 +35,8 @@ import type {
 
 interface TableLineLookup {
     sql: string;
-    contextLineByTable: Map<string, Map<number, number>>;
+    contextLineByTable: Map<string, Map<number, Map<ReferenceType, Array<{ offset: number; line: number }>>>>;
+    nextContextIndex: Map<string, number>;
     fallbackLineByTable: Map<string, Map<number, number>>;
 }
 
@@ -43,6 +46,11 @@ interface TableReferenceLocation {
     nameQuoted: boolean;
     schemaQuoted: boolean;
     catalogQuoted: boolean;
+}
+
+interface ParsedStatement {
+    statement: AstStatement;
+    statementIndex: number;
 }
 
 const REFERENCE_SQL_IDENTIFIER_PATTERN =
@@ -58,6 +66,17 @@ export class ReferenceExtractor {
     private transformExtractor: TransformExtractor;
     private _activeDialect: SqlDialect = 'MySQL'; // Per-call dialect for reserved word scoping
     private tableLineLookup: TableLineLookup | null = null;
+    private locationSearchSource: string | null = null;
+    private locationSearchSql: string = '';
+    private locationStatementBoundaries: number[] = [];
+    /** Per-extraction line lookup; cleared after each call so file text is not retained. */
+    private readonly offsets = new TextOffsetIndex();
+    /**
+     * Statement alias maps, built once per statement AST instead of once per
+     * FROM/JOIN item (which made wide FROM lists quadratic). Keyed weakly by the
+     * AST node so maps are released with it.
+     */
+    private statementAliasMaps = new WeakMap<object, Map<string, string>>();
 
     constructor(options: Partial<ExtractionOptions> = {}) {
         this.parser = new Parser();
@@ -145,19 +164,36 @@ export class ReferenceExtractor {
         filePath: string,
         dialect: SqlDialect = this.options.dialect
     ): { references: TableReference[]; warnings: string[]; queries: QueryAnalysis[] } {
+        this.offsets.clear();
+        try {
+            return this.extractReferencesUncached(sql, filePath, dialect);
+        } finally {
+            this.offsets.clear();
+        }
+    }
+
+    private extractReferencesUncached(
+        sql: string,
+        filePath: string,
+        dialect: SqlDialect
+    ): { references: TableReference[]; warnings: string[]; queries: QueryAnalysis[] } {
         this._activeDialect = dialect;
         this.tableLineLookup = null;
+        this.locationSearchSource = null;
         const references: TableReference[] = [];
         const warnings: string[] = [];
-        let parsedStatements: AstStatement[] = [];
+        const parsedStatements: ParsedStatement[] = [];
         const { sql: normalizedSql } = preprocessSqlForWorkspaceParsing(sql, dialect);
 
         // Pre-collect CTE names via regex BEFORE attempting AST parse.
         // This ensures the catch block (regex fallback) has CTE names available
         // even when the AST parser fails on complex multi-statement files.
-        const sqlNoComments = this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(normalizedSql));
+        const sqlNoComments = this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(normalizedSql, this.getCommentMaskOptions()));
         const reservedWords = new Set(['select', 'from', 'where', 'join', 'inner', 'left', 'right', 'outer', 'on', 'as', 'with', 'recursive']);
         const statementBoundaries = this.getStatementBoundaries(sqlNoComments);
+        this.locationSearchSource = normalizedSql;
+        this.locationSearchSql = sqlNoComments;
+        this.locationStatementBoundaries = statementBoundaries;
         const getStatementIndex = (charIndex: number): number => this.getStatementIndex(statementBoundaries, charIndex);
         const scopedCteNames = new Map<number, Set<string>>();
         const cteBodyLineRanges = new Map<string, Array<{ startLine: number; endLine: number }>>();
@@ -229,21 +265,31 @@ export class ReferenceExtractor {
 
         try {
             const dbDialect = this.mapDialect(dialect);
-            const ast = this.parser.astify(normalizedSql, { database: dbDialect });
-            const statements = Array.isArray(ast) ? ast : [ast];
-            parsedStatements = statements.filter(Boolean) as AstStatement[];
+            // node-sql-parser's multi-statement path scales quadratically. Split
+            // on the already masked statement boundaries and parse each statement
+            // independently while retaining the original SQL for locations.
+            for (let stmtIndex = 0; stmtIndex < statementBoundaries.length; stmtIndex++) {
+                const start = statementBoundaries[stmtIndex];
+                const end = statementBoundaries[stmtIndex + 1] ?? normalizedSql.length;
+                const structuralStatement = sqlNoComments.slice(start, end).replace(/;\s*$/, '');
+                if (!structuralStatement.trim()) {continue;}
 
-            // Extract each statement with only its own CTE scope. A CTE name is
-            // query-local and must not hide a physical table in a later statement.
-            for (let stmtIndex = 0; stmtIndex < statements.length; stmtIndex++) {
-                const stmt = statements[stmtIndex];
-                if (!stmt) {continue;}
-                const aliasMap = this.createAliasMap();
-                this.collectCTENames(stmt as AstStatement, aliasMap.cteNames);
-                this.extractFromStatement(stmt as AstStatement, filePath, normalizedSql, references, aliasMap, 0, stmtIndex);
+                const ast = this.parser.astify(normalizedSql.slice(start, end), { database: dbDialect });
+                const statements = (Array.isArray(ast) ? ast : [ast]).filter(Boolean) as AstStatement[];
+                for (const stmt of statements) {
+                    parsedStatements.push({ statement: stmt, statementIndex: stmtIndex });
+                    const aliasMap = this.createAliasMap();
+                    this.collectCTENames(stmt, aliasMap.cteNames);
+                    this.extractFromStatement(stmt, filePath, normalizedSql, references, aliasMap, 0, stmtIndex);
+                }
             }
         } catch (error) {
             // Fallback to regex extraction with statement-local CTE/alias names.
+            // Discard AST output collected before the failing statement so the
+            // whole-file fallback cannot duplicate those references or leave a
+            // mixed query-analysis payload.
+            references.length = 0;
+            parsedStatements.length = 0;
             warnings.push(this.formatParserWarning('Reference', error));
             const regexRefs = this.extractWithRegex(normalizedSql, filePath);
             for (const ref of regexRefs) {
@@ -289,7 +335,7 @@ export class ReferenceExtractor {
      * third time in WorkspaceScanner.
      */
     private buildQueryAnalyses(
-        statements: AstStatement[],
+        statements: ParsedStatement[],
         references: TableReference[],
         warnings: string[]
     ): QueryAnalysis[] {
@@ -300,7 +346,7 @@ export class ReferenceExtractor {
             bucket.push(reference);
             referencesByStatement.set(statementIndex, bucket);
         }
-        return statements.map((statement, statementIndex) => {
+        return statements.map(({ statement, statementIndex }) => {
             const statementReferences = referencesByStatement.get(statementIndex) || [];
             try {
                 return this.buildQueryAnalysis(statement, statementIndex, statementReferences);
@@ -357,7 +403,14 @@ export class ReferenceExtractor {
             : [];
         let transformations: Transformation[] = selectStatement
             ? this.transformExtractor.extractTransformations(selectStatement, tableAliases)
-            : this.extractUpdateTransformations(statement, tableAliases, queryLineNumber);
+            : this.extractUpdateTransformations(
+                statement,
+                // Only alias resolution for SET expressions needs the MySQL
+                // multi-table list; source scoping above must keep subquery
+                // tables such as `WHERE id IN (SELECT ... FROM other)`.
+                this.columnExtractor.buildAliasMap(this.getMultiTableUpdateAliasSource(statement)),
+                queryLineNumber
+            );
 
         const sourceTableNames = new Set(inputTables.map(reference => reference.tableName).filter(Boolean));
         const soleSourceTable = directSourceTableNames.length === 1
@@ -526,6 +579,18 @@ export class ReferenceExtractor {
         return statement.columns
             .map(column => unwrapIdentifierValue(column))
             .filter((column): column is string => Boolean(column));
+    }
+
+    /**
+     * MySQL multi-table UPDATE (`UPDATE a JOIN b ... SET a.x = b.y`) has no FROM
+     * clause; its aliases live on stmt.table, so expose them for alias lookup.
+     */
+    private getMultiTableUpdateAliasSource(statement: AstStatement): AstStatement {
+        if (statement?.type?.toLowerCase() === 'update' && !statement.from
+            && Array.isArray(statement.table) && statement.table.length > 1) {
+            return { ...statement, from: statement.table } as AstStatement;
+        }
+        return statement;
     }
 
     private extractUpdateTransformations(
@@ -888,31 +953,6 @@ export class ReferenceExtractor {
         depth: number,
         statementIndex: number = 0
     ): void {
-        // Process CTEs first - add to alias map to exclude from references
-        if (stmt.with) {
-            for (const cte of this.getWithClauses(stmt)) {
-                const cteName = this.getCTENameString(cte.name);
-                if (cteName) {
-                    this.addCTEName(aliasMap.cteNames, cte.name);
-                }
-
-                // Extract references from CTE definition
-                const cteStmt = this.getCteStatement(cte);
-                if (cteStmt) {
-                    const cteAliasMap = this.createCteDefinitionAliasMap(aliasMap, cte.name);
-                    this.extractFromStatement(
-                        cteStmt,
-                        filePath,
-                        sql,
-                        references,
-                        cteAliasMap,
-                        depth + 1,
-                        statementIndex
-                    );
-                }
-            }
-        }
-
         // FROM clause
         if (stmt.from) {
             const fromItems = Array.isArray(stmt.from) ? stmt.from : [stmt.from];
@@ -1011,37 +1051,31 @@ export class ReferenceExtractor {
         depth: number,
         statementIndex: number = 0
     ): void {
-        // Process WITH clause first if present (for UPDATE ... WITH ... UPDATE)
-        if (stmt.with) {
-            for (const cte of this.getWithClauses(stmt)) {
-                const cteName = this.getCTENameString(cte.name);
-                if (cteName) {
-                    this.addCTEName(aliasMap.cteNames, cte.name);
-                }
-
-                // Extract references from CTE definition
-                const cteStmt = this.getCteStatement(cte);
-                if (cteStmt) {
-                    const cteAliasMap = this.createCteDefinitionAliasMap(aliasMap, cte.name);
-                    this.extractFromStatement(
-                        cteStmt,
-                        filePath,
-                        sql,
-                        references,
-                        cteAliasMap,
-                        depth + 1,
-                        statementIndex
-                    );
-                }
-            }
-        }
-
         // Target table
         if (stmt.table) {
             const fromAliases = this.collectFromAliases(stmt.from);
-            const tables = Array.isArray(stmt.table) ? stmt.table : [stmt.table];
-            for (const t of tables) {
-                const tableRef = typeof t === 'string' ? { table: t } as AstTableRef : t as AstTableRef;
+            const tables = (Array.isArray(stmt.table) ? stmt.table : [stmt.table]).map(t =>
+                typeof t === 'string' ? { table: t } as AstTableRef : t as AstTableRef
+            );
+            // MySQL `UPDATE a JOIN b ... SET a.x = b.y` lists the joined source
+            // tables in stmt.table too; only SET-qualified tables are written.
+            const targetTables = stmt.from
+                ? tables
+                : selectMultiTableUpdateTargets(tables, stmt.set, entry => this.getTableName(entry));
+            for (const tableRef of tables) {
+                if (!targetTables.includes(tableRef)) {
+                    this.extractFromItem(
+                        tableRef,
+                        filePath,
+                        sql,
+                        references,
+                        aliasMap,
+                        'select',
+                        depth,
+                        statementIndex
+                    );
+                    continue;
+                }
                 const targetName = this.getTableName(tableRef);
                 const resolvedAlias = targetName ? fromAliases.get(targetName.toLowerCase()) : undefined;
                 const ref = this.createTableReference(
@@ -1114,6 +1148,28 @@ export class ReferenceExtractor {
     }
 
     /**
+     * FROM entries named (by table or alias) in a multi-table DELETE's target
+     * list. Falls back to every entry when targets cannot be matched.
+     */
+    private selectDeleteTargets(stmt: AstStatement, fromTables: AstTableRef[]): AstTableRef[] {
+        if (!stmt.from || !stmt.table || fromTables.length <= 1) {
+            return fromTables;
+        }
+        const targetKeys = new Set(
+            (Array.isArray(stmt.table) ? stmt.table : [stmt.table])
+                .map(t => (typeof t === 'string' ? t : this.getTableName(t as AstTableRef)))
+                .filter((name): name is string => typeof name === 'string' && name.length > 0)
+                .map(name => name.toLowerCase())
+        );
+        const matched = fromTables.filter(entry => {
+            const alias = typeof entry.as === 'string' ? entry.as.toLowerCase() : null;
+            const name = this.getTableName(entry)?.toLowerCase() ?? null;
+            return (alias !== null && targetKeys.has(alias)) || (name !== null && targetKeys.has(name));
+        });
+        return matched.length > 0 ? matched : fromTables;
+    }
+
+    /**
      * Extract references from DELETE statement
      */
     private extractFromDelete(
@@ -1125,37 +1181,29 @@ export class ReferenceExtractor {
         depth: number,
         statementIndex: number = 0
     ): void {
-        // Process WITH clause first if present (for DELETE ... WITH ... DELETE FROM)
-        if (stmt.with) {
-            for (const cte of this.getWithClauses(stmt)) {
-                const cteName = this.getCTENameString(cte.name);
-                if (cteName) {
-                    this.addCTEName(aliasMap.cteNames, cte.name);
-                }
-
-                // Extract references from CTE definition
-                const cteStmt = this.getCteStatement(cte);
-                if (cteStmt) {
-                    const cteAliasMap = this.createCteDefinitionAliasMap(aliasMap, cte.name);
-                    this.extractFromStatement(
-                        cteStmt,
-                        filePath,
-                        sql,
-                        references,
-                        cteAliasMap,
-                        depth + 1,
-                        statementIndex
-                    );
-                }
-            }
-        }
-
         // Target table
         const tableSource = stmt.from || stmt.table;
         if (tableSource) {
-            const tables = Array.isArray(tableSource) ? tableSource : [tableSource];
-            for (const t of tables) {
-                const tableRef = typeof t === 'string' ? { table: t } as AstTableRef : t as AstTableRef;
+            const tables = (Array.isArray(tableSource) ? tableSource : [tableSource]).map(t =>
+                typeof t === 'string' ? { table: t } as AstTableRef : t as AstTableRef
+            );
+            const deleteTargets = this.selectDeleteTargets(stmt, tables);
+            for (const tableRef of tables) {
+                if (!deleteTargets.includes(tableRef)) {
+                    // `DELETE t FROM tgt t JOIN src s ...` only deletes from the
+                    // listed targets; the joined tables are read sources.
+                    this.extractFromItem(
+                        tableRef,
+                        filePath,
+                        sql,
+                        references,
+                        aliasMap,
+                        'select',
+                        depth,
+                        statementIndex
+                    );
+                    continue;
+                }
                 const ref = this.createTableReference(tableRef, filePath, sql, 'delete', 'DELETE FROM', statementIndex);
                 if (ref?.tableName) {
                     const isCTE = this.isCTEReference(aliasMap.cteNames, ref);
@@ -1306,7 +1354,6 @@ export class ReferenceExtractor {
         if (!tableName) {return null;}
         const catalog = item.schema ? item.db || undefined : undefined;
         const schema = item.schema || item.db || undefined;
-        const fallbackLineNumber = this.findTableLine(sql, tableName, statementIndex);
         const searchContext = refType === 'join'
             ? 'JOIN'
             : refType === 'insert'
@@ -1338,7 +1385,9 @@ export class ReferenceExtractor {
             catalogQuoted: location?.catalogQuoted ?? false,
             referenceType: refType,
             filePath,
-            lineNumber: location?.lineNumber ?? fallbackLineNumber,
+            lineNumber: this.findTableLine(
+                sql, tableName, statementIndex, refType, schema, catalog, location?.lineNumber
+            ),
             context,
             statementIndex
         };
@@ -1446,9 +1495,11 @@ export class ReferenceExtractor {
             }
         }
 
-        // Nested expression in parentheses
+        // Nested expression in parentheses and aggregate argument wrappers
         if (expr.expr?.type === 'select') {
             this.extractFromStatement(expr.expr, filePath, sql, references, aliasMap, depth + 1, statementIndex);
+        } else if (expr.expr && typeof expr.expr === 'object') {
+            this.extractFromExpression(expr.expr, filePath, sql, references, aliasMap, depth, statementIndex);
         }
 
         // Recursive for AND/OR/binary expressions
@@ -1459,9 +1510,25 @@ export class ReferenceExtractor {
             this.extractFromExpression(expr.right, filePath, sql, references, aliasMap, depth, statementIndex);
         }
 
-        // CASE expression args
+        // CASE branches use cond/result fields rather than binary left/right.
+        if (expr.cond && typeof expr.cond === 'object') {
+            this.extractFromExpression(expr.cond, filePath, sql, references, aliasMap, depth, statementIndex);
+        }
+        if (expr.result && typeof expr.result === 'object') {
+            this.extractFromExpression(expr.result, filePath, sql, references, aliasMap, depth, statementIndex);
+        }
+
+        // node-sql-parser represents CASE args as an array, aggregate args as
+        // { expr }, and scalar-function args as { type: 'expr_list', value: [] }.
         if (expr.args) {
-            for (const arg of expr.args) {
+            const args = Array.isArray(expr.args)
+                ? expr.args
+                : Array.isArray(expr.args.value)
+                    ? expr.args.value
+                    : expr.args.expr !== undefined
+                        ? (Array.isArray(expr.args.expr) ? expr.args.expr : [expr.args.expr])
+                        : [expr.args];
+            for (const arg of args) {
                 if (arg && typeof arg === 'object') {
                     this.extractFromExpression(arg, filePath, sql, references, aliasMap, depth, statementIndex);
                 }
@@ -1495,6 +1562,30 @@ export class ReferenceExtractor {
         const parts = raw.split('.');
         const finalPart = parts[parts.length - 1] || raw;
         return finalPart.replace(/^["'`]+|["'`]+$/g, '').toLowerCase();
+    }
+
+    private qualifiedLineLookupKey(tableName: string, schema?: string, catalog?: string): string {
+        return [catalog, schema, tableName]
+            .filter((part): part is string => Boolean(part))
+            .map(part => this.unquoteIdentifier(part).toLowerCase())
+            .join('.');
+    }
+
+    private addContextLine(
+        map: TableLineLookup['contextLineByTable'],
+        key: string,
+        statementIndex: number,
+        kind: ReferenceType,
+        offset: number,
+        line: number
+    ): void {
+        const byStatement = map.get(key) || new Map();
+        const byKind = byStatement.get(statementIndex) || new Map();
+        const occurrences = byKind.get(kind) || [];
+        occurrences.push({ offset, line });
+        byKind.set(kind, occurrences);
+        byStatement.set(statementIndex, byKind);
+        map.set(key, byStatement);
     }
 
     private addTableLine(
@@ -1536,7 +1627,7 @@ export class ReferenceExtractor {
 
         for (let index = 0; index < sql.length; index++) {
             const char = sql[index];
-            if (!inString && !inBracketIdentifier && char === '$') {
+            if (this.supportsDollarQuotes() && !inString && !inBracketIdentifier && char === '$') {
                 const delimiter = getDollarQuoteDelimiterAt(sql, index);
                 if (delimiter) {
                     const close = sql.indexOf(delimiter, index + delimiter.length);
@@ -1582,44 +1673,108 @@ export class ReferenceExtractor {
     }
 
     private getStatementIndex(boundaries: number[], charIndex: number): number {
-        for (let index = boundaries.length - 1; index >= 0; index--) {
-            if (charIndex >= boundaries[index]) {
-                return index;
-            }
-        }
-        return 0;
+        // Boundaries are ascending statement start offsets; binary search keeps
+        // per-token lookups logarithmic on files with thousands of statements.
+        return Math.max(0, countStartsAtOrBefore(boundaries, charIndex) - 1);
     }
 
     private buildTableLineLookup(sql: string): TableLineLookup {
-        const contextLineByTable = new Map<string, Map<number, number>>();
+        const contextLineByTable: TableLineLookup['contextLineByTable'] = new Map();
         const fallbackLineByTable = new Map<string, Map<number, number>>();
-        const searchableSql = this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(sql));
-        const statementBoundaries = this.getStatementBoundaries(searchableSql);
-        const identifier = '["\'`]?([#A-Za-z_][#A-Za-z0-9_$]*)["\'`]?';
-        const qualifiedIdentifier = `(?:["'\`]?[#A-Za-z_][#A-Za-z0-9_$]*["'\`]?\\.)?${identifier}`;
-        const contextPatterns = [
-            new RegExp(`\\bFROM\\s+${qualifiedIdentifier}\\b`, 'gi'),
-            new RegExp(`\\b(?:INNER|LEFT|RIGHT|FULL|CROSS|OUTER)?\\s*JOIN\\s+${qualifiedIdentifier}\\b`, 'gi'),
-            new RegExp(`\\bINSERT\\s+INTO\\s+${qualifiedIdentifier}\\b`, 'gi'),
-            new RegExp(`\\bUPDATE\\s+${qualifiedIdentifier}\\b`, 'gi'),
-            new RegExp(`\\bDELETE\\s+FROM\\s+${qualifiedIdentifier}\\b`, 'gi'),
+        const cacheHit = this.locationSearchSource === sql;
+        const searchableSql = cacheHit
+            ? this.locationSearchSql
+            : this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(sql, this.getCommentMaskOptions()));
+        const statementBoundaries = cacheHit
+            ? this.locationStatementBoundaries
+            : this.getStatementBoundaries(searchableSql);
+        const identifier = REFERENCE_SQL_IDENTIFIER_PATTERN;
+        const qualifiedIdentifier = `${identifier}(?:\\s*\\.\\s*${identifier}){0,2}`;
+        const contextPatterns: Array<{ kind: ReferenceType; pattern: RegExp }> = [
+            { kind: 'select', pattern: new RegExp(`\\bFROM\\s+(${qualifiedIdentifier})(?![\\w$#@])`, 'gi') },
+            { kind: 'join', pattern: new RegExp(`\\b(?:INNER|LEFT|RIGHT|FULL|CROSS|OUTER)?\\s*JOIN\\s+(${qualifiedIdentifier})(?![\\w$#@])`, 'gi') },
+            { kind: 'insert', pattern: new RegExp(`\\bINSERT\\s+INTO\\s+(${qualifiedIdentifier})(?![\\w$#@])`, 'gi') },
+            { kind: 'update', pattern: new RegExp(`\\bUPDATE\\s+(${qualifiedIdentifier})(?![\\w$#@])`, 'gi') },
+            { kind: 'delete', pattern: new RegExp(`\\bDELETE\\s+FROM\\s+(${qualifiedIdentifier})(?![\\w$#@])`, 'gi') },
         ];
         const fallbackPattern = /["'`]?([#A-Za-z_][#A-Za-z0-9_$]*)["'`]?/g;
+        const identifierParts = new RegExp(identifier, 'g');
 
-        for (const pattern of contextPatterns) {
+        const record = (rawQualified: string, kind: ReferenceType, offset: number): void => {
+            const parts = rawQualified.match(identifierParts);
+            if (!parts?.length) { return; }
+            const key = parts.map(part => this.unquoteIdentifier(part).toLowerCase()).join('.');
+            this.addContextLine(
+                contextLineByTable, key,
+                this.getStatementIndex(statementBoundaries, offset), kind,
+                offset, this.getLineNumberAtIndex(searchableSql, offset)
+            );
+        };
+
+        for (const { kind, pattern } of contextPatterns) {
             pattern.lastIndex = 0;
             let match: RegExpExecArray | null;
             while ((match = pattern.exec(searchableSql)) !== null) {
-                const tableOffset = match[1]
-                    ? match[0].toLowerCase().lastIndexOf(match[1].toLowerCase())
-                    : 0;
-                const tableIndex = match.index + Math.max(0, tableOffset);
-                this.addTableLine(
-                    contextLineByTable,
-                    match[1],
-                    this.getStatementIndex(statementBoundaries, tableIndex),
-                    this.getLineNumberAtIndex(searchableSql, tableIndex)
-                );
+                const rawQualified = match[1];
+                const tableIndex = match.index + match[0].lastIndexOf(rawQualified)
+                    + rawQualified.lastIndexOf(rawQualified.match(identifierParts)?.slice(-1)[0] || rawQualified);
+                record(rawQualified, kind, tableIndex);
+            }
+        }
+
+        // Commas in SELECT lists and function calls are not table references.
+        // Track FROM-list state at each parenthesis level in one pass so wide
+        // comma lists remain linear to index.
+        const fromList = [false];
+        const commaTable = new RegExp(`\\s*(${qualifiedIdentifier})(?![\\w$#@])`, 'y');
+        for (let index = 0; index < searchableSql.length;) {
+            const ch = searchableSql[index];
+            if (ch === '"' || ch === '`' || ch === '[') {
+                const close = ch === '[' ? ']' : ch;
+                index++;
+                while (index < searchableSql.length) {
+                    if (searchableSql[index] === close) {
+                        if (searchableSql[index + 1] === close) { index += 2; continue; }
+                        index++;
+                        break;
+                    }
+                    index++;
+                }
+                continue;
+            }
+            if (ch === '(') { fromList.push(false); index++; continue; }
+            if (ch === ')') { if (fromList.length > 1) { fromList.pop(); } index++; continue; }
+            if (ch === ';') { fromList.length = 1; fromList[0] = false; index++; continue; }
+            if (/[A-Za-z_]/.test(ch)) {
+                const start = index++;
+                while (index < searchableSql.length && /[\w$#@]/.test(searchableSql[index])) { index++; }
+                const word = searchableSql.slice(start, index).toUpperCase();
+                if (word === 'FROM' || word === 'USING') {
+                    fromList[fromList.length - 1] = true;
+                } else if (/^(?:SELECT|WHERE|GROUP|HAVING|ORDER|LIMIT|QUALIFY|UNION|INTERSECT|EXCEPT|MINUS|RETURNING|VALUES|SET)$/.test(word)) {
+                    fromList[fromList.length - 1] = false;
+                }
+                continue;
+            }
+            if (ch === ',' && fromList[fromList.length - 1]) {
+                commaTable.lastIndex = index + 1;
+                const match = commaTable.exec(searchableSql);
+                if (match) {
+                    const rawQualified = match[1];
+                    const lastPart = rawQualified.match(identifierParts)?.slice(-1)[0] || rawQualified;
+                    const tableIndex = match.index + match[0].lastIndexOf(rawQualified)
+                        + rawQualified.lastIndexOf(lastPart);
+                    record(rawQualified, 'select', tableIndex);
+                }
+            }
+            index++;
+        }
+
+        for (const byStatement of contextLineByTable.values()) {
+            for (const byKind of byStatement.values()) {
+                for (const occurrences of byKind.values()) {
+                    occurrences.sort((a, b) => a.offset - b.offset);
+                }
             }
         }
 
@@ -1634,7 +1789,7 @@ export class ReferenceExtractor {
             );
         }
 
-        return { sql, contextLineByTable, fallbackLineByTable };
+        return { sql, contextLineByTable, nextContextIndex: new Map(), fallbackLineByTable };
     }
 
     /**
@@ -1655,14 +1810,27 @@ export class ReferenceExtractor {
      * @param tableName The table name to find
      * @returns Line number (1-based) where the table is referenced, or 1 if not found
      */
-    private findTableLine(sql: string, tableName: string, statementIndex: number): number {
-        const key = this.normalizeTableLineLookupKey(tableName);
+    private findTableLine(
+        sql: string,
+        tableName: string,
+        statementIndex: number,
+        refType: ReferenceType,
+        schema?: string,
+        catalog?: string,
+        locatedLine?: number
+    ): number {
+        const key = this.qualifiedLineLookupKey(tableName, schema, catalog);
         const lookup = this.getTableLineLookup(sql);
-        const contextLines = lookup.contextLineByTable.get(key);
-        const fallbackLines = lookup.fallbackLineByTable.get(key);
-        return contextLines?.get(statementIndex)
+        const contextLines = lookup.contextLineByTable.get(key)?.get(statementIndex)?.get(refType);
+        const cursorKey = `${key}|${statementIndex}|${refType}`;
+        const nextIndex = lookup.nextContextIndex.get(cursorKey) || 0;
+        if (contextLines && nextIndex < contextLines.length) {
+            lookup.nextContextIndex.set(cursorKey, nextIndex + 1);
+            return contextLines[nextIndex].line;
+        }
+        const fallbackLines = lookup.fallbackLineByTable.get(this.normalizeTableLineLookupKey(tableName));
+        return locatedLine
             ?? fallbackLines?.get(statementIndex)
-            ?? contextLines?.values().next().value
             ?? fallbackLines?.values().next().value
             ?? 1;
     }
@@ -1751,8 +1919,33 @@ export class ReferenceExtractor {
         return depth === 0 && fromListActive;
     }
 
+    /**
+     * Backslash escapes only exist in some dialects. Elsewhere `'\'` is a
+     * complete literal; treating it as an escape flips string parity and masks
+     * every later reference in the file.
+     */
+    private supportsBackslashEscapes(): boolean {
+        return dialectSupportsBackslashEscapes(this._activeDialect);
+    }
+
+    private supportsDollarQuotes(): boolean {
+        return this._activeDialect !== 'MySQL' && this._activeDialect !== 'MariaDB';
+    }
+
+    private getCommentMaskOptions(): StripSqlCommentsOptions {
+        return {
+            backslashEscapes: this.supportsBackslashEscapes(),
+            dollarQuotes: this.supportsDollarQuotes(),
+            nestedBlockComments: this._activeDialect !== 'MySQL' && this._activeDialect !== 'MariaDB',
+            // In PostgreSQL `#` is XOR; masking it as a comment hid the rest of
+            // the line, including table names and the statement's `;`.
+            hashComments: dialectSupportsHashComments(this._activeDialect),
+        };
+    }
+
     /** Mask value literals while retaining delimited identifiers and offsets. */
     private maskSqlStringLiterals(sql: string): string {
+        const backslashEscapes = this.supportsBackslashEscapes();
         const masked = sql.split('');
         const blankRange = (start: number, end: number): void => {
             for (let index = start; index < end; index++) {
@@ -1764,6 +1957,7 @@ export class ReferenceExtractor {
 
         for (let index = 0; index < sql.length;) {
             if (sql[index] === "'") {
+                const escapesAllowed = quotedStringAllowsBackslashEscapes(sql, index, backslashEscapes);
                 const start = index++;
                 while (index < sql.length) {
                     if (sql[index] === "'" && sql[index + 1] === "'") {
@@ -1771,7 +1965,7 @@ export class ReferenceExtractor {
                     } else if (sql[index] === "'") {
                         index++;
                         break;
-                    } else if (sql[index] === '\\' && index + 1 < sql.length) {
+                    } else if (escapesAllowed && sql[index] === '\\' && index + 1 < sql.length) {
                         index += 2;
                     } else {
                         index++;
@@ -1781,7 +1975,7 @@ export class ReferenceExtractor {
                 continue;
             }
 
-            if (sql[index] === '$') {
+            if (this.supportsDollarQuotes() && sql[index] === '$') {
                 const delimiter = getDollarQuoteDelimiterAt(sql, index);
                 if (delimiter) {
                     const start = index;
@@ -1799,8 +1993,13 @@ export class ReferenceExtractor {
 
     private extractMergeWithRegex(sql: string, filePath: string): TableReference[] {
         const references: TableReference[] = [];
-        const searchableSql = this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(sql));
-        const statementBoundaries = this.getStatementBoundaries(searchableSql);
+        const cacheHit = this.locationSearchSource === sql;
+        const searchableSql = cacheHit
+            ? this.locationSearchSql
+            : this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(sql, this.getCommentMaskOptions()));
+        const statementBoundaries = cacheHit
+            ? this.locationStatementBoundaries
+            : this.getStatementBoundaries(searchableSql);
         const qualifiedPattern = `(${REFERENCE_SQL_IDENTIFIER_PATTERN})`
             + `(?:\\s*\\.\\s*(${REFERENCE_SQL_IDENTIFIER_PATTERN}))?`
             + `(?:\\s*\\.\\s*(${REFERENCE_SQL_IDENTIFIER_PATTERN}))?`;
@@ -1873,7 +2072,7 @@ export class ReferenceExtractor {
         const functionFromKeywords = ['extract', 'substring', 'trim', 'position'];
 
         // Strip comments to prevent false matches like "UPDATE without WHERE" in comments
-        const sqlNoComments = this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(sql));
+        const sqlNoComments = this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(sql, this.getCommentMaskOptions()));
 
         const statementBoundaries = this.getStatementBoundaries(sqlNoComments);
         const lineStarts = [0];
@@ -1980,8 +2179,57 @@ export class ReferenceExtractor {
 
         const qualifiedTablePattern =
             `(${REFERENCE_SQL_IDENTIFIER_PATTERN})`
-                + `(?:\\s*\\.\\s*(${REFERENCE_SQL_IDENTIFIER_PATTERN}))?`
+                + (this._activeDialect === 'TransactSQL'
+                    ? `(?:\\s*\\.\\s*(${REFERENCE_SQL_IDENTIFIER_PATTERN})?)?`
+                    : `(?:\\s*\\.\\s*(${REFERENCE_SQL_IDENTIFIER_PATTERN}))?`)
                 + `(?:\\s*\\.\\s*(${REFERENCE_SQL_IDENTIFIER_PATTERN}))?`;
+        /**
+         * Record one table match. `baseIndex` is added to `match.index` when the
+         * pattern ran over a slice of sqlNoComments (e.g. a DELETE ... USING list).
+         */
+        const pushTableMatch = (
+            match: RegExpExecArray,
+            baseIndex: number,
+            referenceType: ReferenceType,
+            context: string,
+            hasAlias: boolean
+        ): void => {
+            const matchIndex = baseIndex + match.index;
+            const rawCatalog = match[3] ? match[1] : undefined;
+            const rawSchema = match[3] ? match[2] : (match[2] ? match[1] : undefined);
+            const rawName = match[3] || match[2] || match[1];
+            const tableName = this.unquoteIdentifier(rawName);
+            const nameQuoted = this.isQuotedIdentifier(rawName);
+            if (this.isReservedWord(tableName) && !nameQuoted) {
+                return;
+            }
+            const schema = rawSchema ? this.unquoteIdentifier(rawSchema) : undefined;
+            const catalog = rawCatalog ? this.unquoteIdentifier(rawCatalog) : undefined;
+            const statementIndex = getStatementIndex(matchIndex);
+            // The fallback regex runs against a position-preserving mask, so the
+            // captured identifier already provides its exact source location.
+            // Re-searching the complete SQL for every match made this path O(n²).
+            const aliasOffset = hasAlias && match[4]
+                ? match[0].lastIndexOf(match[4])
+                : match[0].length;
+            const tableOffset = match[0].lastIndexOf(rawName, Math.max(0, aliasOffset - 1));
+            const tableIndex = matchIndex + Math.max(0, tableOffset);
+            references.push({
+                tableName,
+                alias: hasAlias ? match[4] : undefined,
+                schema,
+                catalog,
+                nameQuoted,
+                schemaQuoted: this.isQuotedIdentifier(rawSchema),
+                catalogQuoted: this.isQuotedIdentifier(rawCatalog),
+                referenceType,
+                filePath,
+                lineNumber: getLineNumber(tableIndex),
+                context,
+                statementIndex,
+            });
+        };
+
         const appendMatches = (
             pattern: RegExp,
             referenceType: ReferenceType,
@@ -1997,44 +2245,13 @@ export class ReferenceExtractor {
                 if (referenceType === 'update' && hasPriorTopLevelStatementVerb(match.index)) {
                     continue;
                 }
-                const rawCatalog = match[3] ? match[1] : undefined;
-                const rawSchema = match[3] ? match[2] : (match[2] ? match[1] : undefined);
-                const rawName = match[3] || match[2] || match[1];
-                const tableName = this.unquoteIdentifier(rawName);
-                const nameQuoted = this.isQuotedIdentifier(rawName);
-                if (this.isReservedWord(tableName) && !nameQuoted) {
-                    continue;
-                }
-                const schema = rawSchema ? this.unquoteIdentifier(rawSchema) : undefined;
-                const catalog = rawCatalog ? this.unquoteIdentifier(rawCatalog) : undefined;
-                const statementIndex = getStatementIndex(match.index);
-                // The fallback regex runs against a position-preserving mask, so the
-                // captured identifier already provides its exact source location.
-                // Re-searching the complete SQL for every match made this path O(n²).
-                const aliasOffset = hasAlias && match[4]
-                    ? match[0].lastIndexOf(match[4])
-                    : match[0].length;
-                const tableOffset = match[0].lastIndexOf(rawName, Math.max(0, aliasOffset - 1));
-                const tableIndex = match.index + Math.max(0, tableOffset);
-                references.push({
-                    tableName,
-                    alias: hasAlias ? match[4] : undefined,
-                    schema,
-                    catalog,
-                    nameQuoted,
-                    schemaQuoted: this.isQuotedIdentifier(rawSchema),
-                    catalogQuoted: this.isQuotedIdentifier(rawCatalog),
-                    referenceType,
-                    filePath,
-                    lineNumber: getLineNumber(tableIndex),
-                    context,
-                    statementIndex,
-                });
+                pushTableMatch(match, 0, referenceType, context, hasAlias);
             }
         };
 
         appendMatches(
-            new RegExp(`\\bFROM\\s+${qualifiedTablePattern}(?:\\s+(?:AS\\s+)?([A-Za-z_][\\w$#@]*))?`, 'gi'),
+            // `DELETE FROM t` is the delete target (recorded below), not a read.
+            new RegExp(`(?<!\\bDELETE\\s+)\\bFROM\\s+${qualifiedTablePattern}(?:\\s+(?:AS\\s+)?([A-Za-z_][\\w$#@]*))?`, 'gi'),
             'select',
             'FROM',
             true,
@@ -2049,6 +2266,29 @@ export class ReferenceExtractor {
         appendMatches(new RegExp(`\\bINSERT\\s+INTO\\s+${qualifiedTablePattern}`, 'gi'), 'insert', 'INSERT INTO', false);
         appendMatches(new RegExp(`\\bUPDATE\\s+${qualifiedTablePattern}`, 'gi'), 'update', 'UPDATE', false);
         appendMatches(new RegExp(`\\bDELETE\\s+FROM\\s+${qualifiedTablePattern}`, 'gi'), 'delete', 'DELETE FROM', false);
+
+        // PostgreSQL `DELETE FROM t USING a, b WHERE ...`: every USING entry
+        // is a read source. The AST parser rejects this form, so without this
+        // the fallback dropped the source tables entirely.
+        const deleteUsingPattern = new RegExp(
+            `\\bDELETE\\s+FROM\\s+${qualifiedTablePattern}(?:\\s+(?:AS\\s+)?[A-Za-z_][\\w$#@]*)?\\s+USING\\s+`,
+            'gi'
+        );
+        let usingMatch: RegExpExecArray | null;
+        while ((usingMatch = deleteUsingPattern.exec(sqlNoComments)) !== null) {
+            const listStart = usingMatch.index + usingMatch[0].length;
+            const remainder = sqlNoComments.slice(listStart);
+            const clauseEnd = /\b(?:WHERE|RETURNING)\b|;/i.exec(remainder);
+            const listText = remainder.slice(0, clauseEnd ? clauseEnd.index : remainder.length);
+            const itemPattern = new RegExp(
+                `(?:^|,)\\s*${qualifiedTablePattern}(?:\\s+(?:AS\\s+)?([A-Za-z_][\\w$#@]*))?`,
+                'gi'
+            );
+            let itemMatch: RegExpExecArray | null;
+            while ((itemMatch = itemPattern.exec(listText)) !== null) {
+                pushTableMatch(itemMatch, listStart, 'select', 'USING', true);
+            }
+        }
 
         return references;
     }
@@ -2091,8 +2331,13 @@ export class ReferenceExtractor {
                 ? ''
                 : `(?:(?<schema>${REFERENCE_SQL_IDENTIFIER_PATTERN})\\s*\\.\\s*)?`;
         const qualifiedTablePart = `${catalogPart}${schemaPart}${tablePart}`;
-        const searchableSql = this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(sql));
-        const statementBoundaries = this.getStatementBoundaries(searchableSql);
+        const cacheHit = this.locationSearchSource === sql;
+        const searchableSql = cacheHit
+            ? this.locationSearchSql
+            : this.maskSqlStringLiterals(maskSqlCommentsPreservingPositions(sql, this.getCommentMaskOptions()));
+        const statementBoundaries = cacheHit
+            ? this.locationStatementBoundaries
+            : this.getStatementBoundaries(searchableSql);
         
         let pattern: RegExp;
         switch (context) {
@@ -2115,6 +2360,10 @@ export class ReferenceExtractor {
                 return null;
         }
 
+        // Matches cannot span an unquoted `;`, so scanning can start at the
+        // requested statement and stop once matches move past it instead of
+        // rescanning the whole file for every reference.
+        pattern.lastIndex = statementBoundaries[statementIndex] ?? 0;
         let m: RegExpExecArray | null;
         while ((m = pattern.exec(searchableSql)) !== null) {
             const rawTable = m.groups?.table || tableName;
@@ -2123,6 +2372,9 @@ export class ReferenceExtractor {
             const tableOffset = m[0].lastIndexOf(rawTable);
             const tableIndex = m.index + Math.max(0, tableOffset);
             const matchStatementIndex = this.getStatementIndex(statementBoundaries, tableIndex);
+            if (matchStatementIndex > statementIndex) {
+                break;
+            }
             const statementStart = statementBoundaries[matchStatementIndex] ?? 0;
             const isCommaFromEntry = context === 'FROM' && m[0].trimStart().startsWith(',');
             if (matchStatementIndex === statementIndex
@@ -2156,7 +2408,7 @@ export class ReferenceExtractor {
      * @returns Line number (1-based) where the character index falls
      */
     private getLineNumberAtIndex(sql: string, charIndex: number): number {
-        return sql.substring(0, charIndex).split('\n').length;
+        return this.offsets.lineNumberAt(sql, charIndex);
     }
 
     /**
@@ -2173,15 +2425,39 @@ export class ReferenceExtractor {
 
         const tableName = this.getTableNameFromItem(tableItem);
         const tableAlias = typeof tableItem.as === 'string' ? tableItem.as : undefined;
-        const columns: ColumnReference[] = [];
 
-        // Build alias map from the statement
-        const tableAliases = this.columnExtractor.buildAliasMap(stmt);
-
-        // Add this table's alias
-        if (tableAlias && tableName) {
-            tableAliases.set(tableAlias, tableName);
+        let tableAliases = this.statementAliasMaps.get(stmt);
+        if (!tableAliases) {
+            tableAliases = this.columnExtractor.buildAliasMap(stmt);
+            this.statementAliasMaps.set(stmt, tableAliases);
         }
+
+        // Apply this table's alias only for this call, then restore, so each
+        // FROM item sees exactly the map a fresh buildAliasMap() + set() gave it.
+        if (!tableAlias || !tableName) {
+            return this.collectColumnsForTable(stmt, tableName, tableAlias, tableAliases);
+        }
+        const hadAlias = tableAliases.has(tableAlias);
+        const previousTarget = tableAliases.get(tableAlias);
+        tableAliases.set(tableAlias, tableName);
+        try {
+            return this.collectColumnsForTable(stmt, tableName, tableAlias, tableAliases);
+        } finally {
+            if (hadAlias) {
+                tableAliases.set(tableAlias, previousTarget as string);
+            } else {
+                tableAliases.delete(tableAlias);
+            }
+        }
+    }
+
+    private collectColumnsForTable(
+        stmt: AstStatement,
+        tableName: string | undefined,
+        tableAlias: string | undefined,
+        tableAliases: Map<string, string>
+    ): ColumnReference[] {
+        const columns: ColumnReference[] = [];
 
         // Extract columns from SELECT clause
         if (stmt.columns && Array.isArray(stmt.columns)) {
@@ -2303,6 +2579,15 @@ export class ReferenceExtractor {
     ): boolean {
         if (!tableName) {return true;} // If no table specified, include all columns
 
+        // An explicit alias identifies one FROM item, even when several items
+        // resolve to the same physical table (for example a self-join).
+        if (col.tableAlias && tableAliases.has(col.tableAlias)) {
+            return col.tableAlias === tableAlias;
+        }
+        if (col.tableName && tableAliases.has(col.tableName)) {
+            return col.tableName === tableAlias;
+        }
+
         // Check if column explicitly references this table
         if (col.tableName === tableName) {
             return true;
@@ -2311,14 +2596,6 @@ export class ReferenceExtractor {
         // Check if column references this table's alias
         if (col.tableAlias === tableAlias) {
             return true;
-        }
-
-        // Check if column's table name resolves to this table via alias
-        if (col.tableName && tableAliases.has(col.tableName)) {
-            const resolved = tableAliases.get(col.tableName);
-            if (resolved === tableName) {
-                return true;
-            }
         }
 
         // If column has no table qualifier, it might belong to this table

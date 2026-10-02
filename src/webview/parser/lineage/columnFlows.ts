@@ -190,6 +190,22 @@ export function buildColumnLineagePath(
                 break;
             }
         }
+    } else if (!column.sourceTable && !column.isAggregate && !column.isWindowFunc) {
+        // Unqualified plain column (`SELECT id FROM orders`): when the query
+        // reads exactly one table, that table is the source. With several
+        // tables the owner is ambiguous, so no source step is invented.
+        const sourceColumnName = column.sourceColumn
+            || (!column.expression || column.expression === column.name ? column.name : undefined);
+        const tableNodes = [...nodeMap.values()].filter(node => node.type === 'table');
+        if (sourceColumnName && /^[\w$#]+$/.test(sourceColumnName) && tableNodes.length === 1) {
+            path.unshift({
+                nodeId: tableNodes[0].id,
+                nodeName: tableNodes[0].label,
+                nodeType: 'table',
+                columnName: sourceColumnName,
+                transformation: 'source'
+            });
+        }
     }
 
     return path;
@@ -264,9 +280,12 @@ export function findSourceColumn(
         if (!targetColumn.sourceColumn && !targetColumn.sourceTable) {
             return null;
         }
+        // Keep sourceColumn so the next step can match the originating table
+        // node; without it the trace stopped at the JOIN node.
         return {
             name: targetColumn.sourceColumn || targetColumn.name,
             expression: targetColumn.sourceColumn || targetColumn.name,
+            sourceColumn: targetColumn.sourceColumn,
             sourceTable: targetColumn.sourceTable
         };
     }

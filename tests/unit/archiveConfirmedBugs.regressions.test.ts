@@ -45,12 +45,11 @@ describe('confirmed bug regression anchors from archive/multiple_bugs.txt', () =
         expect(source).toContain('Table name is required for column impact analysis.');
     });
 
-    it('#9 uses full-line matching instead of the old 30-char prefix heuristic', () => {
+    it('#9 derives statement lines from splitter offsets instead of prefix heuristics', () => {
         const source = readSource('src/webview/sqlParser.ts');
-        expect(source).toContain('const matchPrefix = stmtFirstLine.trimEnd();');
-        expect(source).toContain('return normalizeStatementLineForMatch(sourceLine) === normalizeStatementLineForMatch(statementLine);');
-        expect(source).toContain('if (lineMatchesStatementLine(lines[i], matchPrefix)) {');
-        expect(source).not.toContain('matchPrefix.length < 30');
+        expect(source).toContain('return splitSqlStatementsWithOffsets(sql, dialect);');
+        expect(source).toContain('const stmtStartLine = countStartsAtOrBefore(lineStarts, stmtStartOffset);');
+        expect(source).not.toContain('matchPrefix');
         expect(source).not.toContain('substring(0, Math.min(30');
     });
 
@@ -169,7 +168,7 @@ describe('resolved former PARTIAL issue regression anchors', () => {
 
     it('#21 batchTabs uses the quote-safe shared escapeHtml implementation', () => {
         const source = readSource('src/webview/ui/batchTabs.ts');
-        expect(source).toContain("import { escapeHtml, stripSqlComments } from '../../shared/stringUtils';");
+        expect(source).toMatch(/import \{[^}]*escapeHtml[^}]*stripSqlComments[^}]*\} from '\.\.\/\.\.\/shared\/stringUtils';/);
     });
 
     it('#22 issuesPage allowlists item.type for CSS class and escapes text content', () => {

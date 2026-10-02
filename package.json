@@ -2,7 +2,7 @@
   "name": "sql-crack",
   "displayName": "SQL Crack",
   "description": "Visualize SQL queries with interactive flow diagrams",
-  "version": "0.9.3",
+  "version": "0.9.4",
   "license": "MIT",
   "publisher": "buvan",
   "repository": {
@@ -402,22 +402,26 @@
           {
             "id": "openSqlFile",
             "title": "Open a SQL file",
-            "description": "Open any `.sql` file in your workspace to get started.\n\n[Open a SQL file](command:workbench.action.quickOpen)"
+            "description": "Open any `.sql` file in your workspace to get started.\n\n[Open a SQL file](command:workbench.action.quickOpen)",
+            "media": { "image": "assets/video_demo.gif", "altText": "SQL Crack query visualization demo" }
           },
           {
             "id": "visualizeQuery",
             "title": "Visualize your query",
-            "description": "Press `Cmd+Shift+L` (Mac) or `Ctrl+Shift+L` (Windows/Linux) to open the interactive flow diagram.\n\n[Visualize SQL Query](command:sql-crack.visualize)"
+            "description": "Press `Cmd+Shift+L` (Mac) or `Ctrl+Shift+L` (Windows/Linux) to open the interactive flow diagram.\n\n[Visualize SQL Query](command:sql-crack.visualize)",
+            "media": { "image": "assets/video_demo.gif", "altText": "Interactive SQL flow diagram demo" }
           },
           {
             "id": "exploreWorkspace",
             "title": "Explore workspace dependencies",
-            "description": "See how your SQL files relate to each other. Right-click a folder in Explorer and choose **Analyze Workspace Dependencies**.\n\n[Analyze Workspace](command:sql-crack.analyzeWorkspace)"
+            "description": "See how your SQL files relate to each other. Right-click a folder in Explorer and choose **Analyze Workspace Dependencies**.\n\n[Analyze Workspace](command:sql-crack.analyzeWorkspace)",
+            "media": { "image": "assets/video_demo.gif", "altText": "SQL workspace dependency visualization demo" }
           },
           {
             "id": "columnLineage",
             "title": "Try column lineage",
-            "description": "Press `C` while viewing a query visualization to toggle column-level lineage. Click a column to trace its data flow through the query."
+            "description": "Press `C` while viewing a query visualization to toggle column-level lineage. Click a column to trace its data flow through the query.",
+            "media": { "image": "assets/video_demo.gif", "altText": "Column lineage visualization demo" }
           }
         ]
       }
@@ -432,11 +436,11 @@
     "typecheck:src": "tsc --noEmit -p tsconfig.json",
     "typecheck:tests": "tsc --noEmit -p tsconfig.tests.json",
     "typecheck": "npm run typecheck:src && npm run typecheck:tests",
-    "test": "node scripts/runJest.js --testPathIgnorePatterns=/tests/benchmark/ciParsePerformance.test.ts --testPathIgnorePatterns=/tests/webview/perfBaseline.test.ts",
-    "test:watch": "node scripts/runJest.js --watch --testPathIgnorePatterns=/tests/benchmark/ciParsePerformance.test.ts --testPathIgnorePatterns=/tests/webview/perfBaseline.test.ts",
-    "test:coverage": "node scripts/runJest.js --coverage --testPathIgnorePatterns=/tests/benchmark/ciParsePerformance.test.ts --testPathIgnorePatterns=/tests/webview/perfBaseline.test.ts",
-    "test:ci": "node scripts/runJest.js --ci --coverage --reporters=default --reporters=jest-junit --testPathIgnorePatterns=/tests/benchmark/ciParsePerformance.test.ts --testPathIgnorePatterns=/tests/webview/perfBaseline.test.ts",
-    "test:perf": "node scripts/runJest.js --runInBand --runTestsByPath tests/benchmark/ciParsePerformance.test.ts tests/webview/perfBaseline.test.ts",
+    "test": "node scripts/runJest.js --testPathIgnorePatterns=/tests/benchmark/ --testPathIgnorePatterns=/tests/webview/perfBaseline.test.ts",
+    "test:watch": "node scripts/runJest.js --watch --testPathIgnorePatterns=/tests/benchmark/ --testPathIgnorePatterns=/tests/webview/perfBaseline.test.ts",
+    "test:coverage": "node scripts/runJest.js --coverage --testPathIgnorePatterns=/tests/benchmark/ --testPathIgnorePatterns=/tests/webview/perfBaseline.test.ts",
+    "test:ci": "node scripts/runJest.js --ci --coverage --reporters=default --reporters=jest-junit --testPathIgnorePatterns=/tests/benchmark/ --testPathIgnorePatterns=/tests/webview/perfBaseline.test.ts",
+    "test:perf": "node scripts/runJest.js --sql-crack-expose-gc --runInBand --runTestsByPath tests/benchmark/ciParsePerformance.test.ts tests/benchmark/workspaceReferencePerformance.test.ts tests/webview/perfBaseline.test.ts",
     "audit:prod": "npm audit --omit=dev --audit-level=moderate",
     "precheck": "npm run typecheck && npm run lint && npm run test:ci",
     "prepare": "node scripts/install-hooks.js || true",
@@ -468,6 +472,6 @@
   },
   "overrides": {
     "lodash": "^4.18.1",
-    "dompurify": "^3.4.13"
+    "dompurify": "^3.4.16"
   }
 }

@@ -49,8 +49,7 @@ function collectSelectNodes(nodes: FlowNode[]): FlowNode[] {
     return selectNodes;
 }
 
-function extractCteBodyScope(fullNormalizedSql: string, cteName: string): { bodySql: string; downstreamSql: string } | null {
-    const maskedSql = maskStringsAndComments(fullNormalizedSql);
+function extractCteBodyScope(fullNormalizedSql: string, maskedSql: string, cteName: string): { bodySql: string; downstreamSql: string } | null {
     const ctePattern = new RegExp(`\\b${escapeRegex(cteName)}\\b\\s+as\\s*\\(`, 'i');
     const cteMatch = ctePattern.exec(maskedSql);
     if (!cteMatch) {
@@ -285,22 +284,11 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
     const maskedSql = maskStringsAndComments(sql);
     const sqlLower = maskedSql.toLowerCase();
     
-    // 1. Collect FROM subqueries (already have nodes)
+    // FROM nodes have generic descriptions (such as "Derived table with 2
+    // operations"), which are not comparable SQL. Associate them only after
+    // extracting the actual subquery text below.
     const subqueryNodes = nodes.filter(n => n.type === 'subquery');
-    subqueryNodes.forEach(node => {
-        const desc = (node.description || node.label || '').toLowerCase();
-        if (desc) {
-            // Create normalized signature
-            const normalized = desc.replace(/\s+/g, ' ').trim();
-            allSubqueries.push({
-                sql: desc,
-                normalized: normalized,
-                location: 'from',
-                node: node,
-                parentNodeId: node.parentId
-            });
-        }
-    });
+    let fromSubqueryIndex = 0;
     
     // 2. Extract subqueries from SQL using balanced parentheses matching
     // This handles nested subqueries correctly by tracking parenthesis depth
@@ -363,17 +351,22 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
                 
                 // Determine location based on context
                 const beforeMatch = sql.substring(Math.max(0, parenPos - 100), parenPos).toLowerCase();
-                let location: 'where' | 'select' | 'having' = 'where';
-                if (beforeMatch.includes('select') && !beforeMatch.includes('where') && !beforeMatch.includes('having') && !beforeMatch.includes('from')) {
+                let location: SubqueryMatch['location'] = 'where';
+                if (/\b(?:from|join)\s*$/.test(beforeMatch)) {
+                    location = 'from';
+                } else if (beforeMatch.includes('select') && !beforeMatch.includes('where') && !beforeMatch.includes('having') && !beforeMatch.includes('from')) {
                     location = 'select';
                 } else if (beforeMatch.includes('having')) {
                     location = 'having';
                 }
+                const node = location === 'from' ? subqueryNodes[fromSubqueryIndex++] : undefined;
                 
                 allSubqueries.push({
                     sql: subquery.sql,
                     normalized: normalized,
-                    location: location
+                    location: location,
+                    node,
+                    parentNodeId: node?.parentId
                 });
                 
                 searchIndex = subquery.endIndex + 1;
@@ -398,40 +391,26 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
     // Similarity criteria: same FROM table, same aggregate function, same WHERE presence
     const similarGroups: SubqueryMatch[][] = [];
     const processed = new Set<string>();
-    
-    allSubqueries.forEach((subq1, idx1) => {
-        if (processed.has(subq1.normalized)) {return;}
-        
-        const similar: SubqueryMatch[] = [subq1];
-        allSubqueries.forEach((subq2, idx2) => {
-            if (idx1 >= idx2 || processed.has(subq2.normalized)) {return;}
-            
-            // Check if subqueries are similar (same FROM table and similar structure)
-            const sig1 = subq1.normalized;
-            const sig2 = subq2.normalized;
-            
-            // Extract key parts: FROM table and aggregate function
-            const from1 = sig1.match(/from\s+(\w+)/);
-            const from2 = sig2.match(/from\s+(\w+)/);
-            const agg1 = sig1.match(/(avg|count|sum|max|min)\s*\(/);
-            const agg2 = sig2.match(/(avg|count|sum|max|min)\s*\(/);
-            const where1 = sig1.includes('where');
-            const where2 = sig2.includes('where');
-            
-            // Consider similar if: same FROM table, same aggregate (or both have aggregates), both have WHERE
-            if (from1 && from2 && from1[1] === from2[1] && 
-                where1 === where2 && 
-                (agg1 && agg2 && agg1[1] === agg2[1] || (!agg1 && !agg2))) {
-                similar.push(subq2);
-                processed.add(subq2.normalized);
-            }
-        });
-        
-        if (similar.length > 1) {
-            similarGroups.push(similar);
-            processed.add(subq1.normalized);
+    const candidatesBySignature = new Map<string, SubqueryMatch[]>();
+
+    for (const subquery of allSubqueries) {
+        const fromTable = subquery.normalized.match(/from\s+(\w+)/)?.[1];
+        if (!fromTable) {continue;}
+        const aggregate = subquery.normalized.match(/(avg|count|sum|max|min)\s*\(/)?.[1] || '';
+        const hasWhere = subquery.normalized.includes('where');
+        const signature = `${fromTable}\u0000${aggregate}\u0000${hasWhere ? '1' : '0'}`;
+        const group = candidatesBySignature.get(signature) || [];
+        group.push(subquery);
+        candidatesBySignature.set(signature, group);
+    }
+
+    for (const group of candidatesBySignature.values()) {
+        if (group.length <= 1) {continue;}
+        similarGroups.push(group);
+        for (const subquery of group) {
+            processed.add(subquery.normalized);
         }
-    });
+    }
     
     // Add warnings for similar groups
     similarGroups.forEach(group => {
@@ -538,6 +517,10 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
     // ============================================================
     
     const selectNodes = collectSelectNodes(nodes);
+    // Every intermediate SELECT checks the same source statement. Normalize
+    // it once; large CTE chains otherwise repeat this full scan per CTE.
+    const fullNormalizedSql = stripSqlComments(sql).replace(/\s+/g, ' ').trim();
+    let maskedNormalizedSql: string | undefined;
     selectNodes.forEach(selectNode => {
         if (!selectNode.columns || selectNode.columns.length === 0) {return;}
 
@@ -550,9 +533,6 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
             return;
         }
 
-        // Normalize SQL: remove comments, normalize whitespace for reliable matching
-        const fullNormalizedSql = stripSqlComments(sql).replace(/\s+/g, ' ').trim();
-
         // Scope SQL to the relevant CTE/subquery body, but keep downstream
         // query text so CTE output columns selected later are not treated as dead.
         let normalizedSql = fullNormalizedSql;
@@ -563,7 +543,8 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
             if (parentNode?.type === 'cte' && parentNode.label) {
                 const cteName = extractCteName(parentNode.label);
                 if (cteName) {
-                    const cteScope = extractCteBodyScope(fullNormalizedSql, cteName);
+                    maskedNormalizedSql ??= maskStringsAndComments(fullNormalizedSql);
+                    const cteScope = extractCteBodyScope(fullNormalizedSql, maskedNormalizedSql, cteName);
                     if (cteScope) {
                         normalizedSql = cteScope.bodySql;
                         const cteQualifiers = collectCteReferenceQualifiers(cteScope.downstreamSql, cteName);

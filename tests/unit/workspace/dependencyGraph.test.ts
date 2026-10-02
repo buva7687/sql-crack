@@ -443,3 +443,20 @@ describe('workspace dependency graph layout and cycle detection', () => {
         expect(source).not.toContain('function findDefinitionsByName');
     });
 });
+
+describe('workspace dependency graph with same-name definitions', () => {
+    it('keeps the CTAS source edge when another schema defines the same table name first', () => {
+        const sql = [
+            'CREATE TABLE staging.orders (id INT);',
+            '',
+            'CREATE TABLE mart.orders AS SELECT id FROM raw_orders;',
+        ].join('\n');
+        const index = createIndex([createExtractedAnalysis('/sql/orders.sql', sql, 'PostgreSQL')]);
+
+        const graph = buildDependencyGraph(index, 'tables');
+        const labelOf = (id: string) => graph.nodes.find(node => node.id === id)?.label;
+
+        expect(graph.edges.map(edge => [labelOf(edge.source), labelOf(edge.target)]))
+            .toContainEqual(['mart.orders', 'raw_orders']);
+    });
+});

@@ -53,7 +53,10 @@ describe('generateHints', () => {
         context.stats.subqueries = 4;
         context.stats.conditions = 0;
 
-        generateHints(context, { type: 'select' });
+        generateHints(context, { type: 'select', from: [
+            { table: 'a' },
+            { table: 'b', join: 'INNER JOIN', on: { type: 'binary_expr' } },
+        ] });
 
         expect(context.hints).toEqual(expect.arrayContaining([
             expect.objectContaining({
@@ -69,7 +72,7 @@ describe('generateHints', () => {
 
         context.stats.joins = 0;
         context.hints = [];
-        generateHints(context, { type: 'select' });
+        generateHints(context, { type: 'select', from: [{ table: 'a' }, { table: 'b' }] });
 
         expect(context.hints).toContainEqual(expect.objectContaining({
             type: 'error',

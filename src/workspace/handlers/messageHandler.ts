@@ -298,6 +298,10 @@ export class MessageHandler {
                     this.handleShowInGraph(message.query, message.nodeType);
                     break;
 
+                case 'showFileTables':
+                    await this.handleShowFileTables(message.filePath);
+                    break;
+
                 case 'visualizeFile':
                     await this.handleVisualizeFile(message.filePath);
                     break;
@@ -437,8 +441,15 @@ export class MessageHandler {
     // ========== Basic View Commands ==========
 
     private handleSwitchView(view: ViewMode | 'graph' | 'issues'): void {
+        const previousView = this._context.getCurrentView();
         this._context.setCurrentView(view);
-        this._context.renderCurrentView();
+        // Graph, lineage, and impact share one live webview document. Replacing
+        // that document when the client returns to Graph discards its saved
+        // zoom/pan state before restoreViewState can apply it. The standalone
+        // Issues document still requires a host render in either direction.
+        if (view !== 'graph' || previousView === 'issues') {
+            this._context.renderCurrentView();
+        }
     }
 
     private handleShowInGraph(query: string, nodeType?: 'table' | 'view' | 'external' | 'file'): void {
@@ -467,6 +478,27 @@ export class MessageHandler {
             return;
         }
         this._context.renderCurrentView();
+    }
+
+    private async handleShowFileTables(filePath: string): Promise<void> {
+        // Webview paths can originate from a remote/Windows extension host even
+        // when tests or the UI process run on POSIX, so normalize both separators.
+        const query = path.posix.basename((filePath || '').replace(/\\/g, '/')).trim();
+        if (!query) {
+            return;
+        }
+
+        const fromMode = this._context.getCurrentGraphMode();
+        this._context.setCurrentGraphMode('tables');
+        this._context.setCurrentSearchFilter({
+            query,
+            nodeTypes: undefined,
+            useRegex: false,
+            caseSensitive: false
+        });
+        this._context.setCurrentView('graph');
+        this._context.trackUxEvent('graph_show_file_tables', { fromMode });
+        await this._context.rebuildAndRenderGraph();
     }
 
     private async handleRefresh(): Promise<void> {

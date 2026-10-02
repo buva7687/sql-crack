@@ -1,5 +1,6 @@
 import type { FlowEdge, FlowNode, OptimizationHint } from '../../types';
 import type { ParserContext } from '../context';
+import { selectMultiTableUpdateTargets } from '../../../shared/dmlTargets';
 
 type GenIdFn = (prefix: string) => string;
 type ProcessSelectFn = (
@@ -294,7 +295,6 @@ function trackTargetTable(context: ParserContext, tableName: string): void {
 export function tryProcessDmlStatements(args: ProcessDmlStatementsArgs): string | null {
     const {
         context,
-        stmt,
         nodes,
         edges,
         rootId,
@@ -305,6 +305,9 @@ export function tryProcessDmlStatements(args: ProcessDmlStatementsArgs): string 
         getTableName,
         extractConditions
     } = args;
+    const stmt = context.statementType === 'update'
+        ? normalizeMultiTableUpdate(args.stmt, getTableName)
+        : args.stmt;
 
     if (context.statementType === 'insert' || context.statementType === 'replace') {
         const writePresentation = context.statementType === 'insert'
@@ -624,6 +627,27 @@ function getInsertLikeSelectAst(stmt: any): any | null {
     if (!values || typeof values !== 'object') { return null; }
     if (values.type?.toLowerCase() !== 'select') { return null; }
     return values;
+}
+
+/**
+ * Rewrite MySQL `UPDATE a JOIN b ... SET a.x = b.y` (and the comma form) into
+ * the `UPDATE a ... FROM a JOIN b` shape used by SQL Server, so joined tables
+ * render as read sources and only SET-qualified tables become write targets.
+ */
+function normalizeMultiTableUpdate(stmt: any, getTableName: GetTableNameFn): any {
+    if (!stmt || stmt.from || !Array.isArray(stmt.table) || stmt.table.length < 2) {
+        return stmt;
+    }
+    const targets = selectMultiTableUpdateTargets(stmt.table, stmt.set, (entry: any) => getTableName(entry));
+    return {
+        ...stmt,
+        from: stmt.table,
+        table: targets.map((target: any) => ({
+            db: null,
+            table: getNormalizedAlias(target) || getTableName(target),
+            as: null,
+        })),
+    };
 }
 
 function getNormalizedAlias(item: any): string | null {

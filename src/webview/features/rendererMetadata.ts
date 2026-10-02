@@ -5,13 +5,13 @@ export interface KeyboardShortcut {
 
 export function getKeyboardShortcutsFeature(): KeyboardShortcut[] {
     return [
-        { key: 'Ctrl/Cmd + Shift + P', description: 'Command palette' },
+        { key: 'Alt + P', description: 'SQL Crack quick actions' },
         { key: 'Ctrl/Cmd + F', description: 'Search nodes' },
         { key: 'Ctrl/Cmd + Z', description: 'Undo layout change' },
         { key: 'Ctrl/Cmd + Shift + Z', description: 'Redo layout change' },
         { key: '/', description: 'Focus search' },
         { key: '+/-', description: 'Zoom in/out' },
-        { key: 'R', description: 'Reset view' },
+        { key: 'R', description: 'Refresh visualization' },
         { key: 'F', description: 'Toggle fullscreen' },
         { key: 'T', description: 'Toggle theme' },
         { key: 'H', description: 'Cycle layouts' },
@@ -25,8 +25,9 @@ export function getKeyboardShortcutsFeature(): KeyboardShortcut[] {
         { key: 'D', description: 'Focus downstream nodes' },
         { key: 'A', description: 'Focus all connected nodes' },
         { key: 'E', description: 'Expand/collapse all CTEs & subqueries' },
-        { key: 'Esc', description: 'Close panels / Exit fullscreen' },
+        { key: 'Esc', description: 'Close panels / Exit fullscreen / Fit to view' },
         { key: 'Enter', description: 'Next search result' },
+        { key: 'Shift + Enter', description: 'Previous search result' },
         { key: '↑', description: 'Navigate to upstream node' },
         { key: '↓', description: 'Navigate to downstream node' },
         { key: '←/→', description: 'Cycle sibling nodes at same depth' },

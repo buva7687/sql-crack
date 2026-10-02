@@ -55,6 +55,28 @@ describe('WorkspacePanel initialization', () => {
         expect(reveal).toHaveBeenCalled();
     });
 
+    it('waits for an existing panel to finish indexing before returning it', async () => {
+        (vscode as any).ViewColumn = { Beside: 2 };
+        let finishInitialization!: () => void;
+        const initialization = new Promise<void>(resolve => { finishInitialization = resolve; });
+        WorkspacePanel.currentPanel = {
+            _scopeUri: undefined,
+            _dialect: 'MySQL',
+            _initializePromise: initialization,
+            _panel: { reveal: jest.fn() },
+        } as unknown as WorkspacePanel;
+
+        let returned = false;
+        const opened = WorkspacePanel.createOrShow(vscode.Uri.file('/extension'), {} as vscode.ExtensionContext);
+        void opened.then(() => { returned = true; });
+        await Promise.resolve();
+        expect(returned).toBe(false);
+
+        finishInitialization();
+        await opened;
+        expect(returned).toBe(true);
+    });
+
     it('renders immediately for a large workspace with a valid cached index', async () => {
         const context = createContext({
             autoIndexed: false,

@@ -1,4 +1,15 @@
-import { getDollarQuoteDelimiterAt, maskSqlCommentsPreservingPositions, stripSqlComments } from '../../../src/shared/stringUtils';
+import {
+    getDollarQuoteDelimiterAt,
+    maskSqlCommentsPreservingPositions,
+    stripSqlComments,
+    truncateCodePoints,
+} from '../../../src/shared/stringUtils';
+
+describe('truncateCodePoints', () => {
+    it('does not split an emoji surrogate pair at the truncation boundary', () => {
+        expect(truncateCodePoints('12345678😀WXYZ', 12, '...')).toBe('12345678😀...');
+    });
+});
 
 describe('stripSqlComments', () => {
     it('strips line comments (--)', () => {

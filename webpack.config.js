@@ -113,8 +113,12 @@ module.exports = (_env, argv = {}) => {
     },
     performance: {
       hints: isProduction ? 'warning' : false,
-      maxAssetSize: 4000000, // 4 MB (node-sql-parser is ~2.4MB)
-      maxEntrypointSize: 4000000
+      // The parser dominates this bundle and CSP-safe dynamic chunk loading is
+      // intentionally disabled. Keep an explicit 4 MiB budget (binary bytes),
+      // which still warns on meaningful growth without mislabeling 4,000,000
+      // bytes as "4 MB" in webpack's MiB-formatted output.
+      maxAssetSize: 4 * 1024 * 1024,
+      maxEntrypointSize: 4 * 1024 * 1024
     },
     plugins: [
       new webpack.ProvidePlugin({

@@ -67,6 +67,17 @@ describe('SQL Parser', () => {
       expect(result?.details?.actual).toBe(2);
     });
 
+    it('uses the selected dialect when counting quoted statement boundaries', () => {
+      const sql = "SELECT ARRAY['a]b', 'c'] AS x FROM t; SELECT 2;";
+      const result = validateSql(sql, {
+        maxSqlSizeBytes: 1024 * 1024,
+        maxQueryCount: 1,
+      }, 'PostgreSQL');
+
+      expect(result?.type).toBe('query_count_limit');
+      expect(result?.details?.actual).toBe(2);
+    });
+
     it('uses splitter-consistent counting for custom delimiters and procedural bodies', () => {
       const sql = `
 DELIMITER $$
@@ -92,6 +103,22 @@ SELECT 3;
   });
 
   describe('splitSqlStatements', () => {
+    it.each(['//', '$$', ';;', '$', '|'])('splits MySQL DELIMITER %s blocks with or without a space before the delimiter', (delimiter) => {
+      for (const separator of ['', ' ', '\n']) {
+        const sql = [
+          `DELIMITER ${delimiter}`,
+          `CREATE PROCEDURE p1() BEGIN SELECT a FROM t1; END${separator}${delimiter}`,
+          `CREATE PROCEDURE p2() BEGIN SELECT b FROM t2; END${separator}${delimiter}`,
+          'DELIMITER ;',
+          'SELECT c FROM t3;',
+        ].join('\n');
+
+        const statements = splitSqlStatements(sql, 'MySQL');
+        expect(statements).toHaveLength(3);
+        expect(statements[2]).toBe('SELECT c FROM t3');
+      }
+    });
+
     it('splits on semicolons', () => {
       const sql = 'SELECT * FROM users; SELECT * FROM orders;';
       const statements = splitSqlStatements(sql);
@@ -135,6 +162,16 @@ SELECT 3;
       const sql = '  SELECT 1;  ;  SELECT 2  ;';
       const statements = splitSqlStatements(sql);
       expect(statements).toHaveLength(2);
+    });
+
+    it('recovers statement splitting after a stray closing parenthesis', () => {
+      const statements = splitSqlStatements(
+        'SELECT ); SELECT * FROM first_table; SELECT * FROM second_table;'
+      );
+
+      expect(statements).toHaveLength(3);
+      expect(statements[1]).toContain('first_table');
+      expect(statements[2]).toContain('second_table');
     });
 
     it('ignores parentheses inside -- line comments', () => {
@@ -194,7 +231,7 @@ SELECT 2;`;
       const sql = `/* outer; /* inner; */ still outer; */
 SELECT 1;
 SELECT 2;`;
-      const statements = splitSqlStatements(sql);
+      const statements = splitSqlStatements(sql, 'PostgreSQL');
 
       expect(statements).toHaveLength(2);
       expect(statements[0]).toContain('SELECT 1');
@@ -231,6 +268,33 @@ SELECT * FROM t2;
 SELECT * FROM t3;`;
       const statements = splitSqlStatements(sql);
       expect(statements).toHaveLength(3);
+    });
+  });
+
+  describe('TransactSQL GO batches', () => {
+    it('parses each GO-delimited batch instead of swallowing queries after USE', () => {
+      const result = parseSqlBatch(
+        'USE reporting\nGO\nSELECT * FROM first_table\nGO\nSELECT * FROM second_table\nGO',
+        'TransactSQL'
+      );
+
+      expect(result.queries).toHaveLength(3);
+      expect(result.queries[1].tableUsage.has('first_table')).toBe(true);
+      expect(result.queries[2].tableUsage.has('second_table')).toBe(true);
+      expect(result.errorCount).toBe(0);
+    });
+
+    it('applies maxStatements to GO-separated batches the same way parsing splits them', () => {
+      const sql = Array.from({ length: 10 }, (_, index) => `SELECT c FROM t${index}\nGO`).join('\n');
+      const limits = { maxSqlSizeBytes: 1024 * 1024, maxQueryCount: 5 };
+
+      expect(validateSql(sql, limits, 'TransactSQL')).toEqual(expect.objectContaining({
+        type: 'query_count_limit',
+        details: expect.objectContaining({ actual: 10, limit: 5 }),
+      }));
+      const result = parseSqlBatch(sql, 'TransactSQL', limits);
+      expect(result.queries).toHaveLength(5);
+      expect(result.queries[0].hints.some(hint => hint.message === 'Too many statements - showing first batch')).toBe(true);
     });
   });
   describe('Basic SELECT', () => {
@@ -304,6 +368,21 @@ SELECT * FROM t3;`;
       const result = parseSql('SELECT id AS user_id, name AS user_name FROM users', 'MySQL');
 
       expect(result.error).toBeUndefined();
+    });
+
+    it('formats CAST target types without object coercion', () => {
+      const result = parseSql(
+        'SELECT CAST(id AS VARCHAR(10)) AS text_id, CAST(amount AS DECIMAL(10,2)) AS rounded FROM orders',
+        'PostgreSQL'
+      );
+      const selectNode = result.nodes.find(node => node.type === 'select');
+      const expressions = selectNode?.columns?.map(column => column.expression) || [];
+
+      expect(expressions).toEqual(expect.arrayContaining([
+        'CAST(id AS VARCHAR(10))',
+        'CAST(amount AS DECIMAL(10,2))',
+      ]));
+      expect(expressions.join(' ')).not.toContain('[object Object]');
     });
   });
 
@@ -855,6 +934,18 @@ SELECT * FROM t3;`;
       expect(result.error).toBeUndefined();
     });
 
+    it('connects a UNION ALL chain through one merge node', () => {
+      const sql = ['a', 'b', 'c', 'd'].map(table => `SELECT id FROM ${table}`).join(' UNION ALL ');
+      const result = parseSql(sql, 'PostgreSQL');
+      const unionNodes = result.nodes.filter(node => node.type === 'union');
+
+      expect(result.error).toBeUndefined();
+      expect(result.stats.unions).toBe(3);
+      expect(unionNodes).toHaveLength(1);
+      expect(unionNodes[0].details).toEqual(['4 branches']);
+      expect(result.edges.filter(edge => edge.target === unionNodes[0].id)).toHaveLength(4);
+    });
+
     it('parses INTERSECT', () => {
       const sql = 'SELECT id FROM customers INTERSECT SELECT customer_id FROM orders';
       const result = parseSql(sql, 'PostgreSQL');
@@ -1150,6 +1241,89 @@ WHERE amount_1 > 0
       const secondTable = result.queries[1].nodes.find(node => node.label === 'second_table');
       expect(secondTable?.startLine).toBe(5);
       expect(result.queries.some(query => query.nodes.some(node => node.label === 'omitted_table'))).toBe(false);
+    });
+
+    const tableLines = (result: ReturnType<typeof parseSqlBatch>) => result.queries.map(query =>
+      query.nodes.filter(node => node.type === 'table').map(node => `${node.label}@${node.startLine}`));
+
+    it('keeps later statement lines exact after a trailing comment on a statement line', () => {
+      const result = parseSqlBatch([
+        'SELECT a FROM t1; -- first',
+        'SELECT b FROM t2;',
+        'SELECT c FROM t3;',
+        'SELECT d FROM t4;',
+      ].join('\n'));
+
+      expect(tableLines(result)).toEqual([['t1@1'], ['t2@2'], ['t3@3'], ['t4@4']]);
+      expect(result.queryLineRanges).toEqual([
+        { startLine: 1, endLine: 1 },
+        { startLine: 2, endLine: 2 },
+        { startLine: 3, endLine: 3 },
+        { startLine: 4, endLine: 4 },
+      ]);
+    });
+
+    it('detaches comments trailing the previous statement but keeps own-line header comments', () => {
+      const cases: Array<[string, Array<{ startLine: number; endLine: number }>]> = [
+        ['SELECT a FROM t1; -- first\nSELECT b FROM t2;', [{ startLine: 1, endLine: 1 }, { startLine: 2, endLine: 2 }]],
+        ['SELECT a FROM t1; /* x */\nSELECT b FROM t2;', [{ startLine: 1, endLine: 1 }, { startLine: 2, endLine: 2 }]],
+        ['SELECT a FROM t1; # note\nSELECT b FROM t2;', [{ startLine: 1, endLine: 1 }, { startLine: 2, endLine: 2 }]],
+        ['SELECT a FROM t1; -- first\n\n-- header\nSELECT b FROM t2;', [{ startLine: 1, endLine: 1 }, { startLine: 3, endLine: 4 }]],
+        ['SELECT a FROM t1; /* x */ SELECT b FROM t2;', [{ startLine: 1, endLine: 1 }, { startLine: 1, endLine: 1 }]],
+      ];
+      for (const [sql, ranges] of cases) {
+        expect(parseSqlBatch(sql).queryLineRanges).toEqual(ranges);
+      }
+      expect(splitSqlStatements('SELECT a FROM t1; -- first\nSELECT b FROM t2;')).toEqual([
+        'SELECT a FROM t1',
+        'SELECT b FROM t2',
+      ]);
+    });
+
+    it('anchors merged Session Setup and Schema Changes nodes to their file lines', () => {
+      const sql = [
+        'SELECT a FROM t1;', '', '', '', '',
+        'USE analytics;',
+        'SET x = 1;', '', '',
+        'CREATE TABLE foo (id int);',
+        'CREATE TABLE bar (id int);',
+      ].join('\n');
+      const result = parseSqlBatch(sql, 'MySQL', undefined, { combineDdlStatements: true });
+      const merged = result.queries.slice(1).map(query => query.nodes.map(node => `${node.label}@${node.startLine}-${node.endLine}`));
+
+      expect(result.queryLineRanges?.slice(1)).toEqual([{ startLine: 6, endLine: 7 }, { startLine: 10, endLine: 11 }]);
+      expect(merged).toEqual([['Session Setup@6-7'], ['Schema Changes@10-11']]);
+    });
+
+    it('keeps deferred re-parse offsets consistent with batch node lines', () => {
+      const sql = 'SELECT a FROM t1; -- first\n\n-- header\nSELECT b\nFROM t2;';
+      const batch = parseSqlBatch(sql);
+      const range = batch.queryLineRanges![1];
+      // Deferred hydration re-parses query.sql and offsets by range.startLine - 1.
+      const reparsed = parseSqlBatch(batch.queries[1].sql).queries[0];
+      const offsetLines = reparsed.nodes.map(node => `${node.label}@${(node.startLine ?? 0) + range.startLine - 1}`);
+      expect(offsetLines).toEqual(batch.queries[1].nodes.map(node => `${node.label}@${node.startLine}`));
+      expect(batch.queries[1].nodes.find(node => node.label === 't2')?.startLine).toBe(5);
+    });
+
+    it('keeps later statement lines exact when two statements share a line', () => {
+      const result = parseSqlBatch('SELECT a FROM t1; SELECT b FROM t2;\nSELECT c FROM t3;\nSELECT d FROM t4;');
+
+      expect(tableLines(result)).toEqual([['t1@1'], ['t2@1'], ['t3@2'], ['t4@3']]);
+      expect(result.queryLineRanges).toEqual([
+        { startLine: 1, endLine: 1 },
+        { startLine: 1, endLine: 1 },
+        { startLine: 2, endLine: 2 },
+        { startLine: 3, endLine: 3 },
+      ]);
+    });
+
+    it('maps identical statements and SQL Server GO batches to their own lines', () => {
+      const repeated = parseSqlBatch('SELECT 1 FROM t;\nSELECT 1 FROM t;\n\nSELECT 1 FROM t;');
+      expect(repeated.queryLineRanges?.map(range => range.startLine)).toEqual([1, 2, 4]);
+
+      const batches = parseSqlBatch('SELECT a FROM t1\nGO\n\n  SELECT b FROM t2; SELECT c FROM t3\nGO\nSELECT d FROM t4', 'TransactSQL');
+      expect(tableLines(batches)).toEqual([['t1@1'], ['t2@4'], ['t3@4'], ['t4@6']]);
     });
   });
 

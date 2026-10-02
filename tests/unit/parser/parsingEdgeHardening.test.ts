@@ -2,10 +2,11 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 describe('parsing edge hardening guards', () => {
-    it('uses splitSqlStatements for validation statement counts', () => {
+    it('uses the statement splitter (including SQL Server GO batches) for validation counts', () => {
         const source = readFileSync(join(__dirname, '../../../src/webview/parser/validation/validate.ts'), 'utf8');
-        expect(source).toContain("import { countSqlStatements } from './splitting';");
-        expect(source).toContain('return countSqlStatements(sql);');
+        expect(source).toContain("import { countSqlStatements, splitTransactSqlBatches } from './splitting';");
+        expect(source).toContain('return countSqlStatements(sql, dialect);');
+        expect(source).toContain('return splitTransactSqlBatches(sql)');
     });
 
     it('uses TextEncoder byte counting for validation size limits', () => {
@@ -34,12 +35,11 @@ describe('parsing edge hardening guards', () => {
         expect(source).toContain("if ((col.type === 'window_func' || col.over) && col.expr) {");
     });
 
-    it('uses exact statement-start line matching for batch line ranges', () => {
+    it('uses exact statement source offsets for batch line ranges', () => {
         const source = readFileSync(join(__dirname, '../../../src/webview/sqlParser.ts'), 'utf8');
-        expect(source).toContain('const lineMatchesStatementLine = (sourceLine: string, statementLine: string): boolean => {');
-        expect(source).toContain('normalizeStatementLineForMatch(sourceLine) === normalizeStatementLineForMatch(statementLine)');
+        expect(source).toContain('for (const { sql: stmt, start: stmtStartOffset } of statements) {');
+        expect(source).not.toContain('lineMatchesStatementLine');
         expect(source).not.toContain('lines[i].includes(matchPrefix)');
-        expect(source).not.toContain('lines[i + 1].includes(stmtSecondLine)');
     });
 
     it('keeps unicode-aware identifier matching in regex fallback parser', () => {
@@ -57,7 +57,8 @@ describe('parsing edge hardening guards', () => {
     it('masks strings and comments before scanning CTE bodies in advanced issue detection', () => {
         const source = readFileSync(join(__dirname, '../../../src/webview/parser/hints/advancedIssues.ts'), 'utf8');
         expect(source).toContain("import { maskStringsAndComments } from '../dialects/preprocessing';");
-        expect(source).toContain('const maskedSql = maskStringsAndComments(fullNormalizedSql);');
+        expect(source).toContain('maskedNormalizedSql ??= maskStringsAndComments(fullNormalizedSql);');
+        expect(source).toContain('extractCteBodyScope(fullNormalizedSql, maskedNormalizedSql, cteName)');
         expect(source).toContain('const cteMatch = ctePattern.exec(maskedSql);');
     });
 

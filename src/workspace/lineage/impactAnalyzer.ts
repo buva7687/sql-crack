@@ -58,10 +58,36 @@ export interface ImpactItem {
  * Analyzes impact of changes to tables and columns
  */
 export class ImpactAnalyzer {
+    private readonly exactColumnIdsByParent = new Map<string, Map<string, string>>();
+    private readonly foldedColumnIdsByParent = new Map<string, Map<string, string[]>>();
+
     constructor(
         private graph: LineageGraph,
         private flowAnalyzer: FlowAnalyzer
-    ) {}
+    ) {
+        for (const node of graph.nodes.values()) {
+            if (node.type !== 'column' || !node.parentId) {
+                continue;
+            }
+
+            let exactColumns = this.exactColumnIdsByParent.get(node.parentId);
+            if (!exactColumns) {
+                exactColumns = new Map();
+                this.exactColumnIdsByParent.set(node.parentId, exactColumns);
+            }
+            exactColumns.set(node.name, node.id);
+
+            let foldedColumns = this.foldedColumnIdsByParent.get(node.parentId);
+            if (!foldedColumns) {
+                foldedColumns = new Map();
+                this.foldedColumnIdsByParent.set(node.parentId, foldedColumns);
+            }
+            const foldedName = node.name.toLowerCase();
+            const matchingIds = foldedColumns.get(foldedName) || [];
+            matchingIds.push(node.id);
+            foldedColumns.set(foldedName, matchingIds);
+        }
+    }
 
     private createMissingColumnTableReport(columnName: string, changeType: ChangeType): ImpactReport {
         return {
@@ -631,17 +657,21 @@ export class ImpactAnalyzer {
         const parentIds = explicitParentId
             ? new Set([explicitParentId])
             : new Set(['table', 'view', 'external', 'cte'].map(type => `${type}:${relationKey}`));
-        const exact = [...this.graph.nodes.values()].find(node =>
-            node.type === 'column' && parentIds.has(node.parentId || '') && node.name === columnName
-        );
-        if (exact) {return exact.id;}
+        for (const parentId of parentIds) {
+            const exactId = this.exactColumnIdsByParent.get(parentId)?.get(columnName);
+            if (exactId) {
+                return exactId;
+            }
+        }
 
-        const folded = [...this.graph.nodes.values()].filter(node =>
-            node.type === 'column'
-            && parentIds.has(node.parentId || '')
-            && node.name.toLowerCase() === columnName.toLowerCase()
-        );
-        return folded.length === 1 ? folded[0].id : undefined;
+        const foldedIds = new Set<string>();
+        const foldedName = columnName.toLowerCase();
+        for (const parentId of parentIds) {
+            for (const id of this.foldedColumnIdsByParent.get(parentId)?.get(foldedName) || []) {
+                foldedIds.add(id);
+            }
+        }
+        return foldedIds.size === 1 ? foldedIds.values().next().value : undefined;
     }
 
     private getTableDisplayName(tableId: string | undefined): string {

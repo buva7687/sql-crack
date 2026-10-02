@@ -84,11 +84,11 @@ describe('detectDialect', () => {
         expect(result.scores.BigQuery).toBeGreaterThanOrEqual(2);
     });
 
-    it('detects three-part names as a Snowflake-leaning signal', () => {
+    it('treats three-part names as shared syntax without auto-switching', () => {
         const result = detectDialect('SELECT * FROM analytics.sales.orders');
-        expect(result.dialect).toBe('Snowflake');
-        expect(result.confidence).toBe('high');
-        expect(result.scores.Snowflake).toBeGreaterThan((result.scores.TransactSQL || 0));
+        expect(result.dialect).toBeNull();
+        expect(result.confidence).toBe('low');
+        expect(result.scores.Snowflake).toBe(result.scores.TransactSQL);
         expect(result.scores.Redshift).toBeGreaterThan(0);
     });
 
@@ -131,6 +131,15 @@ describe('detectDialect', () => {
         expect(result.scores.Snowflake || 0).toBe(0);
         expect(result.dialect).toBe('PostgreSQL');
         expect(result.confidence).toBe('high');
+    });
+
+    it('does not treat named bind parameters as Snowflake paths', () => {
+        const result = detectDialect(
+            'SELECT * FROM orders WHERE created_at BETWEEN :start_date AND :end_date'
+        );
+
+        expect(result.scores.Snowflake || 0).toBe(0);
+        expect(result.dialect).not.toBe('Snowflake');
     });
 
     it('detects PostgreSQL via AT TIME ZONE plus :: type cast', () => {
@@ -178,9 +187,9 @@ describe('detectDialect', () => {
         expect(result.confidence).toBe('high');
     });
 
-    it('detects Oracle NVL/DECODE as low-confidence signal', () => {
+    it('does not treat shared NVL/DECODE functions as an Oracle signal', () => {
         const result = detectDialect('SELECT NVL(name, DECODE(status, 1, active, inactive)) FROM users');
-        expect(result.scores.Oracle).toBeGreaterThan(0);
+        expect(result.scores.Oracle).toBeUndefined();
     });
 
     it('ignores Oracle-like syntax inside comments', () => {

@@ -4,6 +4,7 @@ import { ICONS } from '../../../shared/icons';
 import { Z_INDEX } from '../../../shared/zIndex';
 import { formatRelativeTime } from '../../../shared/time';
 import { escapeHtml } from '../../../shared/stringUtils';
+import { attachMenuKeyboardNavigation, makeMenuItemFocusable } from '../menuKeyboard';
 
 interface ToolbarMenuCallbacks {
     isDarkTheme: () => boolean;
@@ -39,13 +40,15 @@ function applyMenuChrome(dropdown: HTMLElement, dark: boolean): void {
     dropdown.style.boxShadow = getMenuShadow(dark);
 }
 
-function ensureCheckIcon(item: HTMLElement): void {
-    if (item.querySelector('.sql-crack-check-icon')) {
+function ensureCheckIcon(item: HTMLElement, accentColor: string): void {
+    const existing = item.querySelector<HTMLElement>('.sql-crack-check-icon');
+    if (existing) {
+        existing.style.color = accentColor;
         return;
     }
     const check = document.createElement('span');
     check.className = 'sql-crack-check-icon';
-    check.style.color = '#818cf8';
+    check.style.color = accentColor;
     check.style.display = 'inline-flex';
     check.style.width = '14px';
     check.style.height = '14px';
@@ -61,19 +64,23 @@ function applyFocusModeDropdownTheme(dropdown: HTMLElement, activeMode: FocusMod
         header.style.color = getMutedTextColor(dark);
     }
 
+    // Theme tokens (as in the layout picker): the fixed dark-theme indigos were
+    // ~1.5:1 for the shortcut badges on the light-theme menu.
+    const theme = getComponentUiColors(dark);
     dropdown.querySelectorAll<HTMLElement>('[data-mode]').forEach(item => {
         const isActive = item.dataset.mode === activeMode;
-        item.style.color = isActive ? '#818cf8' : (dark ? '#e2e8f0' : '#1e293b');
-        item.style.background = isActive ? 'rgba(99, 102, 241, 0.15)' : 'transparent';
+        item.style.color = isActive ? theme.accent : (dark ? '#e2e8f0' : '#1e293b');
+        item.style.background = isActive ? theme.accentBg : 'transparent';
+        item.setAttribute('aria-checked', String(isActive));
         const shortcut = item.querySelector('kbd') as HTMLElement | null;
         if (shortcut) {
-            shortcut.style.background = 'rgba(99, 102, 241, 0.2)';
-            shortcut.style.color = '#a5b4fc';
+            shortcut.style.background = theme.accentBg;
+            shortcut.style.color = theme.accentSoft;
         }
 
         const checkIcon = item.querySelector('.sql-crack-check-icon');
         if (isActive) {
-            ensureCheckIcon(item);
+            ensureCheckIcon(item, theme.accent);
         } else {
             checkIcon?.remove();
         }
@@ -87,17 +94,19 @@ function applyViewLocationDropdownState(dropdown: HTMLElement, currentLocation: 
         header.style.color = getMutedTextColor(dark);
     }
 
+    const theme = getComponentUiColors(dark);
     dropdown.querySelectorAll<HTMLElement>('[data-view-location]').forEach(item => {
         const isActive = item.dataset.viewLocation === currentLocation;
-        item.style.color = isActive ? '#818cf8' : (dark ? '#e2e8f0' : '#1e293b');
-        item.style.background = isActive ? 'rgba(99, 102, 241, 0.15)' : 'transparent';
+        item.style.color = isActive ? theme.accent : (dark ? '#e2e8f0' : '#1e293b');
+        item.style.background = isActive ? theme.accentBg : 'transparent';
+        item.setAttribute('aria-checked', String(isActive));
         const desc = item.querySelector('[data-role="location-desc"]') as HTMLElement | null;
         if (desc) {
             desc.style.color = getMutedTextColor(dark);
         }
         const checkIcon = item.querySelector('.sql-crack-check-icon');
         if (isActive) {
-            ensureCheckIcon(item);
+            ensureCheckIcon(item, theme.accent);
         } else {
             checkIcon?.remove();
         }
@@ -180,6 +189,7 @@ export function createFocusModeSelector(
         const item = document.createElement('div');
         const isActive = callbacks.getFocusMode() === mode.id;
         item.dataset.mode = mode.id;
+        makeMenuItemFocusable(item, 'menuitemradio');
         item.style.cssText = `
             padding: 8px 12px;
             cursor: pointer;
@@ -251,6 +261,14 @@ export function createFocusModeSelector(
         }
     }, listenerOptions);
 
+    attachMenuKeyboardNavigation({
+        trigger: btn,
+        menu: dropdown,
+        isOpen: () => dropdown.style.display === 'block',
+        close: () => { dropdown.style.display = 'none'; },
+        listenerOptions,
+    });
+
     const focusModeClickHandler = () => {
         dropdown.style.display = 'none';
     };
@@ -274,6 +292,24 @@ export function createFocusModeSelector(
     }) as EventListener;
     document.addEventListener('theme-change', focusThemeChangeHandler, listenerOptions);
     context.documentListeners.push({ type: 'theme-change', handler: focusThemeChangeHandler });
+
+    // U/D/A and the command bar change the focus direction without the menu;
+    // mirror a click on the matching item (button icon and ✓) when it changes.
+    let lastFocusMode = callbacks.getFocusMode();
+    const focusModeStateHandler = (() => {
+        const mode = callbacks.getFocusMode();
+        if (mode === lastFocusMode) {
+            return;
+        }
+        lastFocusMode = mode;
+        const selected = modes.find(candidate => candidate.id === mode);
+        if (selected) {
+            btn.innerHTML = selected.icon;
+        }
+        applyFocusModeDropdownTheme(dropdown, mode, callbacks.isDarkTheme());
+    }) as EventListener;
+    document.addEventListener('layout-state-changed', focusModeStateHandler, listenerOptions);
+    context.documentListeners.push({ type: 'layout-state-changed', handler: focusModeStateHandler });
 
     applyFocusModeDropdownTheme(dropdown, callbacks.getFocusMode(), dark);
     container.appendChild(btn);
@@ -314,6 +350,14 @@ export function createViewLocationButton(
             dropdown.style.display = 'none';
         }
     }, listenerOptions);
+
+    attachMenuKeyboardNavigation({
+        trigger: viewLocBtn,
+        menu: dropdown,
+        isOpen: () => dropdown.style.display === 'block',
+        close: () => { dropdown.style.display = 'none'; },
+        listenerOptions,
+    });
 
     const viewLocClickHandler = () => {
         dropdown.style.display = 'none';
@@ -416,6 +460,7 @@ function createViewLocationDropdown(
     locations.forEach(location => {
         const item = document.createElement('div');
         item.dataset.viewLocation = location.id;
+        makeMenuItemFocusable(item, 'menuitemradio');
         item.style.cssText = `
             padding: 8px 12px;
             cursor: pointer;
@@ -457,9 +502,21 @@ export function createPinnedTabsButton(
     pinsBtn.title = `Open pinned tabs (${pins.length})`;
     pinsBtn.dataset.overflowIcon = ICONS.clipboard;
     pinsBtn.style.cssText = context.getBtnStyle(dark) + `border-left: 1px solid ${borderColor};`;
+    pinsBtn.style.display = pins.length > 0 ? '' : 'none';
 
     const dropdown = createPinnedTabsDropdown(callbacks, pins, context);
     document.body.appendChild(dropdown);
+
+    const pinnedTabsChangedHandler = ((event: CustomEvent<{ pins: typeof pins }>) => {
+        if (!Array.isArray(event.detail?.pins)) {return;}
+        const nextPins = event.detail.pins;
+        pinsBtn.title = `Open pinned tabs (${nextPins.length})`;
+        pinsBtn.style.display = nextPins.length > 0 ? '' : 'none';
+        dropdown.style.display = 'none';
+        populatePinnedTabsDropdown(dropdown, callbacks, nextPins, context, () => dark);
+    }) as EventListener;
+    document.addEventListener('pinned-tabs-changed', pinnedTabsChangedHandler, listenerOptions);
+    context.documentListeners.push({ type: 'pinned-tabs-changed', handler: pinnedTabsChangedHandler });
 
     pinsBtn.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -474,6 +531,14 @@ export function createPinnedTabsButton(
             dropdown.style.display = 'none';
         }
     }, listenerOptions);
+
+    attachMenuKeyboardNavigation({
+        trigger: pinsBtn,
+        menu: dropdown,
+        isOpen: () => dropdown.style.display === 'block',
+        close: () => { dropdown.style.display = 'none'; },
+        listenerOptions,
+    });
 
     const pinnedTabsClickHandler = () => {
         dropdown.style.display = 'none';
@@ -494,6 +559,7 @@ export function createPinnedTabsButton(
     const pinnedTabsThemeHandler = ((event: CustomEvent<{ dark: boolean }>) => {
         dark = Boolean(event.detail?.dark);
         pinsBtn.style.cssText = context.getBtnStyle(dark) + `border-left: 1px solid ${getMenuBorderColor(dark)};`;
+        pinsBtn.style.display = dropdown.querySelectorAll('[data-role="pin-item"]').length > 0 ? '' : 'none';
         applyPinnedTabsDropdownTheme(dropdown, dark);
     }) as EventListener;
     document.addEventListener('theme-change', pinnedTabsThemeHandler, listenerOptions);
@@ -550,9 +616,31 @@ function createPinnedTabsDropdown(
     `;
     dropdown.appendChild(header);
 
+    populatePinnedTabsDropdown(dropdown, callbacks, pins, context, () => dark);
+
+    const pinnedTabsDropdownThemeHandler = ((event: CustomEvent<{ dark: boolean }>) => {
+        dark = Boolean(event.detail?.dark);
+    }) as EventListener;
+    document.addEventListener('theme-change', pinnedTabsDropdownThemeHandler, listenerOptions);
+    context.documentListeners.push({ type: 'theme-change', handler: pinnedTabsDropdownThemeHandler });
+
+    return dropdown;
+}
+
+function populatePinnedTabsDropdown(
+    dropdown: HTMLElement,
+    callbacks: ToolbarMenuCallbacks,
+    pins: Array<{ id: string; name: string; sql: string; dialect: string; timestamp: number }>,
+    context: MenuListenerContext,
+    isDark: () => boolean
+): void {
+    const listenerOptions = context.getListenerOptions();
+    const dark = isDark();
+    dropdown.querySelectorAll('[data-role="pin-item"]').forEach(item => item.remove());
     pins.forEach(pin => {
         const item = document.createElement('div');
         item.dataset.role = 'pin-item';
+        makeMenuItemFocusable(item);
         item.style.cssText = `
             padding: 8px 12px;
             cursor: pointer;
@@ -577,6 +665,9 @@ function createPinnedTabsDropdown(
 
         const deleteBtn = document.createElement('span');
         deleteBtn.dataset.role = 'pin-delete';
+        // Delete/Backspace on the focused pin row activates this control.
+        deleteBtn.setAttribute('data-menu-item-remove', '');
+        deleteBtn.setAttribute('aria-label', `Unpin ${pin.name}`);
         deleteBtn.innerHTML = '×';
         deleteBtn.style.cssText = `font-size: 16px; color: ${getMutedTextColor(dark)}; padding: 0 4px; cursor: pointer;`;
         deleteBtn.addEventListener('click', (event) => {
@@ -588,7 +679,7 @@ function createPinnedTabsDropdown(
             deleteBtn.style.color = '#ef4444';
         }, listenerOptions);
         deleteBtn.addEventListener('mouseleave', () => {
-            deleteBtn.style.color = getMutedTextColor(dark);
+            deleteBtn.style.color = getMutedTextColor(isDark());
         }, listenerOptions);
         item.appendChild(deleteBtn);
 
@@ -607,12 +698,4 @@ function createPinnedTabsDropdown(
 
         dropdown.appendChild(item);
     });
-
-    const pinnedTabsDropdownThemeHandler = ((event: CustomEvent<{ dark: boolean }>) => {
-        dark = Boolean(event.detail?.dark);
-    }) as EventListener;
-    document.addEventListener('theme-change', pinnedTabsDropdownThemeHandler, listenerOptions);
-    context.documentListeners.push({ type: 'theme-change', handler: pinnedTabsDropdownThemeHandler });
-
-    return dropdown;
 }

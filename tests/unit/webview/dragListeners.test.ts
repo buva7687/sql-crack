@@ -69,6 +69,7 @@ function createCallbacks(): EventListenerCallbacks {
         updateTransform: jest.fn(),
         updateZoomIndicator: jest.fn(),
         recordLayoutHistorySnapshot: jest.fn(),
+        onViewStateChanged: jest.fn(),
         selectNode: jest.fn(),
         clearFocusMode: jest.fn(),
         fitView: jest.fn(),
@@ -78,6 +79,7 @@ function createCallbacks(): EventListenerCallbacks {
         hideContextMenu: jest.fn(),
         clearSearch: jest.fn(),
         resetView: jest.fn(),
+        refreshVisualization: jest.fn(),
         undoLayoutChange: jest.fn(),
         redoLayoutChange: jest.fn(),
         toggleCommandBar: jest.fn(),
@@ -185,11 +187,14 @@ describe('dragListeners', () => {
         expect(state.offsetX).toBe(35);
         expect(state.offsetY).toBe(40);
         expect(callbacks.updateTransform).toHaveBeenCalled();
+        expect(callbacks.onViewStateChanged).not.toHaveBeenCalled();
 
         svg.emit('mouseup', {});
         expect(state.isDragging).toBe(false);
         expect(svg.style.cursor).toBe('grab');
         expect(callbacks.recordLayoutHistorySnapshot).toHaveBeenCalled();
+        // The pan changed the persisted viewport (S8).
+        expect(callbacks.onViewStateChanged).toHaveBeenCalledTimes(1);
     });
 
     it('drags a node, updates its transform, and restores opacity on completion', () => {

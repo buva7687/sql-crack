@@ -29,6 +29,43 @@ describe('WorkspacePanel lineage guards and config defaults', () => {
         expect(setterMatch?.[0]).toContain('logger.warn');
     });
 
+    it('builds lineage with the panel dialect so CTE scanning follows its lexing rules', async () => {
+        const builders: LineageBuilder[] = [];
+        jest.spyOn(LineageBuilder.prototype, 'buildFromIndexAsync').mockImplementation(function (this: LineageBuilder) {
+            builders.push(this);
+            return Promise.resolve({ nodes: new Map(), edges: [], columnEdges: [] } as any);
+        });
+        const context: any = {
+            _dialect: 'PostgreSQL',
+            _lineageGraph: null,
+            _lineageBuilder: null,
+            _lineageBuildPromise: null,
+            _lineageBuildVersion: 0,
+            _indexManager: { getIndex: jest.fn(() => ({ files: [] })) },
+        };
+
+        await (WorkspacePanel.prototype as any).buildLineageGraph.call(context);
+
+        expect(builders).toHaveLength(1);
+        expect((builders[0] as any).sqlLexRules).toEqual({ hashComments: false, backslashEscapes: false });
+    });
+
+    it('does not warn that lineage is not ready when the panel closed during the build', async () => {
+        const warning = jest.spyOn(vscode.window, 'showWarningMessage');
+        const context: any = {
+            _isDisposed: false,
+            _lineageGraph: null,
+            buildLineageGraph: jest.fn(async () => { context._isDisposed = true; }),
+            renderCurrentView: jest.fn(),
+        };
+
+        const traced = await (WorkspacePanel.prototype as any).traceTableInLineage.call(context, 'orders');
+
+        expect(traced).toBe(false);
+        expect(warning).not.toHaveBeenCalled();
+        expect(context.renderCurrentView).not.toHaveBeenCalled();
+    });
+
     it('reuses a single in-flight lineage build promise across concurrent callers', async () => {
         const mockGraph = {
             nodes: new Map(),

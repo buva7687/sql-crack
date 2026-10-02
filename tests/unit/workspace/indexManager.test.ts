@@ -168,6 +168,7 @@ describe('IndexManager', () => {
             expect(result.autoIndexed).toBe(false);
             expect(result.fileCount).toBe(100);
             expect(mockScanner.analyzeWorkspace).not.toHaveBeenCalled();
+            expect(vscode.workspace.createFileSystemWatcher).not.toHaveBeenCalled();
         });
 
         it('should NOT auto-index empty workspaces', async () => {
@@ -204,6 +205,19 @@ describe('IndexManager', () => {
     // =========================================================================
 
     describe('buildIndex', () => {
+        it('does not build a declined index from a queued watcher update', async () => {
+            mockScanner.analyzeWorkspace.mockResolvedValue([
+                createMockAnalysis('/queued.sql', [{ name: 'queued_table' }])
+            ]);
+            (indexManager as any).updateQueue.add('/queued.sql');
+
+            await expect((indexManager as any).processUpdateQueue()).resolves.toBeUndefined();
+
+            expect(mockScanner.analyzeWorkspace).not.toHaveBeenCalled();
+            expect(indexManager.getIndex()).toBeNull();
+            expect((indexManager as any).updateQueue.size).toBe(0);
+        });
+
         it('should build index from workspace analysis', async () => {
             const analyses = [
                 createMockAnalysis('/tables.sql', [
@@ -222,6 +236,37 @@ describe('IndexManager', () => {
             expect(index.fileCount).toBe(2);
             expect(index.definitionMap.size).toBe(2);
             expect(index.referenceMap.size).toBe(2);
+        });
+
+        it('queues edits made during the first explicit build', async () => {
+            mockScanner.getFileCount.mockResolvedValue(100);
+            await indexManager.initialize();
+            expect(__getFileSystemWatcher()).toBeNull();
+
+            let resolveScan!: (analyses: FileAnalysis[]) => void;
+            mockScanner.analyzeWorkspace.mockImplementationOnce(() => new Promise(resolve => {
+                resolveScan = resolve;
+            }));
+            mockScanner.analyzeFile.mockResolvedValue(
+                createMockAnalysis('/changed-during-build.sql', [{ name: 'fresh_table' }])
+            );
+            (indexManager as any).updateDebounceMs = 0;
+
+            const buildPromise = indexManager.buildIndex();
+            await Promise.resolve();
+            const watcher = __getFileSystemWatcher();
+            expect(watcher).not.toBeNull();
+            watcher?.__triggerChange(vscode.Uri.file('/changed-during-build.sql'));
+
+            resolveScan([createMockAnalysis('/seed.sql', [{ name: 'seed_table' }])]);
+            await buildPromise;
+            await new Promise(resolve => setTimeout(resolve, 0));
+            await (indexManager as any)._queueProcessingPromise;
+
+            expect(mockScanner.analyzeFile).toHaveBeenCalledWith(
+                expect.objectContaining({ fsPath: '/changed-during-build.sql' })
+            );
+            expect(indexManager.findDefinition('fresh_table')).toBeDefined();
         });
 
         it('should call progress callback during build', async () => {
@@ -248,7 +293,7 @@ describe('IndexManager', () => {
 
             mockScanner.analyzeWorkspace.mockImplementation(async (_progress, cancellation) => {
                 // Simulate checking cancellation
-                expect(cancellation).toBe(token);
+                expect(cancellation?.isCancellationRequested).toBe(false);
                 return [];
             });
 
@@ -256,8 +301,28 @@ describe('IndexManager', () => {
 
             expect(mockScanner.analyzeWorkspace).toHaveBeenCalledWith(
                 undefined,
-                token
+                expect.objectContaining({ isCancellationRequested: false })
             );
+        });
+
+        it('cancels an in-flight scan and does not publish its index after disposal', async () => {
+            let releaseScan!: () => void;
+            const scanReleased = new Promise<void>(resolve => { releaseScan = resolve; });
+            let observedToken: { readonly isCancellationRequested: boolean } | undefined;
+            mockScanner.analyzeWorkspace.mockImplementation(async (_progress, cancellation) => {
+                observedToken = cancellation;
+                await scanReleased;
+                return [createMockAnalysis('/late.sql', [{ name: 'late_table', type: 'table' }])];
+            });
+
+            const build = indexManager.buildIndex();
+            await Promise.resolve();
+            indexManager.dispose();
+            expect(observedToken?.isCancellationRequested).toBe(true);
+            releaseScan();
+            await build;
+
+            expect(indexManager.getIndex()).toBeNull();
         });
 
         it('should persist index after building', async () => {
@@ -980,6 +1045,34 @@ describe('IndexManager', () => {
     // =========================================================================
 
     describe('caching', () => {
+        it('rejects a cached index when dialect changes during filesystem validation', async () => {
+            await mockContext.workspaceState.update('sqlWorkspaceIndex', {
+                version: 7,
+                identity: JSON.stringify({ schema: 7, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                lastUpdated: Date.now(),
+                fileCount: 1,
+                filesArray: [['/cached.sql', createMockAnalysis('/cached.sql', [{ name: 'old_table' }])]],
+                fileHashesArray: [['/cached.sql', hashSql('')]],
+                definitionArray: [['old_table', [{ name: 'old_table', type: 'table', filePath: '/cached.sql', lineNumber: 1, columns: [] }]]],
+                referenceArray: [],
+            });
+            mockScanner.getFileCount.mockResolvedValue(1);
+            let completeValidation!: (current: boolean) => void;
+            jest.spyOn(indexManager as any, 'isCachedIndexCurrent').mockImplementation(() => new Promise<boolean>(resolve => {
+                completeValidation = resolve;
+            }));
+
+            const initialization = indexManager.initialize(0);
+            await flushPromises();
+            indexManager.setDialect('PostgreSQL');
+            completeValidation(true);
+
+            const result = await initialization;
+            expect(result.cacheState).toBe('identity-mismatch');
+            expect(result.hasValidIndex).toBe(false);
+            expect(indexManager.findDefinition('old_table')).toBeUndefined();
+        });
+
         it('should load cached index on initialize', async () => {
             // Pre-populate cache. The identity must match computeCacheIdentity()
             // for this manager (schema 5, no scope, MySQL dialect, no extra
@@ -1613,8 +1706,9 @@ describe('IndexManager', () => {
 
     describe('file watcher', () => {
         const flushMicrotasks = async () => {
-            await Promise.resolve();
-            await Promise.resolve();
+            for (let tick = 0; tick < 8; tick++) {
+                await Promise.resolve();
+            }
         };
 
         const flushWatcherDebounce = async () => {
@@ -1932,7 +2026,11 @@ describe('IndexManager', () => {
             await indexManager.initialize();
 
             expect(mockScanner.analyzeWorkspace).not.toHaveBeenCalled();
+            expect(watchers).toHaveLength(0);
+
+            await indexManager.buildIndex();
             expect(watchers).toHaveLength(1);
+            mockScanner.analyzeWorkspace.mockClear();
 
             __setMockConfig('sqlCrack', { additionalFileExtensions: ['hql'] });
             if (!configChangeHandler) {
@@ -1958,7 +2056,9 @@ describe('IndexManager', () => {
             expect(vscode.workspace.createFileSystemWatcher).toHaveBeenLastCalledWith('**/*.{sql,hql}');
             expect(mockScanner.analyzeWorkspace).toHaveBeenCalledTimes(1);
             expect(mockScanner.analyzeFile).toHaveBeenCalledTimes(1);
-            expect(mockScanner.analyzeFile).toHaveBeenCalledWith(expect.objectContaining({ fsPath: '/fresh.sql' }));
+            expect(mockScanner.analyzeFile).toHaveBeenCalledWith(
+                expect.objectContaining({ fsPath: '/fresh.sql' })
+            );
         });
     });
 
@@ -2009,6 +2109,11 @@ describe('IndexManager', () => {
         });
 
         it('coalesces rapid dialect changes into one rebuild for the latest dialect', async () => {
+            // Dialect rebuilds only apply once indexing has been authorized.
+            mockScanner.analyzeWorkspace.mockResolvedValueOnce([
+                createMockAnalysis('/users.sql', [{ name: 'users' }]),
+            ]);
+            await indexManager.buildIndex();
             mockScanner.analyzeWorkspace.mockResolvedValue([
                 createMockAnalysis('/snowflake.sql', [{ name: 'snow_orders' }]),
             ]);
@@ -2021,7 +2126,7 @@ describe('IndexManager', () => {
 
             expect(mockScanner.setDialect).toHaveBeenNthCalledWith(1, 'PostgreSQL');
             expect(mockScanner.setDialect).toHaveBeenNthCalledWith(2, 'Snowflake');
-            expect(mockScanner.analyzeWorkspace).toHaveBeenCalledTimes(1);
+            expect(mockScanner.analyzeWorkspace).toHaveBeenCalledTimes(2);
             expect(indexManager.findDefinition('snow_orders')).toBeDefined();
         });
 

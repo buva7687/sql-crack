@@ -19,14 +19,20 @@ export {
     escapeRegex,
     safeString,
     escapeHtml,
+    truncateCodePoints,
     stripSqlComments,
     maskSqlCommentsPreservingPositions,
     isHashTempTableIdentifierAt,
+    isPostgresJsonPathOperatorAt,
+    dialectSupportsHashComments,
+    dialectSupportsBackslashEscapes,
+    quotedStringAllowsBackslashEscapes,
     getDollarQuoteDelimiterAt,
     getDollarQuotedTokenEnd,
 } from './stringUtils';
 export type { StripSqlCommentsOptions } from './stringUtils';
 export { unwrapIdentifierValue } from './astUtils';
+export { TextOffsetIndex, buildSegmentStarts, countStartsAtOrBefore } from './textOffsets';
 
 export {
     CANVAS,

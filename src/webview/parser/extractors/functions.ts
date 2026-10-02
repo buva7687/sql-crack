@@ -8,7 +8,7 @@ import type {
 } from '../../types';
 import { getAggregateFunctions, getWindowFunctions } from '../../../dialects';
 import { unwrapIdentifierValue } from '../../../shared/astUtils';
-import { formatExpressionFromAst } from './columns';
+import { formatCastTarget, formatExpressionFromAst } from './columns';
 
 export type TrackFunctionUsageFn = (
     functionName: unknown,
@@ -217,6 +217,15 @@ export function extractAggregateFunctionDetails(
         }
         if (argType === 'binary_expr') {
             const left = formatAggregateArg(arg.left);
+            // expr_list doubles as a function argument list, so IN / BETWEEN
+            // operands get their SQL shape here rather than in the generic branch.
+            if (arg.right?.type === 'expr_list' && Array.isArray(arg.right.value)) {
+                const items = arg.right.value.map(formatAggregateArg);
+                if (/BETWEEN$/i.test(String(arg.operator)) && items.length === 2) {
+                    return `${left} ${arg.operator} ${items[0]} AND ${items[1]}`;
+                }
+                return `${left} ${arg.operator || '?'} (${items.join(', ')})`;
+            }
             const right = formatAggregateArg(arg.right);
             return `${left} ${arg.operator || '?'} ${right}`;
         }
@@ -225,8 +234,7 @@ export function extractAggregateFunctionDetails(
         }
         if (argType === 'cast') {
             const castExpr = formatAggregateArg(arg.expr);
-            const dataType = arg.target?.dataType || arg.target || '?';
-            return `CAST(${castExpr} AS ${String(dataType)})`;
+            return `CAST(${castExpr} AS ${formatCastTarget(arg.target)})`;
         }
         if (argType === 'aggr_func' || argType === 'function') {
             const funcName = getExpressionFunctionName(arg) || 'FUNC';
@@ -404,12 +412,22 @@ export function extractCaseStatementDetails(columns: any): CaseDetail[] {
 
     function formatExpr(expr: any): string {
         if (!expr) {return '?';}
+        // IN (...) / BETWEEN operands arrive as an expr_list whose value is an
+        // array of AST nodes; String() on it renders "[object Object],...".
+        if (expr.type === 'expr_list') {
+            const items = Array.isArray(expr.value) ? expr.value : [];
+            return `(${items.map(formatExpr).join(', ')})`;
+        }
         const unwrapped = unwrapIdentifierValue(expr.column) || unwrapIdentifierValue(expr);
         if (unwrapped) {return unwrapped;}
         if (expr.value !== undefined) {return String(expr.value);}
         if (expr.type === 'null') {return 'NULL';}
         if (expr.type === 'binary_expr') {
             const left = formatExpr(expr.left);
+            if (/BETWEEN$/i.test(String(expr.operator)) && expr.right?.type === 'expr_list'
+                && Array.isArray(expr.right.value) && expr.right.value.length === 2) {
+                return `${left} ${expr.operator} ${formatExpr(expr.right.value[0])} AND ${formatExpr(expr.right.value[1])}`;
+            }
             const right = formatExpr(expr.right);
             return `${left} ${expr.operator} ${right}`;
         }

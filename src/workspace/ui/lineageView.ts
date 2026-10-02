@@ -10,6 +10,17 @@ import { ICONS, getWorkspaceNodeIcon } from '../../shared';
  * Generates HTML for lineage visualization
  */
 export class LineageView {
+    private readonly flowAnalyzers = new WeakMap<LineageGraph, FlowAnalyzer>();
+
+    private getFlowAnalyzer(graph: LineageGraph): FlowAnalyzer {
+        let analyzer = this.flowAnalyzers.get(graph);
+        if (!analyzer) {
+            analyzer = new FlowAnalyzer(graph);
+            this.flowAnalyzers.set(graph, analyzer);
+        }
+        return analyzer;
+    }
+
     /**
      * Generate the main lineage view with search interface and graph container
      * This is the new default view that replaces the overview
@@ -23,7 +34,7 @@ export class LineageView {
         const { depth = 5 } = options;
 
         // Get all searchable nodes
-        const renderer = new LineageGraphRenderer(graph);
+        const renderer = new LineageGraphRenderer(graph, this.getFlowAnalyzer(graph));
         const searchableNodes = renderer.getSearchableNodes();
 
         // Stats
@@ -44,7 +55,7 @@ export class LineageView {
                 </div>
                 <div class="workspace-alert-card">
                     <h3>Find lineage faster</h3>
-                    <p class="workspace-alert-message">Search by table or view name to open a full lineage graph. Use Quick Find with Cmd/Ctrl+K to jump between views and search targets.</p>
+                    <p class="workspace-alert-message">Search by table or view name to open a full lineage graph. Use Quick Find with Alt+K to jump between views and search targets.</p>
                 </div>
                 <div class="view-search-box">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -133,7 +144,7 @@ export class LineageView {
             displayLabel
         } = options;
 
-        const renderer = new LineageGraphRenderer(graph);
+        const renderer = new LineageGraphRenderer(graph, this.getFlowAnalyzer(graph));
         const renderableGraph = renderer.buildGraph({
             centerNodeId,
             depth,
@@ -162,7 +173,15 @@ export class LineageView {
         const svg = renderer.generateSVG(renderableGraph, { focusedNodeId });
 
         // Build external count parentheticals
-        const { upstreamCount, downstreamCount, externalUpstreamCount, externalDownstreamCount } = renderableGraph.stats;
+        const {
+            upstreamCount,
+            downstreamCount,
+            externalUpstreamCount,
+            externalDownstreamCount,
+            totalNodes,
+            totalAvailableNodes = totalNodes,
+            truncated = false,
+        } = renderableGraph.stats;
         const upstreamLabel = externalUpstreamCount > 0
             ? `${upstreamCount} upstream (${externalUpstreamCount} external)`
             : `${upstreamCount} upstream`;
@@ -180,6 +199,7 @@ export class LineageView {
                         <span class="node-type-badge">${centerNode?.type || 'table'}</span>
                     </div>
                     <div class="graph-stats">
+                        ${truncated ? `<span class="stat" title="The graph is capped to keep layout responsive. Reduce the depth or choose one direction to see a smaller branch.">Showing ${totalNodes} of ${totalAvailableNodes} nodes</span><span class="stat-divider">|</span>` : ''}
                         <span class="stat upstream" title="Upstream dependencies">
                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
                                 <path d="M12 19V5M5 12l7-7 7 7"/>
@@ -427,7 +447,7 @@ export class LineageView {
         graph: LineageGraph,
         depth: number
     ): Array<{ node: LineageNode; upstreamCount: number; downstreamCount: number; total: number }> {
-        const flowAnalyzer = new FlowAnalyzer(graph);
+        const flowAnalyzer = this.getFlowAnalyzer(graph);
         const nodeConnections: { node: LineageNode; upstreamCount: number; downstreamCount: number; total: number }[] = [];
 
         graph.nodes.forEach((node) => {

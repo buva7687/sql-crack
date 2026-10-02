@@ -59,6 +59,7 @@ describe('workspace exportUtils', () => {
         expect(mermaid).toContain('```mermaid');
         expect(mermaid).toContain('graph BT');
         expect(mermaid).toContain('file_orders["orders.sql"]');
+        expect(mermaid).toContain('table_orders["orders"]');
         expect(mermaid).toContain('file_orders --> table_orders');
         expect(mermaid).toContain('```');
     });

@@ -6,6 +6,7 @@ import type { LayoutType } from '../types';
 import { getComponentUiColors } from '../constants';
 import { ICONS } from '../../shared/icons';
 import { MONO_FONT_STACK } from '../../shared/themeTokens';
+import { attachMenuKeyboardNavigation } from './menuKeyboard';
 
 export interface LayoutPickerCallbacks {
     onLayoutChange: (layout: LayoutType) => void;
@@ -106,6 +107,13 @@ export function createLayoutPicker(
 
     // Append dropdown to body so it escapes overflow:hidden clipping
     document.body.appendChild(dropdown);
+    attachMenuKeyboardNavigation({
+        trigger: btn,
+        menu: dropdown,
+        isOpen: () => isOpen,
+        close: closePicker,
+        popupRole: 'listbox',
+    });
 
     // Listen for theme changes
     document.addEventListener('theme-change', ((e: CustomEvent) => {
@@ -117,6 +125,15 @@ export function createLayoutPicker(
         dropdown.style.borderColor = nextTheme.border;
         dropdown.style.boxShadow = nextTheme.shadow;
     }) as EventListener, { signal: layoutPickerAbortController.signal });
+
+    // Layout keys (1-5, H), the command bar, undo, and restored state change
+    // the layout without clicking the picker; keep its icon and list current.
+    document.addEventListener('layout-state-changed', () => {
+        btn.innerHTML = getLayoutIcon(callbacks.getCurrentLayout());
+        if (isOpen) {
+            renderLayoutItems(dropdown, callbacks);
+        }
+    }, { signal: layoutPickerAbortController.signal });
 
     return container;
 }
@@ -175,6 +192,7 @@ function renderLayoutItems(dropdown: HTMLElement, callbacks: LayoutPickerCallbac
         const item = document.createElement('div');
         item.setAttribute('role', 'option');
         item.setAttribute('aria-selected', String(isActive));
+        item.setAttribute('tabindex', '-1');
         item.style.cssText = `
             padding: 8px 12px;
             cursor: pointer;

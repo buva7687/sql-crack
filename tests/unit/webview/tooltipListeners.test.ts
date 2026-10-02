@@ -26,6 +26,7 @@ describe('registerTooltipListeners', () => {
             hideContextMenu: jest.fn(),
             clearSearch: jest.fn(),
             resetView: jest.fn(),
+            refreshVisualization: jest.fn(),
             undoLayoutChange: jest.fn(),
             redoLayoutChange: jest.fn(),
             toggleCommandBar: jest.fn(),

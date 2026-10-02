@@ -1,7 +1,11 @@
 /**
  * Base styles - Reset and body styles
  */
-export function getBaseStyles(): string {
+export function getBaseStyles(dark: boolean = true): string {
+    // Increased-contrast borders must contrast with the current background:
+    // white borders on the light theme made them nearly invisible.
+    const highContrastBorder = dark ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)';
+    const highContrastSubtleBorder = dark ? 'rgba(255, 255, 255, 0.25)' : 'rgba(0, 0, 0, 0.25)';
     return `
         /* ========== Base Styles ========== */
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -470,8 +474,8 @@ export function getBaseStyles(): string {
         /* High Contrast Mode */
         @media (prefers-contrast: more) {
             :root {
-                --border-color: rgba(255, 255, 255, 0.4);
-                --border-subtle: rgba(255, 255, 255, 0.25);
+                --border-color: ${highContrastBorder};
+                --border-subtle: ${highContrastSubtleBorder};
             }
             .node .node-bg {
                 stroke-width: 2 !important;

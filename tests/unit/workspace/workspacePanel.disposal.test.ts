@@ -40,7 +40,7 @@ describe('WorkspacePanel disposal guards', () => {
         expect(context._indexManager.getIndex).not.toHaveBeenCalled();
     });
 
-    it('marks handler disposed and detaches index callback during dispose', async () => {
+    it('flushes the index before disposal and detaches the index callback', async () => {
         const markDisposed = jest.fn();
         const setOnIndexUpdated = jest.fn();
         const indexDispose = jest.fn();
@@ -59,9 +59,7 @@ describe('WorkspacePanel disposal guards', () => {
         expect(setOnIndexUpdated).toHaveBeenCalledWith(null);
         expect(flushPersist).toHaveBeenCalledTimes(1);
         expect(context._panel.dispose).toHaveBeenCalledTimes(1);
-
-        // indexManager.dispose() is called in the .finally() of flushPersist — drain microtasks
-        await new Promise(resolve => process.nextTick(resolve));
         expect(indexDispose).toHaveBeenCalledTimes(1);
+        expect(flushPersist.mock.invocationCallOrder[0]).toBeLessThan(indexDispose.mock.invocationCallOrder[0]);
     });
 });

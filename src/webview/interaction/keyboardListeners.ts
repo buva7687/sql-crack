@@ -111,7 +111,11 @@ export function registerDocumentKeyboardListeners(
         }
         matrixChordKeys.add(normalized);
         if (!isMatrixChordActive()) {
-            return 'captured';
+            // Only swallow keys once the chord is clearly in progress (two of
+            // S/Q/L held), so a single Shift+S / Shift+Q / Shift+L still reaches
+            // the SQL preview, stats, and legend shortcuts.
+            const heldLetters = ['s', 'q', 'l'].filter(key => matrixChordKeys.has(key)).length;
+            return heldLetters >= 2 ? 'captured' : 'none';
         }
         const now = Date.now();
         if (now - matrixLastTriggeredAt < 800) {
@@ -127,8 +131,16 @@ export function registerDocumentKeyboardListeners(
             return;
         }
 
-        const isInputFocused = document.activeElement?.tagName === 'INPUT' ||
-            document.activeElement?.tagName === 'TEXTAREA';
+        const activeElement = document.activeElement as HTMLElement | null;
+        // Keyboard focus inside a toolbar menu belongs to that menu (it handles
+        // arrows, Enter, and Escape); letters must not toggle graph features.
+        const isMenuFocused = typeof activeElement?.closest === 'function'
+            && activeElement.closest('[role="menu"], [role="listbox"]') !== null;
+        const isInputFocused = activeElement?.tagName === 'INPUT'
+            || activeElement?.tagName === 'TEXTAREA'
+            || activeElement?.tagName === 'SELECT'
+            || activeElement?.isContentEditable === true
+            || isMenuFocused;
 
         if (!isInputFocused && (e.ctrlKey || e.metaKey) && !e.altKey && (e.key === 'z' || e.key === 'Z')) {
             e.preventDefault();
@@ -140,7 +152,7 @@ export function registerDocumentKeyboardListeners(
             return;
         }
 
-        if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'P') {
+        if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyP') {
             e.preventDefault();
             callbacks.toggleCommandBar();
             return;
@@ -163,6 +175,11 @@ export function registerDocumentKeyboardListeners(
         }
 
         if (e.key === 'Escape') {
+            // An overlay (shortcuts modal, export preview, menus) already
+            // consumed this Escape to dismiss itself; don't also clear graph state.
+            if (e.defaultPrevented) {
+                return;
+            }
             if (callbacks.isZeroGravityModeActive()) {
                 e.preventDefault();
                 callbacks.toggleZeroGravityMode(false);
@@ -221,7 +238,7 @@ export function registerDocumentKeyboardListeners(
         }
         if (e.key === 'r' || e.key === 'R') {
             e.preventDefault();
-            callbacks.resetView();
+            callbacks.refreshVisualization();
         }
         if (e.key === 'f' || e.key === 'F') {
             e.preventDefault();

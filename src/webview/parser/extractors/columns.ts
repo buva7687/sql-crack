@@ -45,6 +45,19 @@ export function getAstString(val: any, depth = 0): string | null {
     return null;
 }
 
+export function formatCastTarget(target: any): string {
+    const targetNode = Array.isArray(target) ? target[0] : target;
+    if (!targetNode || typeof targetNode !== 'object') {
+        return getAstString(targetNode) || 'type';
+    }
+
+    const dataType = getAstString(targetNode.dataType) || 'type';
+    const length = getAstString(targetNode.length);
+    const scale = getAstString(targetNode.scale);
+    const parameters = [length, scale].filter((value): value is string => value !== null);
+    return parameters.length > 0 ? `${dataType}(${parameters.join(',')})` : dataType;
+}
+
 export function formatExpressionFromAst(expr: any, options: ExpressionFormatOptions = {}): string {
     if (!expr) { return ''; }
 
@@ -83,8 +96,20 @@ export function formatExpressionFromAst(expr: any, options: ExpressionFormatOpti
         return `${funcName}(${argsStr})`;
     }
 
+    // IN (...) / BETWEEN operands arrive as an expr_list whose value is an
+    // array of AST nodes; String() on it renders "[object Object],...".
+    if (expr.type === 'expr_list') {
+        const items = Array.isArray(expr.value) ? expr.value : [];
+        return `(${items.map((item: any) => formatExpressionFromAst(item, options)).join(', ')})`;
+    }
+
     if (expr.type === 'binary_expr') {
         const left = formatExpressionFromAst(expr.left, options);
+        if (/BETWEEN$/i.test(String(expr.operator)) && expr.right?.type === 'expr_list'
+            && Array.isArray(expr.right.value) && expr.right.value.length === 2) {
+            const [low, high] = expr.right.value.map((item: any) => formatExpressionFromAst(item, options));
+            return `${left} ${expr.operator} ${low} AND ${high}`;
+        }
         const right = formatExpressionFromAst(expr.right, options);
         return `${left} ${expr.operator || '?'} ${right}`;
     }
@@ -95,7 +120,7 @@ export function formatExpressionFromAst(expr: any, options: ExpressionFormatOpti
 
     if (expr.type === 'cast') {
         const innerExpr = formatExpressionFromAst(expr.expr, options);
-        const dataType = expr.target?.dataType || expr.target || 'type';
+        const dataType = formatCastTarget(expr.target);
         return `CAST(${innerExpr} AS ${dataType})`;
     }
 

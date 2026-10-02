@@ -329,7 +329,7 @@ export function renderNodeFeature(options: RenderNodeDispatcherOptions): void {
         }
         group.removeAttribute('data-keyboard-focus');
         if (state.selectedNodeId === node.id) {
-            rectEl.setAttribute('stroke', UI_COLORS.white);
+            rectEl.setAttribute('stroke', state.isDarkTheme ? UI_COLORS.white : UI_COLORS.focusTextLight);
             rectEl.setAttribute('stroke-width', '3');
             rectEl.setAttribute('filter', 'url(#glow)');
             return;

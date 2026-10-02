@@ -101,6 +101,8 @@ export class WorkspacePanel {
     private readonly _scopeUri: vscode.Uri | undefined;
     private _disposables: vscode.Disposable[] = [];
     private _indexManager: IndexManager;
+    private _initializePromise: Promise<void> | null = null;
+    private _indexBuildPromise: Promise<void> | null = null;
     private _dialect: SqlDialect;
     private _currentGraph: WorkspaceDependencyGraph | null = null;
     private _currentView: ViewMode | 'graph' | 'issues' = 'graph';
@@ -183,6 +185,11 @@ export class WorkspacePanel {
         }
 
         await this.buildLineageGraph();
+        // The panel may have been closed while lineage was building; there is
+        // nothing to show, and warning "not ready" would be misleading.
+        if (this._isDisposed) {
+            return false;
+        }
 
         this._currentView = 'lineage';
         this._lineageDetailDirection = 'both';
@@ -235,11 +242,15 @@ export class WorkspacePanel {
                 // Different scope — dispose old panel and create new one
                 WorkspacePanel.currentPanel.dispose();
             } else {
-                if (WorkspacePanel.currentPanel._dialect !== dialect) {
-                    WorkspacePanel.currentPanel._dialect = dialect;
-                    WorkspacePanel.currentPanel._indexManager.setDialect(dialect);
+                const existingPanel = WorkspacePanel.currentPanel;
+                if (existingPanel._dialect !== dialect) {
+                    existingPanel._dialect = dialect;
+                    existingPanel._indexManager.setDialect(dialect);
                 }
-                WorkspacePanel.currentPanel._panel.reveal(column);
+                existingPanel._panel.reveal(column);
+                if (existingPanel._initializePromise) {
+                    await existingPanel._initializePromise;
+                }
                 return;
             }
         }
@@ -263,8 +274,10 @@ export class WorkspacePanel {
             }
         );
 
-        WorkspacePanel.currentPanel = new WorkspacePanel(panel, extensionUri, context, dialect, scopeUri);
-        await WorkspacePanel.currentPanel.initialize();
+        const workspacePanel = new WorkspacePanel(panel, extensionUri, context, dialect, scopeUri);
+        WorkspacePanel.currentPanel = workspacePanel;
+        workspacePanel._initializePromise = workspacePanel.initialize();
+        await workspacePanel._initializePromise;
     }
 
     /**
@@ -459,6 +472,22 @@ export class WorkspacePanel {
      * Supports cancellation for large workspaces
      */
     private async buildIndexWithProgress(): Promise<void> {
+        if (this._indexBuildPromise) {
+            await this._indexBuildPromise;
+            return;
+        }
+        const buildPromise = this.runIndexBuildWithProgress();
+        this._indexBuildPromise = buildPromise;
+        try {
+            await buildPromise;
+        } finally {
+            if (this._indexBuildPromise === buildPromise) {
+                this._indexBuildPromise = null;
+            }
+        }
+    }
+
+    private async runIndexBuildWithProgress(): Promise<void> {
         let wasCancelled = false;
 
         await vscode.window.withProgress(
@@ -693,7 +722,7 @@ export class WorkspacePanel {
                 const currentIndex = this._indexManager.getIndex();
                 if (!currentIndex) {return;}
 
-                const builder = new LineageBuilder({ includeExternal: true, includeColumns: true });
+                const builder = new LineageBuilder({ includeExternal: true, includeColumns: true, dialect: this._dialect });
                 const graph = await builder.buildFromIndexAsync(currentIndex);
 
                 // If graph state was invalidated while building, discard stale results.
@@ -1097,12 +1126,14 @@ ${bodyContent}
 
         this._messageHandler?.markDisposed();
         this._indexManager.setOnIndexUpdated(null);
-        // Flush pending index persistence before disposing resources
-        void this._indexManager.flushPersist().catch(err =>
+        // Enqueue the last complete incremental index before cancellation. The
+        // manager serializes cache writes across panel scopes, so a retired
+        // scope cannot overwrite a newer scope after its write completes.
+        const flushPromise = this._indexManager.flushPersist();
+        this._indexManager.dispose();
+        void flushPromise.catch(err =>
             logger.warn(`[WorkspacePanel] flushPersist failed during dispose: ${err instanceof Error ? err.message : String(err)}`)
-        ).finally(() => {
-            this._indexManager.dispose();
-        });
+        );
         this._messageHandler = null;
         this._panel.dispose();
 

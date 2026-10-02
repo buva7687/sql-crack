@@ -370,6 +370,19 @@ describe('ImpactAnalyzer', () => {
     });
 
     describe('edge lookup scaling', () => {
+        it('resolves column nodes from constructor indexes without scanning every graph node', () => {
+            const nodes = [
+                makeNode('table:orders', 'table', 'orders'),
+                makeNode('column:orders.Amount', 'column', 'Amount', { parentId: 'table:orders' }),
+            ];
+            const { graph, analyzer } = makeAnalyzer(nodes, []);
+            const valuesSpy = jest.spyOn(graph.nodes, 'values');
+
+            expect((analyzer as any).resolveColumnNodeId('table:orders', 'amount'))
+                .toBe('column:orders.Amount');
+            expect(valuesSpy).not.toHaveBeenCalled();
+        });
+
         it('indexes graph and column edges instead of repeatedly scanning them per downstream node', () => {
             const nodes = [
                 makeNode('table:orders', 'table', 'orders', { filePath: 'shared.sql' }),

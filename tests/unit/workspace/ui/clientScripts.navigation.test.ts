@@ -1,6 +1,17 @@
 import { getWebviewScript } from '../../../../src/workspace/ui/clientScripts';
 
 describe('workspace clientScripts navigation context', () => {
+    it('clears saved path endpoints on graph mode switches and rejects nodes missing from the new graph', () => {
+        const script = getWebviewScript({
+            nonce: 'test', graphData: '{"nodes":[]}', searchFilterQuery: '', initialView: 'graph', currentGraphMode: 'tables',
+        });
+
+        expect(script).toMatch(/function switchGraphModeFromAction\(mode\)[\s\S]*?clearPathState\(\)/);
+        expect(script).toMatch(/graphModeSwitcherContainer\.addEventListener\('click'[\s\S]*?clearPathState\(\)/);
+        expect(script).toContain("document.querySelectorAll('.node[data-id]')");
+        expect(script).toContain('graphHasNode(persistedGraphUiState.pathStartNodeId)');
+        expect(script).toContain('graphHasNode(persistedGraphUiState.pathEndNodeId)');
+    });
     it('stores and restores graph zoom/pan/selection state', () => {
         const script = getWebviewScript({
             nonce: 'test',
@@ -219,7 +230,7 @@ describe('workspace clientScripts navigation context', () => {
         });
 
         expect(script).toContain("const workspaceCommandBtn = document.getElementById('btn-workspace-command');");
-        expect(script).toContain("if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k')");
+        expect(script).toContain("if (event.altKey && !event.ctrlKey && !event.metaKey && event.code === 'KeyK')");
         expect(script).toContain('let pendingWorkspaceSearchFocus = \'\';');
         expect(script).toContain('function requestWorkspaceSearchFocus(targetView)');
         expect(script).toContain("restoreWorkspaceViewRoot(normalizedTargetView);");
@@ -288,6 +299,10 @@ describe('workspace clientScripts navigation context', () => {
         expect(script).toContain("case 'view-lineage':");
         expect(script).toContain("case 'analyze-impact':");
         expect(script).toContain("case 'show-file-tables':");
+        expect(script).toContain("vscode.postMessage({ command: 'showFileTables', filePath });");
+        expect(script).toContain('function activatePrimaryGraphNode(node)');
+        expect(script).toContain('activatePrimaryGraphNode(sel);');
+        expect(script).toContain('activatePrimaryGraphNode(node);');
         expect(script).toContain("case 'open-file':");
         expect(script).toContain("case 'trace-upstream':");
         expect(script).toContain("case 'trace-downstream':");

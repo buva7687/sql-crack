@@ -12,6 +12,7 @@ export type {
 
 // Classes
 export { LineageBuilder } from './lineageBuilder';
+export type { LineageBuilderOptions } from './lineageBuilder';
 export { ColumnLineageTracker } from './columnLineage';
 export { FlowAnalyzer } from './flowAnalyzer';
 export type { FlowOptions, FlowResult } from './flowAnalyzer';

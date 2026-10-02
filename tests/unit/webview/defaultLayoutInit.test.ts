@@ -25,11 +25,17 @@ describe('default layout initialization', () => {
         );
     });
 
-    it('applies non-vertical layout after fitView in render()', () => {
-        // After fitView(), render() should call switchLayout for non-vertical defaults
-        // This ensures parser positions (always vertical) get recomputed
-        expect(rendererSource).toContain("if (state.layoutType && state.layoutType !== 'vertical')");
-        expect(rendererSource).toContain('switchLayout(state.layoutType)');
+    it('applies non-vertical layout before first-paint virtualization', () => {
+        const layoutIndex = rendererSource.indexOf("const initialLayout = state.layoutType || 'vertical'");
+        const virtualizationIndex = rendererSource.indexOf('const canVirtualizeOnFirstPaint = useVirtualization;');
+        expect(layoutIndex).toBeGreaterThan(-1);
+        expect(layoutIndex).toBeLessThan(virtualizationIndex);
+        expect(rendererSource).toContain('layoutGraphHorizontal(renderNodes, renderEdges, bottomUp)');
+    });
+
+    it('initializes layout history from the already-laid-out first paint', () => {
+        expect(rendererSource).toContain('if (!layoutHistory.getCurrent())');
+        expect(rendererSource).toContain('layoutHistory.initialize(captureLayoutHistorySnapshot())');
     });
 
     it('updateNodeEdges uses calculateEdgePath instead of hardcoded vertical math', () => {
@@ -69,7 +75,7 @@ describe('default layout initialization', () => {
 
     it('switchLayout uses cached node maps instead of repeated DOM and array scans', () => {
         const switchLayoutMatch = rendererSource.match(
-            /export function switchLayout\(layoutType: LayoutType\): void \{[\s\S]*?\n}\n\nexport function getCurrentLayout/
+            /export function switchLayout\([\s\S]*?\n}\n\nexport function getCurrentLayout/
         );
         expect(switchLayoutMatch).not.toBeNull();
         const switchLayoutBody = switchLayoutMatch![0];

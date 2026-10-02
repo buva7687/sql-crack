@@ -38,6 +38,16 @@ describe('workspace sharedStyles accessibility rules', () => {
         expect(css).toContain('.workspace-breadcrumb');
     });
 
+    it('uses theme-appropriate borders in increased-contrast mode', () => {
+        const lightMedia = /@media \(prefers-contrast: more\)\s*\{\s*:root\s*\{([^}]*)\}/.exec(getBaseStyles(false))?.[1] ?? '';
+        const darkMedia = /@media \(prefers-contrast: more\)\s*\{\s*:root\s*\{([^}]*)\}/.exec(getBaseStyles(true))?.[1] ?? '';
+
+        expect(lightMedia).toContain('--border-color: rgba(0, 0, 0, 0.4)');
+        expect(lightMedia).not.toContain('255, 255, 255');
+        expect(darkMedia).toContain('--border-color: rgba(255, 255, 255, 0.4)');
+        expect(getWebviewStyles(false)).toContain('--border-color: rgba(0, 0, 0, 0.4)');
+    });
+
     it('defines theme-aware scrollbar tokens for both dark and light workspace themes', () => {
         const darkVars = getCssVariables(true);
         const lightVars = getCssVariables(false);

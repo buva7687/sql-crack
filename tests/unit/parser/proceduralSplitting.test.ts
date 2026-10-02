@@ -94,7 +94,7 @@ describe('Item #4: Procedural SQL Splitting (BEGIN...END Blocks)', () => {
                 $$ LANGUAGE plpgsql;
                 SELECT * FROM users;
             `;
-            const statements = splitSqlStatements(sql);
+            const statements = splitSqlStatements(sql, 'PostgreSQL');
 
             // Should be 2 statements: CREATE FUNCTION and SELECT
             expect(statements.length).toBe(2);
@@ -120,7 +120,7 @@ describe('Item #4: Procedural SQL Splitting (BEGIN...END Blocks)', () => {
                 $$;
                 SELECT * FROM products;
             `;
-            const statements = splitSqlStatements(sql);
+            const statements = splitSqlStatements(sql, 'PostgreSQL');
 
             // Should be 2 statements
             expect(statements.length).toBe(2);
@@ -135,7 +135,7 @@ describe('Item #4: Procedural SQL Splitting (BEGIN...END Blocks)', () => {
                 $function$ LANGUAGE plpgsql;
                 SELECT * FROM users;
             `;
-            const statements = splitSqlStatements(sql);
+            const statements = splitSqlStatements(sql, 'PostgreSQL');
 
             // Should be 2 statements
             expect(statements.length).toBe(2);
@@ -145,7 +145,8 @@ describe('Item #4: Procedural SQL Splitting (BEGIN...END Blocks)', () => {
 
         it('supports Unicode dollar-quote tags', () => {
             const statements = splitSqlStatements(
-                'SELECT $étiquette$literal;still literal$étiquette$; SELECT 2;'
+                'SELECT $étiquette$literal;still literal$étiquette$; SELECT 2;',
+                'PostgreSQL'
             );
 
             expect(statements).toEqual([
@@ -156,7 +157,8 @@ describe('Item #4: Procedural SQL Splitting (BEGIN...END Blocks)', () => {
 
         it('does not open a dollar quote inside a Unicode identifier', () => {
             const statements = splitSqlStatements(
-                'SELECT * FROM café$$tbl; SELECT * FROM real_tbl;'
+                'SELECT * FROM café$$tbl; SELECT * FROM real_tbl;',
+                'PostgreSQL'
             );
 
             expect(statements).toEqual([
@@ -253,6 +255,49 @@ describe('Item #4: Procedural SQL Splitting (BEGIN...END Blocks)', () => {
     });
 
     describe('Complex Scenarios', () => {
+        it('keeps Oracle declaration sections with their BEGIN body', () => {
+            for (const sql of [
+                'CREATE PROCEDURE p IS v NUMBER; BEGIN SELECT 1 INTO v FROM orders; END; SELECT 2;',
+                'DECLARE v NUMBER; BEGIN SELECT 1 INTO v FROM orders; END; SELECT 2;',
+            ]) {
+                const statements = splitSqlStatements(sql, 'Oracle');
+                expect(statements).toHaveLength(2);
+                expect(statements[0]).toContain('v NUMBER; BEGIN');
+                expect(statements[1]).toBe('SELECT 2');
+            }
+        });
+
+        it('recognizes BEGIN after a long MySQL routine header', () => {
+            const parameter = 'x'.repeat(240);
+            const sql = `CREATE PROCEDURE p(IN ${parameter} INT) BEGIN SELECT 1; SELECT 2; END; SELECT 3;`;
+            const statements = splitSqlStatements(sql, 'MySQL');
+            expect(statements).toHaveLength(2);
+            expect(statements[0]).toContain('SELECT 1; SELECT 2; END');
+            expect(statements[1]).toBe('SELECT 3');
+        });
+
+        it('does not count an @end variable as a procedural END', () => {
+            const sql = 'CREATE PROCEDURE p @end INT AS BEGIN SELECT @end; SELECT 2; END; SELECT 3;';
+            const statements = splitSqlStatements(sql, 'TransactSQL');
+            expect(statements).toHaveLength(2);
+            expect(statements[0]).toContain('SELECT 2; END');
+            expect(statements[1]).toBe('SELECT 3');
+        });
+
+        it('keeps END CASE and END REPEAT blocks inside their procedure', () => {
+            for (const block of [
+                'SELECT CASE WHEN 1 = 1 THEN 1 END CASE;',
+                'REPEAT SELECT 1; UNTIL done END REPEAT;',
+                'FOR x IN 1..2 DO SELECT x; END FOR;',
+            ]) {
+                const sql = `CREATE PROCEDURE p() BEGIN ${block} SELECT 2; END; SELECT 3;`;
+                const statements = splitSqlStatements(sql, 'MySQL');
+                expect(statements).toHaveLength(2);
+                expect(statements[0]).toContain('SELECT 2; END');
+                expect(statements[1]).toBe('SELECT 3');
+            }
+        });
+
         it('should handle migration file with multiple procedures', () => {
             const sql = `
                 CREATE PROCEDURE proc1()
@@ -376,6 +421,41 @@ describe('Item #4: Procedural SQL Splitting (BEGIN...END Blocks)', () => {
             const statements = splitSqlStatements(sql);
             expect(statements.length).toBe(1);
             expect(statements[0]).toContain('SELECT 1');
+        });
+    });
+
+    describe('dialect-aware quoted content', () => {
+        it('does not split on semicolons or parentheses inside T-SQL bracket identifiers', () => {
+            expect(splitSqlStatements('SELECT * FROM [my;table]; SELECT [a(b] FROM t;', 'TransactSQL'))
+                .toEqual(['SELECT * FROM [my;table]', 'SELECT [a(b] FROM t']);
+            expect(splitSqlStatements('SELECT [a]];b] FROM t; SELECT 2;', 'TransactSQL')).toHaveLength(2);
+        });
+
+        it('does not treat a backslash as an escape in PostgreSQL standard strings', () => {
+            const sql = String.raw`SELECT 'C:\temp\' AS p FROM t; SELECT id FROM u`;
+            expect(splitSqlStatements(sql, 'PostgreSQL')).toHaveLength(2);
+        });
+
+        it('preserves backslash escapes for PostgreSQL E strings', () => {
+            const sql = String.raw`SELECT E'can\'t; stop' FROM t; SELECT id FROM u`;
+            expect(splitSqlStatements(sql, 'PostgreSQL')).toHaveLength(2);
+        });
+
+        it.each(['BigQuery', 'Snowflake', 'Hive', 'Redshift'] as const)(
+            'preserves backslash-escaped quotes for %s strings',
+            (dialect) => {
+                const sql = String.raw`SELECT 'can\'t; stop' FROM t; SELECT id FROM u`;
+                expect(splitSqlStatements(sql, dialect)).toHaveLength(2);
+            }
+        );
+
+        it('only treats square brackets as quoted identifiers in TransactSQL', () => {
+            expect(splitSqlStatements(
+                "SELECT ARRAY['a]b', 'c'] AS x FROM t; SELECT 2;",
+                'PostgreSQL'
+            )).toHaveLength(2);
+            expect(splitSqlStatements('SELECT m[a[1]] FROM t; SELECT 2;', 'PostgreSQL')).toHaveLength(2);
+            expect(splitSqlStatements('SELECT [a;b] FROM t; SELECT 2;', 'TransactSQL')).toHaveLength(2);
         });
     });
 });

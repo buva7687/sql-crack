@@ -1,5 +1,5 @@
-import type { ValidationError, ValidationLimits } from '../../types';
-import { countSqlStatements } from './splitting';
+import type { SqlDialect, ValidationError, ValidationLimits } from '../../types';
+import { countSqlStatements, splitTransactSqlBatches } from './splitting';
 
 /**
  * Default validation limits for SQL parsing.
@@ -22,7 +22,8 @@ function getUtf8ByteSize(value: string): number {
  */
 export function validateSql(
     sql: string,
-    limits: ValidationLimits = DEFAULT_VALIDATION_LIMITS
+    limits: ValidationLimits = DEFAULT_VALIDATION_LIMITS,
+    dialect: SqlDialect = 'MySQL'
 ): ValidationError | null {
     if (!sql || !sql.trim()) {
         return {
@@ -49,7 +50,7 @@ export function validateSql(
         };
     }
 
-    const estimatedStatements = countStatements(sql);
+    const estimatedStatements = countStatements(sql, dialect);
     if (estimatedStatements > limits.maxQueryCount) {
         return {
             type: 'query_count_limit',
@@ -65,8 +66,14 @@ export function validateSql(
     return null;
 }
 
-function countStatements(sql: string): number {
-    return countSqlStatements(sql);
+function countStatements(sql: string, dialect: SqlDialect): number {
+    if (dialect !== 'TransactSQL') {
+        return countSqlStatements(sql, dialect);
+    }
+    // Parsing splits SQL Server scripts on GO batches before semicolons, so
+    // the limit must count the same way or GO-only scripts bypass it.
+    return splitTransactSqlBatches(sql)
+        .reduce((count, batch) => count + countSqlStatements(batch, dialect), 0);
 }
 
 export function formatBytes(bytes: number): string {

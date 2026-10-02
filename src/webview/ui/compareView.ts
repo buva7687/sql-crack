@@ -1,6 +1,7 @@
 import { ParseResult } from '../types';
 import { FlowNode } from '../types/nodes';
 import { Z_INDEX } from '../../shared/zIndex';
+import { truncateCodePoints } from '../../shared/stringUtils';
 
 export interface ComparePaneInput {
     label: string;
@@ -249,7 +250,7 @@ function createNodeGroup(
     label.setAttribute('fill', style.text);
     label.setAttribute('font-size', '12');
     label.setAttribute('font-weight', '600');
-    label.textContent = node.label.length > 34 ? `${node.label.slice(0, 34)}...` : node.label;
+    label.textContent = truncateCodePoints(node.label, 37, '...');
     group.appendChild(label);
 
     const type = document.createElementNS(ns, 'text');

@@ -6,9 +6,9 @@ import type {
     QueryStats,
     SqlDialect
 } from '../../types';
-import { findMatchingParen } from './preprocessing';
+import { findMatchingParen, maskStringsAndComments } from './preprocessing';
 import { extractMergeOnCondition } from '../mergeCondition';
-import { stripSqlComments } from '../../../shared';
+import { dialectSupportsBackslashEscapes, dialectSupportsHashComments, quotedStringAllowsBackslashEscapes, stripSqlComments } from '../../../shared';
 
 interface RoutineDdlInfo {
     action: 'CREATE' | 'ALTER' | 'DROP';
@@ -74,10 +74,77 @@ function extractRoutineDdlInfo(sql: string): RoutineDdlInfo | null {
 }
 
 /**
+ * Replace quoted tokens (quotes included) with spaces, keeping offsets: single-
+ * and double-quoted text, backtick identifiers, and bracket identifiers where
+ * the dialect has them. A keyword inside any of these is not SQL structure,
+ * whether the token is a MySQL "string" or a PostgreSQL "identifier".
+ */
+function maskQuotedTokens(sql: string, backslashEscapes: boolean, bracketIdentifiers: boolean): string {
+    const chars = sql.split('');
+    for (let index = 0; index < chars.length; index++) {
+        const open = sql[index];
+        const isQuote = open === "'" || open === '"' || open === '`' || (bracketIdentifiers && open === '[');
+        if (!isQuote) {
+            continue;
+        }
+        const close = open === '[' ? ']' : open;
+        // Backslash escapes apply to string literals ('...' and MySQL-style "...").
+        const escapesAllowed = (open === "'" || open === '"')
+            && quotedStringAllowsBackslashEscapes(sql, index, backslashEscapes);
+        let end = index + 1;
+        while (end < sql.length) {
+            if (escapesAllowed && sql[end] === '\\' && end + 1 < sql.length) {
+                end += 2;
+            } else if (sql[end] === close && sql[end + 1] === close) {
+                end += 2;
+            } else if (sql[end] === close) {
+                end++;
+                break;
+            } else {
+                end++;
+            }
+        }
+        for (let position = index; position < end; position++) {
+            if (chars[position] !== '\n' && chars[position] !== '\r') {
+                chars[position] = ' ';
+            }
+        }
+        index = end - 1;
+    }
+    return chars.join('');
+}
+
+/**
  * Regex-based fallback parser for when AST parsing fails.
  * Extracts basic structure (tables, columns, JOINs) to show best-effort visualization.
  * This is better than showing nothing - 70% accuracy > 0%.
  */
+const DECLARED_NAME = /^(?:(?:IN\s+OUT|INOUT|IN|OUT)\s+)?([A-Za-z_][\w$#]*)/i;
+
+/**
+ * Variables and parameters a procedural block declares: routine parameter
+ * lists, a PL/SQL `IS`/`AS`/`DECLARE ... BEGIN` section, and `DECLARE a, b`
+ * statements. Empty for non-procedural SQL.
+ */
+function collectDeclaredVariables(sql: string): Set<string> {
+    const names = new Set<string>();
+    if (!/\b(?:PROCEDURE|FUNCTION|TRIGGER|DECLARE|BEGIN)\b/i.test(sql)) {
+        return names;
+    }
+    const addFirstName = (part: string): void => {
+        const name = DECLARED_NAME.exec(part.trim())?.[1];
+        if (name) { names.add(name.toLowerCase()); }
+    };
+    const parameters = /\b(?:PROCEDURE|FUNCTION)\s+[\w$#".]+\s*\(([^)]*)\)/i.exec(sql);
+    parameters?.[1].split(',').forEach(addFirstName);
+    const declarations = /\b(?:IS|AS|DECLARE)\b([\s\S]*?)\bBEGIN\b/i.exec(sql);
+    declarations?.[1].split(';').forEach(addFirstName);
+    for (const match of sql.matchAll(/\bDECLARE\s+([A-Za-z_][\w$#]*(?:\s*,\s*[A-Za-z_][\w$#]*)*)/gi)) {
+        match[1].split(',').forEach(addFirstName);
+    }
+    return names;
+}
+
 export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
     const nodes: FlowNode[] = [];
     const edges: FlowEdge[] = [];
@@ -92,7 +159,19 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
     };
     const commentStripped = stripSqlComments(sql, {
         preserveHashTempIdentifiers: dialect === 'TransactSQL',
+        hashComments: dialectSupportsHashComments(dialect),
     });
+    const structureMasked = maskStringsAndComments(commentStripped);
+    // Comments are already gone (dialect-aware), so blank only quoted tokens:
+    // table patterns must not match keywords inside text such as
+    // 'Copied from staging_backup' or "Copied from ghost_table". Offsets stay
+    // aligned with commentStripped.
+    const quotedMasked = maskQuotedTokens(
+        commentStripped,
+        dialectSupportsBackslashEscapes(dialect),
+        dialect === 'TransactSQL' || dialect === 'SQLite'
+    );
+    const isInsideQuotedToken = (offset: number): boolean => quotedMasked[offset] !== commentStripped[offset];
     const routineDdl = extractRoutineDdlInfo(commentStripped);
 
     const cteNames = new Set<string>();
@@ -100,11 +179,34 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
     const identifierPart = '#?[\\p{L}\\p{N}_$]+';
     const quotedIdentifier = "(?:`[^`]+`|\"[^\"]+\"|\\[[^\\]]+\\]|'[^']+')";
     const identifier = `(?:${quotedIdentifier}|${identifierPart})`;
-    const qualifiedIdentifier = `${identifier}(?:\\.${identifier})*`;
+    const qualifiedIdentifier = dialect === 'TransactSQL'
+        ? `${identifier}(?:\\.${identifier}|\\.\\.${identifier})*`
+        : `${identifier}(?:\\.${identifier})*`;
     const identifierWrapperPattern = /[`"'\[\]]/g;
     const normalizeObjectName = (raw: string): string => {
         const parts = raw.split('.').map((part) => part.replace(identifierWrapperPattern, '')).filter(Boolean);
         return parts[parts.length - 1] || raw.replace(identifierWrapperPattern, '');
+    };
+    const functionFromKeywords = new Set(['EXTRACT', 'SUBSTRING', 'TRIM', 'POSITION', 'OVERLAY']);
+    const isFunctionFromDelimiter = (text: string, fromIndex: number): boolean => {
+        let nestedDepth = 0;
+        for (let index = fromIndex - 1; index >= 0; index--) {
+            if (text[index] === ')') {
+                nestedDepth++;
+                continue;
+            }
+            if (text[index] !== '(') {
+                continue;
+            }
+            if (nestedDepth > 0) {
+                nestedDepth--;
+                continue;
+            }
+
+            const functionMatch = text.slice(0, index).match(/([A-Z_][\w$]*)\s*$/i);
+            return functionFromKeywords.has((functionMatch?.[1] || '').toUpperCase());
+        }
+        return false;
     };
 
     const firstCtePattern = new RegExp(`\\bWITH\\s+(${identifier})\\s+AS\\s*\\(`, 'giu');
@@ -151,11 +253,23 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
         });
     }
 
+    // In procedural code `SELECT ... INTO name` (and FETCH ... INTO) assigns a
+    // declared variable or parameter; only INSERT/REPLACE/MERGE INTO, or an
+    // undeclared name (T-SQL/PostgreSQL SELECT INTO new_table), writes a table.
+    // Declaration keywords inside literals or quoted identifiers cannot
+    // declare a variable that suppresses a real SELECT INTO table target.
+    const declaredVariables = collectDeclaredVariables(quotedMasked);
+    const isVariableIntoTarget = (matchIndex: number, name: string): boolean =>
+        declaredVariables.has(name.toLowerCase())
+        && !/\b(?:INSERT|REPLACE|MERGE)(?:\s+(?:IGNORE|OVERWRITE|ALL|FIRST))?\s*$/i.test(commentStripped.slice(Math.max(0, matchIndex - 40), matchIndex));
+
     const tablePatterns = [
         new RegExp(`\\bFROM\\s+(${qualifiedIdentifier})`, 'giu'),
         new RegExp(`\\bJOIN\\s+(${qualifiedIdentifier})`, 'giu'),
         new RegExp(`\\bINTO\\s+(${qualifiedIdentifier})`, 'giu'),
-        new RegExp(`\\bUPDATE\\s+(?!SET\\b)(${qualifiedIdentifier})`, 'giu'),
+        // FOR UPDATE, ON DUPLICATE KEY UPDATE, and ON UPDATE CASCADE are not
+        // table references.
+        new RegExp(`(?<!\\b(?:FOR|KEY|ON)\\s+)\\bUPDATE\\s+(?!SET\\b)(${qualifiedIdentifier})`, 'giu'),
         new RegExp(`\\bMERGE\\s+INTO\\s+(${qualifiedIdentifier})`, 'giu'),
         new RegExp(`\\bUSING\\s+(${qualifiedIdentifier})`, 'giu'),
     ];
@@ -163,8 +277,17 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
     for (const pattern of tablePatterns) {
         let match;
         while ((match = pattern.exec(commentStripped)) !== null) {
+            if (isInsideQuotedToken(match.index)) {
+                continue;
+            }
+            if (/^FROM\b/i.test(match[0]) && isFunctionFromDelimiter(structureMasked, match.index)) {
+                continue;
+            }
             const tableName = normalizeObjectName(match[1]);
             if (!tableName) {
+                continue;
+            }
+            if (/^INTO\b/i.test(match[0]) && isVariableIntoTarget(match.index, tableName)) {
                 continue;
             }
             trackTableUsage(tableName);
@@ -193,6 +316,12 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
 
     while ((refMatch = tableRefPattern.exec(commentStripped)) !== null) {
         const keyword = refMatch[1].toUpperCase();
+        if (isInsideQuotedToken(refMatch.index)) {
+            continue;
+        }
+        if (keyword === 'FROM' && isFunctionFromDelimiter(structureMasked, refMatch.index)) {
+            continue;
+        }
         const table = normalizeObjectName(refMatch[2]);
         tableRefs.push({ keyword, table, pos: refMatch.index });
     }
@@ -221,8 +350,12 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
 
     for (const [cteName, body] of cteBodies) {
         const bodyRefPattern = new RegExp(`\\b(?:FROM|JOIN)\\s+(${qualifiedIdentifier})`, 'giu');
+        const maskedBody = maskStringsAndComments(body);
         let bodyRef;
         while ((bodyRef = bodyRefPattern.exec(body)) !== null) {
+            if (/^FROM\b/i.test(bodyRef[0]) && isFunctionFromDelimiter(maskedBody, bodyRef.index)) {
+                continue;
+            }
             const srcTable = normalizeObjectName(bodyRef[1]);
             if (srcTable && tableNames.has(srcTable) && srcTable !== cteName) {
                 const srcNode = nodeByLabel.get(srcTable);

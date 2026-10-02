@@ -7,6 +7,64 @@ describe('ReferenceExtractor behavioral coverage', () => {
         extractor = new ReferenceExtractor();
     });
 
+    it('finds references after a MySQL procedure using DELIMITER $$', () => {
+        const sql = [
+            'SELECT id FROM src;',
+            'DELIMITER $$',
+            'CREATE PROCEDURE p() BEGIN SELECT id FROM log; END $$',
+            'DELIMITER ;',
+            'SELECT id FROM audit;',
+        ].join('\n');
+        const references = extractor.extractReferences(sql, '/sql/migration.sql', 'MySQL');
+        expect(references).toEqual(expect.arrayContaining([
+            expect.objectContaining({ tableName: 'audit', lineNumber: 5 }),
+        ]));
+    });
+
+    it('finds references after a MySQL comment containing a glob path', () => {
+        const sql = 'SELECT * FROM a; /* /backups/*.sql */ SELECT * FROM b;';
+        expect(extractor.extractReferences(sql, '/sql/migration.sql', 'MySQL')
+            .map(reference => reference.tableName)).toContain('b');
+    });
+
+    it('keeps the table and catalog in a SQL Server double-dot reference', () => {
+        const references = extractor.extractReferences('SELECT * FROM mydb..orders', '/sql/query.sql', 'TransactSQL');
+        expect(references).toEqual(expect.arrayContaining([
+            expect.objectContaining({ tableName: 'orders', catalog: 'mydb' }),
+        ]));
+        expect(references.some(reference => reference.tableName === 'mydb')).toBe(false);
+    });
+
+    it('anchors INSERT and UPDATE targets before later joins to the same table', () => {
+        const insertSql = 'INSERT INTO audit (id)\nSELECT e.id\nFROM events e\nJOIN audit a ON a.id = e.id';
+        const updateSql = 'UPDATE audit\nSET id = a.id\nFROM events e\nJOIN audit a ON a.id = e.id';
+        for (const [sql, targetType] of [
+            [insertSql, 'insert'], [updateSql, 'update'],
+        ] as const) {
+            const refs = extractor.extractReferences(sql, 'query.sql', 'PostgreSQL');
+            expect(refs.find(ref => ref.tableName === 'audit' && ref.referenceType === targetType)?.lineNumber).toBe(1);
+            expect(refs.find(ref => ref.tableName === 'audit' && ref.referenceType === 'join')?.lineNumber).toBe(4);
+        }
+    });
+
+    it('keeps CTE and outer uses of the same table on their own lines', () => {
+        const sql = [
+            'WITH recent AS (',
+            '  SELECT id FROM orders',
+            ')',
+            'SELECT r.id',
+            'FROM recent r',
+            'JOIN orders o ON o.id = r.id',
+        ].join('\n');
+        const refs = extractor.extractReferences(sql, 'query.sql', 'PostgreSQL');
+        expect(refs.filter(ref => ref.tableName === 'orders').map(ref => ref.lineNumber)).toEqual([2, 6]);
+    });
+
+    it('locates comma-listed tables after FROM instead of matching SELECT columns', () => {
+        const refs = extractor.extractReferences('SELECT b.id\nFROM a, b', 'query.sql', 'PostgreSQL');
+        expect(refs.filter(ref => ref.tableName === 'b').map(ref => ref.lineNumber)).toEqual([2]);
+    });
+
     it('extracts base FROM and JOIN table references with aliases', () => {
         const refs = extractor.extractReferences(
             'SELECT u.id, o.total FROM users u JOIN orders o ON u.id = o.user_id',
@@ -27,6 +85,19 @@ describe('ReferenceExtractor behavioral coverage', () => {
                 referenceType: 'join',
             }),
         ]));
+    });
+
+    it('attributes qualified columns to the correct alias in a self-join', () => {
+        const refs = extractor.extractReferences(
+            'SELECT o1.id, o2.parent_id FROM orders o1 JOIN orders o2 ON o1.id = o2.parent_id WHERE o1.status = 1',
+            'query.sql',
+            'MySQL'
+        );
+        const first = refs.find(ref => ref.alias === 'o1');
+        const second = refs.find(ref => ref.alias === 'o2');
+
+        expect(first?.columns?.map(col => col.tableAlias)).toEqual(['o1', 'o1']);
+        expect(second?.columns?.map(col => col.tableAlias)).toEqual(['o2']);
     });
 
     it('preserves schema-qualified names and schema metadata', () => {
@@ -117,6 +188,28 @@ describe('ReferenceExtractor behavioral coverage', () => {
                 catalogQuoted: true,
             }),
         ]));
+    });
+
+    it('discards earlier AST output when a later statement requires whole-file fallback', () => {
+        jest.spyOn((extractor as any).parser, 'astify')
+            .mockReturnValueOnce({
+                type: 'select',
+                columns: '*',
+                from: [{ table: 'users' }],
+            })
+            .mockImplementationOnce(() => {
+                throw new Error('force second statement fallback');
+            });
+
+        const result = extractor.extractReferencesWithStatus(
+            'SELECT * FROM users; SELECT * FROM orders WHERE :=: invalid_token;',
+            'mixed.sql',
+            'MySQL'
+        );
+
+        expect(result.references.map(ref => ref.tableName).sort()).toEqual(['orders', 'users']);
+        expect(result.queries).toEqual([]);
+        expect(result.warnings).toHaveLength(1);
     });
 
     it('extracts real tables from subqueries without leaking the subquery alias', () => {
@@ -333,6 +426,29 @@ describe('ReferenceExtractor behavioral coverage', () => {
                 referenceType: 'select',
             }),
         ]));
+    });
+
+    it('walks function argument containers without falling back or inventing references', () => {
+        const aggregate = extractor.extractReferencesWithStatus(
+            'SELECT COUNT(*) FROM target_table',
+            'query.sql',
+            'MySQL'
+        );
+        const nested = extractor.extractReferencesWithStatus(
+            "DELETE FROM target_table WHERE id IN (SELECT id FROM source_table WHERE LOWER(name) = 'a')",
+            'query.sql',
+            'MySQL'
+        );
+
+        expect(aggregate.warnings).toEqual([]);
+        expect(aggregate.references).toEqual([
+            expect.objectContaining({ tableName: 'target_table', referenceType: 'select' })
+        ]);
+        expect(nested.warnings).toEqual([]);
+        expect(nested.references.map(ref => `${ref.tableName}:${ref.referenceType}`)).toEqual([
+            'target_table:delete',
+            'source_table:select',
+        ]);
     });
 
     it('handles dialect preprocessing cases without inventing table names from syntax', () => {

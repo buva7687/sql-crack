@@ -1,5 +1,5 @@
 import type { SqlDialect } from '../../types';
-import { getDollarQuoteDelimiterAt } from '../../../shared';
+import { dialectSupportsHashComments, getDollarQuoteDelimiterAt, isPostgresJsonPathOperatorAt } from '../../../shared';
 import { preprocessJinjaTemplates } from './jinjaPreprocessor';
 
 interface TextRewrite {
@@ -129,6 +129,7 @@ export function preprocessPostgresSyntax(sql: string, dialect: SqlDialect): stri
     let match: RegExpExecArray | null;
     const typePrefixRegex = /\b(timestamptz|timestamp|date|time|interval)\b/gi;
     const typePrefixMatches: { start: number; end: number }[] = [];
+    const intervalQualifierMatches: { start: number; end: number }[] = [];
     while ((match = typePrefixRegex.exec(masked)) !== null) {
         let pos = match.index + match[0].length;
         if (pos < result.length && /\s/.test(result[pos])) {
@@ -137,11 +138,37 @@ export function preprocessPostgresSyntax(sql: string, dialect: SqlDialect): stri
             }
             if (pos < result.length && result[pos] === '\'') {
                 typePrefixMatches.push({ start: match.index, end: pos });
+                if (match[1].toLowerCase() === 'interval') {
+                    let literalEnd = pos + 1;
+                    while (literalEnd < result.length) {
+                        if (result[literalEnd] === '\'' && result[literalEnd + 1] === '\'') {
+                            literalEnd += 2;
+                            continue;
+                        }
+                        if (result[literalEnd] === '\'') {
+                            literalEnd++;
+                            break;
+                        }
+                        literalEnd++;
+                    }
+                    let qualifierStart = literalEnd;
+                    while (qualifierStart < masked.length && /\s/.test(masked[qualifierStart])) {
+                        qualifierStart++;
+                    }
+                    const qualifier = /^(?:YEAR|MONTH|DAY|HOUR|MINUTE|SECOND)(?:\s+TO\s+(?:YEAR|MONTH|DAY|HOUR|MINUTE|SECOND))?\b/i
+                        .exec(masked.slice(qualifierStart));
+                    if (qualifier) {
+                        intervalQualifierMatches.push({
+                            start: qualifierStart,
+                            end: qualifierStart + qualifier[0].length,
+                        });
+                    }
+                }
             }
         }
     }
-    if (typePrefixMatches.length > 0) {
-        result = applyTextRewrites(result, typePrefixMatches);
+    if (typePrefixMatches.length > 0 || intervalQualifierMatches.length > 0) {
+        result = applyTextRewrites(result, [...typePrefixMatches, ...intervalQualifierMatches]);
         changed = true;
     }
 
@@ -543,6 +570,11 @@ export function preprocessHashTempTableIdentifiers(sql: string, dialect: SqlDial
         if (before && /[A-Za-z0-9_$#]/.test(before)) {
             continue;
         }
+        // Preserve identifiers that are already delimited. Re-quoting #tmp in
+        // [#tmp], "#tmp", or `#tmp` changes the logical table name.
+        if (before === '[' || before === '"' || before === '`') {
+            continue;
+        }
         if (after && /[A-Za-z0-9_$]/.test(after)) {
             continue;
         }
@@ -664,10 +696,20 @@ export function preprocessOracleSyntax(sql: string, dialect: SqlDialect): string
     let result = sql;
     let changed = false;
 
-    // 1. Remove (+) outer join operator
-    const outerJoinResult = result.replace(/\(\+\)/g, '');
-    if (outerJoinResult !== result) {
-        result = outerJoinResult;
+    // 1. Remove (+) outer join operators found in SQL structure, preserving
+    // identical text inside string literals and comments.
+    const outerJoinMasked = maskStringsAndComments(result);
+    const outerJoinRegex = /\(\+\)/g;
+    const outerJoinRewrites: Array<{ start: number; end: number }> = [];
+    let outerJoinMatch: RegExpExecArray | null;
+    while ((outerJoinMatch = outerJoinRegex.exec(outerJoinMasked)) !== null) {
+        outerJoinRewrites.push({
+            start: outerJoinMatch.index,
+            end: outerJoinMatch.index + outerJoinMatch[0].length,
+        });
+    }
+    if (outerJoinRewrites.length > 0) {
+        result = applyTextRewrites(result, outerJoinRewrites);
         changed = true;
     }
 
@@ -805,7 +847,10 @@ export function preprocessOracleSyntax(sql: string, dialect: SqlDialect): string
     while ((match = createTableRegex.exec(masked3)) !== null) {
         const afterName = match.index + match[0].length;
         let openParen = afterName;
-        while (openParen < masked3.length && masked3[openParen] !== '(' && masked3[openParen] !== ';') { openParen++; }
+        while (openParen < masked3.length && /\s/.test(masked3[openParen])) { openParen++; }
+        // Only a parenthesis immediately following the table name can be the
+        // CREATE TABLE column list. Searching ahead mistakes function calls in
+        // a CTAS SELECT (for example COUNT(*)) for that list.
         if (openParen >= masked3.length || masked3[openParen] !== '(') { continue; }
 
         const closeParen = findMatchingParen(result, openParen);
@@ -1399,9 +1444,33 @@ function isBoundaryChar(ch: string | undefined): boolean {
 }
 
 /**
+ * Whether `#` starts a line comment when a masker call does not say. Parsing
+ * and preprocessing run synchronously, so `withSqlDialectLexing()` scopes this
+ * to the dialect being parsed (PostgreSQL `#` is XOR, not a comment) without
+ * threading the dialect through every helper. Dialect-agnostic callers such as
+ * detection keep the permissive default.
+ */
+let defaultHashComments = true;
+
+/** Run `fn` with `#`-comment masking set for `dialect`, restoring the previous rule. */
+export function withSqlDialectLexing<T>(dialect: SqlDialect, fn: () => T): T {
+    const previous = defaultHashComments;
+    defaultHashComments = dialectSupportsHashComments(dialect);
+    try {
+        return fn();
+    } finally {
+        defaultHashComments = previous;
+    }
+}
+
+/**
  * Replace string literals and comments with spaces (preserving length/positions).
  */
-export function maskStringsAndComments(sql: string): string {
+export function maskStringsAndComments(
+    sql: string,
+    options: { hashComments?: boolean } = {}
+): string {
+    const hashComments = options.hashComments ?? defaultHashComments;
     const chars = sql.split('');
     let i = 0;
     while (i < chars.length) {
@@ -1437,7 +1506,7 @@ export function maskStringsAndComments(sql: string): string {
             }
             continue;
         }
-        if (chars[i] === '#') {
+        if (chars[i] === '#' && hashComments && !isPostgresJsonPathOperatorAt(sql, i)) {
             const next = i + 1 < chars.length ? chars[i + 1] : '';
             const afterDoubleHash = i + 2 < chars.length ? chars[i + 2] : '';
             const isTempIdentifier =
@@ -2609,6 +2678,10 @@ function findStatementTerminatorAtDepth0(masked: string, pos: number): number {
 }
 
 export function preprocessForParsing(sql: string, dialect: SqlDialect): { sql: string; hadJinja: boolean } {
+    return withSqlDialectLexing(dialect, () => preprocessForParsingForDialect(sql, dialect));
+}
+
+function preprocessForParsingForDialect(sql: string, dialect: SqlDialect): { sql: string; hadJinja: boolean } {
     const { rewritten, hadJinja } = preprocessJinjaTemplates(sql);
     let result = rewritten;
 

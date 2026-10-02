@@ -6,6 +6,7 @@
  */
 
 import { splitSqlStatements } from '../../../src/webview/parser/validation/splitting';
+import { parseSqlBatch } from '../../../src/webview/sqlParser';
 
 describe('statement splitting — quote and identifier delimiters', () => {
     it('does not split on a semicolon inside a backtick-quoted identifier', () => {
@@ -40,5 +41,61 @@ describe('statement splitting — quote and identifier delimiters', () => {
         const result = splitSqlStatements('SELECT "co""l;n" FROM t; SELECT 2;');
         expect(result).toHaveLength(2);
         expect(result[0]).toContain('"co""l;n"');
+    });
+});
+
+describe('statement splitting — long statements', () => {
+    it('splits a single large INSERT in linear time', () => {
+        const rows = Array.from({ length: 12000 }, (_, i) => `(${i}, 'name_${i}', ${i * 3})`);
+        const sql = `INSERT INTO t (a, b, c) VALUES\n${rows.join(',\n')};\nSELECT 1;`;
+        expect(sql.length).toBeGreaterThan(300 * 1024);
+
+        const started = Date.now();
+        const statements = splitSqlStatements(sql, 'PostgreSQL');
+        const elapsedMs = Date.now() - started;
+
+        expect(statements).toHaveLength(2);
+        expect(statements[1]).toBe('SELECT 1');
+        // Trimming the growing statement on every character took ~6-14 s here.
+        expect(elapsedMs).toBeLessThan(1500);
+    });
+
+    it('still recognizes DELIMITER only at the start of a statement', () => {
+        const sql = [
+            "SELECT 'DELIMITER //' AS note;",
+            'DELIMITER //',
+            'CREATE PROCEDURE p() BEGIN SELECT 1; END //',
+            'DELIMITER ;',
+            'SELECT 2;',
+        ].join('\n');
+
+        expect(splitSqlStatements(sql, 'MySQL')).toEqual([
+            "SELECT 'DELIMITER //' AS note",
+            'CREATE PROCEDURE p() BEGIN SELECT 1; END',
+            'SELECT 2',
+        ]);
+    });
+
+    it('recognizes DELIMITER after leading comments', () => {
+        const sql = [
+            '-- migration header',
+            '/* generated script */',
+            'DELIMITER $$',
+            'CREATE PROCEDURE p() BEGIN SELECT 1; END $$',
+            'DELIMITER ;',
+            'SELECT 2;',
+        ].join('\n');
+
+        expect(splitSqlStatements(sql, 'MySQL')).toEqual([
+            'CREATE PROCEDURE p() BEGIN SELECT 1; END',
+            'SELECT 2',
+        ]);
+    });
+
+    it('does not nest MySQL block comments containing a glob path', () => {
+        const sql = 'SELECT * FROM a /* /backups/*.sql */; SELECT * FROM b;';
+        expect(splitSqlStatements(sql, 'MySQL')).toHaveLength(2);
+        expect(splitSqlStatements(sql, 'PostgreSQL')).toHaveLength(1);
+        expect(parseSqlBatch(sql, 'MySQL').queries).toHaveLength(2);
     });
 });

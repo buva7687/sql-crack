@@ -300,16 +300,17 @@ describe('parser worker migration prep', () => {
         }
     });
     it('compare-mode baseline parse cannot overwrite a newer interaction state', () => {
-        expect(indexSource).toContain('const compareToken = parseRequestId;');
+        expect(indexSource).toContain('const compareToken = ++compareRequestId;');
         expect(indexSource).toContain('const compareQueryIndex = currentQueryIndex;');
         expect(indexSource).toContain('const baselineResult = await parseAsync(baseline.sql, baseline.dialect, {');
-        expect(indexSource).toContain('compareToken !== parseRequestId || currentQueryIndex !== compareQueryIndex');
+        expect(indexSource).toContain('parseToken !== parseRequestId');
+        expect(indexSource).toContain('compareToken !== compareRequestId');
     });
 
     it('pinned-tab restore parse flow is cancellation-safe during rapid refresh/switch', () => {
         expect(indexSource).toContain('await switchToQueryIndex(targetIndex);');
         expect(indexSource).toContain('const hydrateToken = parseRequestId;');
-        expect(indexSource).toContain('if (batchResult && parseRequestId === hydrateToken) {');
+        expect(indexSource).toContain('if (batchResult === owningBatch && parseRequestId === hydrateToken) {');
         expect(indexSource).toContain('if (currentQueryIndex !== newIndex) {');
         expect(indexSource).toContain('if (currentQueryIndex !== newIndex) { return; }');
         expect(indexSource).toContain('if (requestId !== parseRequestId) {');
@@ -330,6 +331,10 @@ describe('parser worker migration prep', () => {
 
         expect(switchBody).toContain('querySwitchPromises.get(newIndex)');
         expect(switchBody).toContain('await existingSwitch');
+        // Re-requesting a hydrating query makes it current before awaiting, so
+        // the in-flight switch renders it and newer switches are not overridden.
+        expect(switchBody).toContain('enterQueryIndex(newIndex, options);');
+        expect(switchBody).not.toContain('await switchToQueryIndex(newIndex, options);');
         expect(switchBody).toContain('querySwitchPromises.set(newIndex, switchPromise)');
         expect(switchBody).toContain('querySwitchPromises.delete(newIndex)');
     });

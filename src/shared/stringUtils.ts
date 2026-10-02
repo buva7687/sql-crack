@@ -41,6 +41,21 @@ export function escapeHtml(value: string): string {
 }
 
 /**
+ * Truncate by Unicode code points so a surrogate pair is never split.
+ * `maxLength` includes the suffix.
+ */
+export function truncateCodePoints(value: string, maxLength: number, suffix = '…'): string {
+    const characters = Array.from(value);
+    if (characters.length <= maxLength) {
+        return value;
+    }
+
+    const suffixCharacters = Array.from(suffix).slice(0, Math.max(0, maxLength));
+    const contentLength = Math.max(0, maxLength - suffixCharacters.length);
+    return characters.slice(0, contentLength).join('') + suffixCharacters.join('');
+}
+
+/**
  * Serialize a value with JSON.stringify and escape the HTML-significant sequences
  * that could break out of an inline `<script>` context (closing the script tag,
  * HTML comments, or a CDATA end). Canonical home for what the panel and workspace
@@ -67,6 +82,49 @@ export function escapeForInlineScriptValue(value: unknown): string {
  * comments such as `#CONNECT BY ...` are still removed while `FROM #temp` and
  * `CREATE TABLE ##temp` remain intact.
  */
+/**
+ * SQL dialects whose quoted strings treat `\` as an escape character. In the
+ * others (PostgreSQL standard strings, SQL Server, Oracle, Teradata, ...)
+ * `'\'` is a complete one-character literal.
+ */
+const BACKSLASH_ESCAPE_DIALECTS: ReadonlySet<string> = new Set([
+    'MySQL', 'MariaDB', 'BigQuery', 'Snowflake', 'Hive', 'Redshift',
+]);
+
+/** Whether `\` escapes the next character inside quoted strings in `dialect`. */
+export function dialectSupportsBackslashEscapes(dialect: string): boolean {
+    return BACKSLASH_ESCAPE_DIALECTS.has(dialect);
+}
+
+/**
+ * Whether a string opened at `quoteOffset` honours backslash escapes: always in
+ * backslash-escape dialects, and for PostgreSQL-style `E'...'` strings.
+ */
+export function quotedStringAllowsBackslashEscapes(
+    sql: string,
+    quoteOffset: number,
+    backslashEscapes: boolean
+): boolean {
+    return backslashEscapes || (sql[quoteOffset] === "'" && /[Ee]/.test(sql[quoteOffset - 1] || ''));
+}
+
+/** SQL dialects in which `#` starts a line comment. */
+const HASH_COMMENT_DIALECTS: ReadonlySet<string> = new Set(['MySQL', 'MariaDB', 'BigQuery']);
+
+/** Whether `#` starts a line comment in `dialect` (MySQL, MariaDB, BigQuery). */
+export function dialectSupportsHashComments(dialect: string): boolean {
+    return HASH_COMMENT_DIALECTS.has(dialect);
+}
+
+/**
+ * PostgreSQL JSON path operators `#>` and `#>>` are never treated as `#` line
+ * comments. Without this, dialect-agnostic comment masking swallows the rest of
+ * a JSON path expression — including the statement's terminating `;`.
+ */
+export function isPostgresJsonPathOperatorAt(sql: string, offset: number): boolean {
+    return sql[offset] === '#' && sql[offset + 1] === '>';
+}
+
 export function isHashTempTableIdentifierAt(sql: string, offset: number): boolean {
     // The scanner visits both characters in a global-temp `##name`; normalize
     // the second hash back to the start of the identifier.
@@ -98,8 +156,22 @@ export function isHashTempTableIdentifierAt(sql: string, offset: number): boolea
 }
 
 export interface StripSqlCommentsOptions {
+    /** Set false for MySQL-family SQL, where $$ can be a statement delimiter. */
+    dollarQuotes?: boolean;
+    /** Set false where an inner block-comment opener is plain text. */
+    nestedBlockComments?: boolean;
     /** Set false when the caller knows `#` always starts a MySQL-style comment. */
     preserveHashTempIdentifiers?: boolean;
+    /**
+     * Set false for dialects where `\` is an ordinary character inside quotes
+     * (see `dialectSupportsBackslashEscapes`). Defaults to true.
+     */
+    backslashEscapes?: boolean;
+    /**
+     * Set false for dialects where `#` is an operator rather than a line
+     * comment (see `dialectSupportsHashComments`). Defaults to true.
+     */
+    hashComments?: boolean;
 }
 
 const DOLLAR_QUOTE_DELIMITER_PATTERN = /^\$(?:[_\p{L}][_\p{L}\p{M}\p{N}]*)?\$/u;
@@ -192,7 +264,7 @@ export function maskSqlCommentsPreservingPositions(
     while (i < len) {
         const ch = sql[i];
 
-        const dollarQuotedEnd = getDollarQuotedTokenEnd(sql, i);
+        const dollarQuotedEnd = options.dollarQuotes === false ? null : getDollarQuotedTokenEnd(sql, i);
         if (dollarQuotedEnd !== null) {
             i = dollarQuotedEnd;
             continue;
@@ -200,9 +272,11 @@ export function maskSqlCommentsPreservingPositions(
 
         if (ch === "'" || ch === '"' || ch === '`' || ch === '[') {
             const closingQuote = ch === '[' ? ']' : ch;
+            const escapesAllowed = ch !== '['
+                && quotedStringAllowsBackslashEscapes(sql, i, options.backslashEscapes !== false);
             i++;
             while (i < len) {
-                if (sql[i] === '\\' && ch !== '[' && i + 1 < len) {
+                if (escapesAllowed && sql[i] === '\\' && i + 1 < len) {
                     i += 2;
                     continue;
                 }
@@ -224,7 +298,8 @@ export function maskSqlCommentsPreservingPositions(
             let depth = 1;
             i += 2;
             while (i < len && depth > 0) {
-                if (sql[i] === '/' && i + 1 < len && sql[i + 1] === '*') {
+                if (options.nestedBlockComments !== false
+                    && sql[i] === '/' && i + 1 < len && sql[i + 1] === '*') {
                     depth++;
                     i += 2;
                 } else if (sql[i] === '*' && i + 1 < len && sql[i + 1] === '/') {
@@ -245,7 +320,7 @@ export function maskSqlCommentsPreservingPositions(
             continue;
         }
 
-        if (ch === '#') {
+        if (ch === '#' && options.hashComments !== false && !isPostgresJsonPathOperatorAt(sql, i)) {
             const preserveTempIdentifier = options.preserveHashTempIdentifiers !== false
                 && isHashTempTableIdentifierAt(sql, i);
             if (!preserveTempIdentifier) {
@@ -278,7 +353,7 @@ export function stripSqlComments(sql: string, options: StripSqlCommentsOptions =
 
         // PostgreSQL dollar-quoted string: pass through verbatim. Comment-like
         // text inside the token is literal content, not SQL comments.
-        const dollarQuotedEnd = getDollarQuotedTokenEnd(sql, i);
+        const dollarQuotedEnd = options.dollarQuotes === false ? null : getDollarQuotedTokenEnd(sql, i);
         if (dollarQuotedEnd !== null) {
             out += sql.slice(i, dollarQuotedEnd);
             i = dollarQuotedEnd;
@@ -348,7 +423,8 @@ export function stripSqlComments(sql: string, options: StripSqlCommentsOptions =
             i += 2;
             out += ' ';
             while (i < len && depth > 0) {
-                if (sql[i] === '/' && i + 1 < len && sql[i + 1] === '*') {
+                if (options.nestedBlockComments !== false
+                    && sql[i] === '/' && i + 1 < len && sql[i + 1] === '*') {
                     depth++;
                     i += 2;
                     continue;
@@ -370,8 +446,9 @@ export function stripSqlComments(sql: string, options: StripSqlCommentsOptions =
             continue;
         }
 
-        // Hash line comment: # (but not a contextual #identifier/##identifier temp table)
-        if (ch === '#') {
+        // Hash line comment: # (but not a contextual #identifier/##identifier
+        // temp table, or a PostgreSQL #> / #>> JSON path operator)
+        if (ch === '#' && options.hashComments !== false && !isPostgresJsonPathOperatorAt(sql, i)) {
             const preserveTempIdentifier = options.preserveHashTempIdentifiers !== false
                 && isHashTempTableIdentifierAt(sql, i);
             if (!preserveTempIdentifier) {

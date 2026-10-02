@@ -39,6 +39,7 @@ jobs:
     outputs:
       should_release: ${{ steps.check.outputs.should_release }}
       version: ${{ steps.check.outputs.version }}
+      release_channel: ${{ steps.check.outputs.release_channel }}
       release_mode: ${{ steps.check.outputs.release_mode }}
       checkout_ref: ${{ steps.check.outputs.checkout_ref }}
     steps:
@@ -71,6 +72,12 @@ jobs:
           fi
 
           if git rev-parse "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            if git cat-file -e "refs/tags/v$VERSION:release.config.json" 2>/dev/null; then
+              RELEASE_CHANNEL="$(git show "refs/tags/v$VERSION:release.config.json" | node -e "let source=''; process.stdin.on('data', chunk => source += chunk); process.stdin.on('end', () => console.log(JSON.parse(source).channel));")"
+            else
+              # Releases created before channel metadata was introduced are stable.
+              RELEASE_CHANNEL="stable"
+            fi
             if [[ "$RELEASE_MODE" == "full-release" ]]; then
               echo "Tag v$VERSION already exists; nothing to release."
               echo "should_release=false" >> "$GITHUB_OUTPUT"
@@ -81,6 +88,7 @@ jobs:
               echo "checkout_ref=refs/tags/v$VERSION" >> "$GITHUB_OUTPUT"
             fi
           else
+            RELEASE_CHANNEL="$(node -p "require('./release.config.json').channel")"
             if [[ "$RELEASE_MODE" != "full-release" ]]; then
               echo "Cannot retry $RELEASE_MODE because tag v$VERSION does not exist." >&2
               exit 1
@@ -89,6 +97,12 @@ jobs:
             echo "should_release=true" >> "$GITHUB_OUTPUT"
             echo "checkout_ref=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
           fi
+
+          if [[ "$RELEASE_CHANNEL" != "stable" && "$RELEASE_CHANNEL" != "pre-release" ]]; then
+            echo "Invalid release channel: $RELEASE_CHANNEL" >&2
+            exit 1
+          fi
+          echo "release_channel=$RELEASE_CHANNEL" >> "$GITHUB_OUTPUT"
 
   release:
     needs: check
@@ -99,6 +113,7 @@ jobs:
     env:
       VERSION: ${{ needs.check.outputs.version }}
       TAG_NAME: v${{ needs.check.outputs.version }}
+      RELEASE_CHANNEL: ${{ needs.check.outputs.release_channel }}
       RELEASE_MODE: ${{ needs.check.outputs.release_mode }}
       VSCE_PAT: ${{ secrets.VSCE_PAT }}
       OVSX_PAT: ${{ secrets.OVSX_PAT }}
@@ -113,7 +128,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20.x
+          node-version: 22.x
           cache: "npm"
 
       - name: Validate package version
@@ -142,6 +157,9 @@ jobs:
             }
           " "$VERSION"
 
+      - name: Validate changelog release date
+        run: node scripts/validateReleaseChangelog.js "$VERSION"
+
       - name: Install dependencies
         run: npm ci
 
@@ -165,7 +183,12 @@ jobs:
 
       - name: Package VSIX
         run: |
-          npx @vscode/vsce package --out "sql-crack-${TAG_NAME}.vsix"
+          set -euo pipefail
+          PRERELEASE_ARGS=()
+          if [[ "$RELEASE_CHANNEL" == "pre-release" ]]; then
+            PRERELEASE_ARGS+=(--pre-release)
+          fi
+          npx --yes @vscode/vsce@3.9.2 package "${PRERELEASE_ARGS[@]}" --no-dependencies --out "sql-crack-${TAG_NAME}.vsix"
 
       - name: Create GitHub release and tag
         if: ${{ env.RELEASE_MODE == 'full-release' || env.RELEASE_MODE == 'github-release' }}
@@ -175,11 +198,17 @@ jobs:
           name: ${{ env.TAG_NAME }}
           files: sql-crack-${{ env.TAG_NAME }}.vsix
           generate_release_notes: true
+          prerelease: ${{ env.RELEASE_CHANNEL == 'pre-release' }}
 
       - name: Publish to VS Code Marketplace
         if: ${{ (env.RELEASE_MODE == 'full-release' || env.RELEASE_MODE == 'vscode-marketplace') && env.VSCE_PAT != '' }}
         run: |
-          npx @vscode/vsce publish --packagePath "sql-crack-${TAG_NAME}.vsix"
+          set -euo pipefail
+          PRERELEASE_ARGS=()
+          if [[ "$RELEASE_CHANNEL" == "pre-release" ]]; then
+            PRERELEASE_ARGS+=(--pre-release)
+          fi
+          npx --yes @vscode/vsce@3.9.2 publish "${PRERELEASE_ARGS[@]}" --packagePath "sql-crack-${TAG_NAME}.vsix"
 
       - name: Skip VS Code Marketplace publish
         if: ${{ env.RELEASE_MODE == 'full-release' && env.VSCE_PAT == '' }}
@@ -194,7 +223,12 @@ jobs:
       - name: Publish to Open VSX
         if: ${{ (env.RELEASE_MODE == 'full-release' || env.RELEASE_MODE == 'open-vsx') && env.OVSX_PAT != '' }}
         run: |
-          npx ovsx publish "sql-crack-${TAG_NAME}.vsix"
+          set -euo pipefail
+          PRERELEASE_ARGS=()
+          if [[ "$RELEASE_CHANNEL" == "pre-release" ]]; then
+            PRERELEASE_ARGS+=(--pre-release)
+          fi
+          npx --yes ovsx@1.2.0 publish "sql-crack-${TAG_NAME}.vsix" "${PRERELEASE_ARGS[@]}"
 
       - name: Skip Open VSX publish
         if: ${{ env.RELEASE_MODE == 'full-release' && env.OVSX_PAT == '' }}

@@ -59,6 +59,7 @@ function createCallbacks(overrides: Partial<EventListenerCallbacks> = {}): Event
         updateTransform: jest.fn(),
         updateZoomIndicator: jest.fn(),
         recordLayoutHistorySnapshot: jest.fn(),
+        onViewStateChanged: jest.fn(),
         selectNode: jest.fn(),
         clearFocusMode: jest.fn(),
         fitView: jest.fn(),
@@ -68,6 +69,7 @@ function createCallbacks(overrides: Partial<EventListenerCallbacks> = {}): Event
         hideContextMenu: jest.fn(),
         clearSearch: jest.fn(),
         resetView: jest.fn(),
+        refreshVisualization: jest.fn(),
         undoLayoutChange: jest.fn(),
         redoLayoutChange: jest.fn(),
         toggleCommandBar: jest.fn(),
@@ -213,6 +215,75 @@ describe('keyboardListeners', () => {
         expect(preventDefault).not.toHaveBeenCalled();
     });
 
+    function registerDocumentHandler(callbacks: EventListenerCallbacks, state = createState()): Listener {
+        const listeners = new Map<string, Listener>();
+        global.document = {
+            activeElement: { tagName: 'DIV' },
+            addEventListener: jest.fn((type: string, handler: Listener) => {
+                listeners.set(type, handler);
+            }),
+        } as unknown as Document;
+        global.requestAnimationFrame = ((cb: FrameRequestCallback) => {
+            cb(0);
+            return 1;
+        }) as typeof requestAnimationFrame;
+        registerDocumentKeyboardListeners(createContext(state, createKeyboardTarget(), null), callbacks);
+        return listeners.get('keydown')!;
+    }
+
+    function keyEvent(key: string, overrides: Record<string, unknown> = {}) {
+        return {
+            key,
+            preventDefault: jest.fn(),
+            ctrlKey: false,
+            metaKey: false,
+            altKey: false,
+            shiftKey: false,
+            defaultPrevented: false,
+            ...overrides,
+        };
+    }
+
+    it('R refreshes the visualization while Escape only fits the view', () => {
+        const callbacks = createCallbacks();
+        const keydown = registerDocumentHandler(callbacks);
+
+        keydown(keyEvent('r'));
+        expect(callbacks.refreshVisualization).toHaveBeenCalledTimes(1);
+        expect(callbacks.resetView).not.toHaveBeenCalled();
+
+        keydown(keyEvent('Escape'));
+        expect(callbacks.resetView).toHaveBeenCalledTimes(1);
+        expect(callbacks.refreshVisualization).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignores an Escape already consumed by an overlay', () => {
+        const callbacks = createCallbacks();
+        const keydown = registerDocumentHandler(callbacks, createState({ selectedNodeId: 'n1' }));
+
+        keydown(keyEvent('Escape', { defaultPrevented: true }));
+
+        expect(callbacks.selectNode).not.toHaveBeenCalled();
+        expect(callbacks.resetView).not.toHaveBeenCalled();
+    });
+
+    it('does not fire graph shortcuts while a toolbar menu item has focus', () => {
+        const callbacks = createCallbacks();
+        const keydown = registerDocumentHandler(callbacks);
+        (global.document as any).activeElement = {
+            tagName: 'DIV',
+            closest: (selector: string) => (selector.includes('[role="menu"]') ? {} : null),
+        };
+
+        keydown(keyEvent('t'));
+        keydown(keyEvent('f'));
+        keydown(keyEvent('r'));
+
+        expect(callbacks.toggleTheme).not.toHaveBeenCalled();
+        expect(callbacks.toggleFullscreen).not.toHaveBeenCalled();
+        expect(callbacks.refreshVisualization).not.toHaveBeenCalled();
+    });
+
     it('lets SVG Escape exit fullscreen before clearing graph state', () => {
         const svg = createKeyboardTarget();
         const callbacks = createCallbacks();
@@ -295,11 +366,12 @@ describe('keyboardListeners', () => {
         expect(searchBox.focus).toHaveBeenCalled();
 
         keydown!({
-            key: 'P',
-            ctrlKey: true,
+            key: 'π',
+            code: 'KeyP',
+            ctrlKey: false,
             metaKey: false,
-            altKey: false,
-            shiftKey: true,
+            altKey: true,
+            shiftKey: false,
             preventDefault: jest.fn(),
         });
         expect(callbacks.toggleCommandBar).toHaveBeenCalled();
@@ -374,5 +446,23 @@ describe('keyboardListeners', () => {
         });
 
         expect(callbacks.navigateSearch).not.toHaveBeenCalled();
+    });
+
+    it('does not fire graph shortcuts while a select control is focused', () => {
+        const svg = createKeyboardTarget();
+        const callbacks = createCallbacks();
+        const listeners = new Map<string, Listener>();
+        global.document = {
+            activeElement: { tagName: 'SELECT' },
+            addEventListener: jest.fn((type: string, handler: Listener) => listeners.set(type, handler)),
+        } as unknown as Document;
+
+        registerDocumentKeyboardListeners(createContext(createState(), svg, null), callbacks);
+        listeners.get('keydown')?.({
+            key: '1', ctrlKey: false, metaKey: false, altKey: false, shiftKey: false,
+            preventDefault: jest.fn(),
+        });
+
+        expect(callbacks.switchLayout).not.toHaveBeenCalled();
     });
 });

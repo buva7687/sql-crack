@@ -25,6 +25,7 @@ const DEFAULT_AUTO_INDEX_THRESHOLD = 50;
 const DEFAULT_CACHE_TTL_HOURS = 24;
 const DEFAULT_MAX_CACHE_BYTES = 4 * 1024 * 1024; // 4MB safety limit for workspaceState
 const MAX_CACHE_VALIDATION_CONCURRENCY = 4;
+let workspaceIndexPersistQueue: Promise<void> = Promise.resolve();
 
 function isFileNotFoundCode(code: string | undefined): boolean {
     return code === 'FileNotFound' || code === 'ENOENT';
@@ -72,6 +73,12 @@ export class IndexManager {
     private onIndexUpdated: (() => void) | null = null;
     private _configDisposable: vscode.Disposable | null = null;
     private _buildPromise: Promise<WorkspaceIndex> | null = null;
+    /**
+     * True once any full build has been requested (auto-index, explicit
+     * rebuild, or a large-workspace "Index now"). Until then the workspace is
+     * idle by the user's choice and dialect changes must not start a scan.
+     */
+    private _indexingAuthorized = false;
     private _queueProcessingPromise: Promise<void> | null = null;
     private _changesSinceIndex: number = 0;
     private _persistTimer: NodeJS.Timeout | null = null;
@@ -84,6 +91,7 @@ export class IndexManager {
     private _lastCacheState: WorkspaceCacheState = 'missing';
     private _indexUpdateBatchDepth: number = 0;
     private _indexUpdatePending: boolean = false;
+    private _disposed: boolean = false;
 
     constructor(context: vscode.ExtensionContext, dialect: SqlDialect = 'MySQL', scopeUri?: vscode.Uri) {
         this.context = context;
@@ -102,7 +110,20 @@ export class IndexManager {
         cacheState: WorkspaceCacheState;
         hasValidIndex: boolean;
     }> {
+        // The panel can be closed or re-scoped while any await below is
+        // pending; return an idle result instead of throwing "disposed" from
+        // buildIndex() into the command that opened the panel.
+        const disposedResult = (fileCount: number) => ({
+            autoIndexed: false,
+            fileCount,
+            cacheState: this._lastCacheState,
+            hasValidIndex: false,
+        });
+
         const fileCount = await this.scanner.getFileCount();
+        if (this._disposed) {
+            return disposedResult(fileCount);
+        }
         const shouldAutoIndex = fileCount < autoIndexThreshold && fileCount > 0;
 
         // Try to load cached index. loadCachedIndex() records the precise reason
@@ -110,16 +131,25 @@ export class IndexManager {
         // disabled) so callers don't have to infer it from a bare null.
         this.index = await this.loadCachedIndex(fileCount);
         const cacheState = this._lastCacheState;
+        if (this._disposed) {
+            return disposedResult(fileCount);
+        }
 
         // Auto-index small workspaces when there is no valid cache to reuse. A
         // freshly loaded valid index already passed the TTL check in
         // loadCachedIndex, so isIndexStale() only matters on the auto-build path.
         if (shouldAutoIndex && (!this.index || this.isIndexStale())) {
             await this.buildIndex();
+            if (this._disposed) {
+                return disposedResult(fileCount);
+            }
         }
 
-        // Setup file watcher for incremental updates
-        this.setupFileWatcher();
+        // A declined/manual index must remain idle. Install incremental
+        // watching only after a usable index exists.
+        if (this.index) {
+            this.setupFileWatcher();
+        }
 
         return {
             autoIndexed: shouldAutoIndex && this.index !== null,
@@ -138,14 +168,33 @@ export class IndexManager {
         progressCallback?: ProgressCallback,
         cancellationToken?: CancellationToken
     ): Promise<WorkspaceIndex> {
+        if (this._disposed) {
+            throw new Error('IndexManager has been disposed');
+        }
+        this._indexingAuthorized = true;
         if (this._buildPromise) {
             return this._buildPromise;
         }
         await this.waitForQueueToDrain();
+        return this.startBuild(progressCallback, cancellationToken);
+    }
+
+    /**
+     * Start or join a serialized full build. Callers outside the watcher queue
+     * must use buildIndex() so pending incremental updates drain first.
+     */
+    private async startBuild(
+        progressCallback?: ProgressCallback,
+        cancellationToken?: CancellationToken
+    ): Promise<WorkspaceIndex> {
         if (this._buildPromise) {
             return this._buildPromise;
         }
         this._buildPromise = this._doBuildIndex(progressCallback, cancellationToken);
+        // An explicit or automatic build authorizes indexing. Start watching
+        // immediately so edits made during the initial scan are queued and
+        // reconciled after the build completes.
+        this.setupFileWatcher();
         try {
             return await this._buildPromise;
         } finally {
@@ -156,12 +205,38 @@ export class IndexManager {
         }
     }
 
+    /** Keep incremental events idle until the user has allowed a full index. */
+    private async updateQueuedFile(uri: vscode.Uri): Promise<void> {
+        if (!this.index) {
+            return;
+        }
+        await this.updateFile(uri);
+    }
+
     private async _doBuildIndex(
         progressCallback?: ProgressCallback,
         cancellationToken?: CancellationToken
     ): Promise<WorkspaceIndex> {
         const previousIndex = this.index;
-        const analyses = await this.scanner.analyzeWorkspace(progressCallback, cancellationToken);
+        const isManagerDisposed = (): boolean => this._disposed;
+        const combinedCancellationToken: CancellationToken = {
+            get isCancellationRequested() {
+                return isManagerDisposed() || cancellationToken?.isCancellationRequested === true;
+            }
+        };
+        const analyses = await this.scanner.analyzeWorkspace(progressCallback, combinedCancellationToken);
+
+        if (this._disposed) {
+            return previousIndex ?? {
+                version: INDEX_VERSION,
+                lastUpdated: Date.now(),
+                fileCount: 0,
+                files: new Map(),
+                fileHashes: new Map(),
+                definitionMap: new Map(),
+                referenceMap: new Map(),
+            };
+        }
 
         // A cancelled refresh must not replace a complete, usable index with
         // the scanner's partial result set.
@@ -206,6 +281,10 @@ export class IndexManager {
 
         this.index = newIndex;
         this._changesSinceIndex = 0;
+
+        if (!this.fileWatcher) {
+            this.setupFileWatcher();
+        }
 
         // Persist to workspace state
         await this.persistIndex();
@@ -570,6 +649,13 @@ export class IndexManager {
         }
         this.dialect = dialect;
         this.scanner.setDialect(dialect);
+        // Without authorized indexing (the user declined a large workspace, or
+        // indexing is manual) only record the dialect; the next explicit build
+        // uses it. Rebuilding here started an unprompted full scan. The cache
+        // identity includes the dialect, so an old-dialect cache is not reused.
+        if (!this.index && !this._indexingAuthorized) {
+            return;
+        }
         this._pendingDialectRebuildVersion += 1;
         this.scheduleDialectRebuild();
     }
@@ -631,7 +717,7 @@ export class IndexManager {
             this._persistTimer = null;
         }
         if (this.index) {
-            await this.persistIndex();
+            await this.persistIndex(true);
         }
     }
 
@@ -639,6 +725,7 @@ export class IndexManager {
      * Dispose resources
      */
     dispose(): void {
+        this._disposed = true;
         this.disposeFileWatcherResources();
         if (this._configDisposable) {
             this._configDisposable.dispose();
@@ -705,8 +792,11 @@ export class IndexManager {
             }
         }
 
-        // Remove references from this file
-        for (const [key, refs] of this.index.referenceMap.entries()) {
+        // Only this file's reference keys can contain its entries. Targeting
+        // those buckets avoids sweeping the complete workspace map per save.
+        const referenceKeys = new Set(analysis.references.map(getReferenceKey));
+        for (const key of referenceKeys) {
+            const refs = this.index.referenceMap.get(key) || [];
             const filtered = refs.filter(r => r.filePath !== analysis.filePath);
             if (filtered.length === 0) {
                 this.index.referenceMap.delete(key);
@@ -753,6 +843,18 @@ export class IndexManager {
         }
     }
 
+    /** Path relative to the containing workspace folder (the absolute path when outside any folder). */
+    private getWorkspaceRelativePath(uri: vscode.Uri): string {
+        const candidatePath = this.canonicalizePathForComparison(uri.fsPath);
+        for (const folder of vscode.workspace.workspaceFolders ?? []) {
+            const folderPath = this.canonicalizePathForComparison(folder.uri.fsPath);
+            if (candidatePath.startsWith(folderPath + path.sep)) {
+                return candidatePath.slice(folderPath.length + 1);
+            }
+        }
+        return uri.fsPath;
+    }
+
     private isInScope(filePath: string): boolean {
         if (!this.scopeUri) {
             return true;
@@ -789,7 +891,10 @@ export class IndexManager {
      * do not re-index generated/dependency folders.
      */
     private shouldIndexFile(uri: vscode.Uri): boolean {
-        if (/(^|[\\/])(node_modules|\.git|dist|build)([\\/]|$)/i.test(uri.fsPath)) {
+        // Match the scanner's findFiles exclude, which applies relative to the
+        // workspace folder. Testing the absolute path ignored every change in
+        // a workspace located under e.g. ~/build/<repo>.
+        if (/(^|[\\/])(node_modules|\.git|dist|build)([\\/]|$)/i.test(this.getWorkspaceRelativePath(uri))) {
             return false;
         }
         // When scoped to a subfolder, only index files within that folder
@@ -820,6 +925,9 @@ export class IndexManager {
      * Setup file watcher for incremental updates
      */
     private setupFileWatcher(): void {
+        if (this.fileWatcher || this._disposed) {
+            return;
+        }
         this.fileWatcher = vscode.workspace.createFileSystemWatcher(this.getWatcherGlob());
 
         // Debounced update function
@@ -933,11 +1041,11 @@ export class IndexManager {
                                     // if it remains unreadable, updateFile preserves
                                     // and marks the last-known-good analysis.
                                     logger.debug(`[IndexManager] File stat failed, preserving until analysis retry: ${uri.fsPath} ${String(e)}`);
-                                    await this.updateFile(uri);
+                                    await this.updateQueuedFile(uri);
                                 }
                                 continue;
                             }
-                            await this.updateFile(uri);
+                            await this.updateQueuedFile(uri);
                         } catch (err) {
                             logger.debug(`[IndexManager] Update failed for ${filePath}: ${err}`);
                         } finally {
@@ -1048,6 +1156,13 @@ export class IndexManager {
         if (!(await this.isCachedIndexCurrent(cached, currentFileCount))) {
             logger.debug('[IndexManager] Cached index filesystem snapshot changed - rebuilding index');
             this._lastCacheState = 'stale';
+            return null;
+        }
+        // Validation can await the filesystem while the user changes dialect
+        // or scope settings. Never install the old snapshot under a new cache
+        // identity, even if it matched when validation began.
+        if (cached.identity !== this.computeCacheIdentity()) {
+            this._lastCacheState = 'identity-mismatch';
             return null;
         }
 
@@ -1166,6 +1281,9 @@ export class IndexManager {
      * Persist index to workspace state
      */
     private schedulePersist(delayMs: number = this._persistDebounceMs): void {
+        if (this._disposed) {
+            return;
+        }
         if (this._persistTimer) {
             clearTimeout(this._persistTimer);
         }
@@ -1210,8 +1328,8 @@ export class IndexManager {
         return total;
     }
 
-    private async persistIndex(): Promise<void> {
-        if (!this.index) {return;}
+    private async persistIndex(allowDisposed = false): Promise<void> {
+        if ((!allowDisposed && this._disposed) || !this.index) {return;}
 
         // Convert Maps to arrays for JSON serialization
         const serializable: SerializedWorkspaceIndex = {
@@ -1247,7 +1365,7 @@ export class IndexManager {
                 referenceArray: []
             };
             try {
-                await this.context.workspaceState.update('sqlWorkspaceIndex', marker);
+                await this.enqueuePersist(marker);
             } catch (error) {
                 logger.warn(`[IndexManager] Failed to persist oversized marker: ${error instanceof Error ? error.message : String(error)}`);
             }
@@ -1255,10 +1373,18 @@ export class IndexManager {
         }
 
         try {
-            await this.context.workspaceState.update('sqlWorkspaceIndex', serializable);
+            await this.enqueuePersist(serializable);
         } catch (error) {
             logger.warn(`[IndexManager] Failed to persist index cache: ${error instanceof Error ? error.message : String(error)}`);
         }
+    }
+
+    private enqueuePersist(value: SerializedWorkspaceIndex | undefined): Promise<void> {
+        const write = async (): Promise<void> => {
+            await this.context.workspaceState.update('sqlWorkspaceIndex', value);
+        };
+        workspaceIndexPersistQueue = workspaceIndexPersistQueue.then(write, write);
+        return workspaceIndexPersistQueue;
     }
 
     /**
@@ -1282,7 +1408,7 @@ export class IndexManager {
      */
     async clearCache(): Promise<void> {
         this.index = null;
-        await this.context.workspaceState.update('sqlWorkspaceIndex', undefined);
+        await this.enqueuePersist(undefined);
         logger.debug('[IndexManager] Cache cleared');
     }
 }

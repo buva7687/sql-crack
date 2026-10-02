@@ -17,6 +17,7 @@
   <a href="#installation">Installation</a> •
   <a href="#usage">Usage</a> •
   <a href="#configuration">Configuration</a> •
+  <a href="#support">Support</a> •
   <a href="#contributing">Contributing</a>
 </p>
 
@@ -38,7 +39,7 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 | **Multi-Query Support** | Visualize multiple statements with tab navigation (Q1, Q2, Q3...) |
 | **Column Lineage** | Click any output column to trace its transformation path through JOINs, aggregations, and calculations |
 | **Legend Bar (Default On)** | Bottom legend is visible on first open, dismissable, and remembers your preference |
-| **Command Palette** | Press `Cmd/Ctrl + Shift + P` inside the webview for quick action search |
+| **Command Palette** | Press `Alt + P` (`Option + P` on macOS) inside the webview for quick action search |
 | **CTE & Subquery Expansion** | Double-click to expand CTEs/subqueries in floating cloud panels with independent pan/zoom |
 | **Undo / Redo Layout History** | Revert or re-apply drag, zoom, layout, and focus-mode changes with toolbar controls or keyboard shortcuts |
 | **Query Compare Mode** | Compare baseline vs current query side-by-side with added/removed/changed node highlights and stats deltas |
@@ -73,7 +74,7 @@ Explore data lineage across tables, views, and CTEs with:
 Analyze change impact (MODIFY/RENAME/DROP) with severity indicators, grouped transitive impacts, and source → target column paths.
 
 **Common Features** (all views):
-- Click nodes to open files, double-click to visualize SQL
+- Select a node to inspect actions; use Enter or double-click for its primary action (show a file's tables or trace an object's lineage)
 - Pan/zoom navigation with search (regex and case-sensitivity options)
 - Statistics panel showing files, tables, views, and references
 - Orphaned/missing definition badges with click-to-navigate
@@ -203,11 +204,11 @@ Analyze cross-file dependencies:
 | Shortcut | Action |
 |----------|--------|
 | `Cmd/Ctrl + Shift + L` | Open visualization |
-| `Cmd/Ctrl + Shift + P` | Open command palette |
+| `Alt + P` | Open SQL Crack quick actions |
 | `Cmd/Ctrl + F` or `/` | Search nodes |
-| `Enter` / `↓` | Next search result |
-| `↑` | Previous search result |
-| `Escape` | Clear selection |
+| `Enter` | Next search result |
+| `Shift + Enter` | Previous search result |
+| `Escape` | Clear selection and fit to screen |
 | `C` | Toggle column lineage |
 | `L` | Toggle legend |
 | `S` | Toggle SQL preview |
@@ -219,7 +220,7 @@ Analyze cross-file dependencies:
 | `U` / `D` / `A` | Focus mode: upstream / downstream / all |
 | `T` | Toggle theme |
 | `F` | Toggle fullscreen |
-| `R` | Reset view (fit to screen) |
+| `R` | Refresh visualization (re-parse the file) |
 | `+` / `-` | Zoom in / out |
 | `Cmd/Ctrl + Z` | Undo latest layout change |
 | `Cmd/Ctrl + Shift + Z` | Redo layout change |
@@ -231,6 +232,10 @@ Analyze cross-file dependencies:
 | Shortcut | Action |
 |----------|--------|
 | `Cmd/Ctrl + F` | Focus graph search |
+| `Enter` / `Shift+Enter` while searching | Next / previous search result |
+| `Tab` / `Shift+Tab` | Select next / previous node |
+| `Arrow keys` | Select the nearest node in that direction |
+| `Enter` on a selected node | Show file tables or trace object lineage |
 | `Escape` | Clear search or selection |
 | `F` | Toggle focus mode (neighbors only) |
 | `R` | Reset view (fit to screen) |
@@ -359,6 +364,14 @@ If the extension behaves unexpectedly:
 
 ---
 
+## Support
+
+SQL Crack supports the latest stable release on VS Code `1.85` or newer. When a Marketplace pre-release is available, it is intended for testing an upcoming version. SQL parsing and optimization guidance are static, best-effort analysis; vendor-specific syntax may use compatibility rewrites or partial fallback results, which are identified in the UI.
+
+For ordinary bugs and feature requests, use [GitHub Issues](https://github.com/buva7687/sql-crack/issues) and include the extension version, VS Code version, selected dialect, reproduction steps, and a minimal redacted SQL sample. Report security-sensitive problems privately as described in [SECURITY.md](SECURITY.md).
+
+---
+
 ## Development
 
 ```bash
@@ -425,6 +438,8 @@ src/
 - ✅ **Phase 5** — Polish & accessibility (keyboard navigation, ARIA labels, cancellable indexing)
 - ✅ **Phase 6** — Large-file modular refactor (parser/renderer/workspace UI split into focused modules)
 - ✅ **Phase 7** — Export preview with PDF support
+
+`0.9.4` is a stable release focused on consistent Workspace Graph navigation, explicit index trust signals, reproducible publishing, cross-platform smoke testing, and release documentation. New dialect and parser features resume in later releases.
 
 `0.9.0`: Security & reliability hardening — production dependency upgrades (`npm audit --omit=dev` reports 0 advisories), cryptographically strong CSP nonces and collision-free pin/tab IDs, stricter HTML-attribute / DOT / Mermaid export escaping, source-scoped auto-refresh and cursor-follow, a workspace index cache keyed by scope/dialect/config, and a non-blocking parser-worker timeout.
 

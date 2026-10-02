@@ -45,7 +45,7 @@ export {
 export function getWebviewStyles(dark: boolean = true, isHighContrast: boolean = false): string {
     return [
         getCssVariables(dark, isHighContrast),
-        getBaseStyles(),
+        getBaseStyles(dark),
         getWorkspaceCommandBarStyles(),
         getContextMenuStyles(),
         getLineagePanelStyles(),

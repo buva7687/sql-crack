@@ -3,6 +3,7 @@ import { Z_INDEX } from '../../../shared/zIndex';
 import { applyOverflowMenuTheme, getOverflowPalette } from './overflowMenu';
 import type { ToolbarCallbacks } from '../toolbar';
 import { createToolbarButton } from './buttonFactory';
+import { attachMenuKeyboardNavigation } from '../menuKeyboard';
 
 export interface ToolbarActionOptions {
     isPinnedView: boolean;
@@ -30,6 +31,61 @@ export interface ActionButtonsResult {
     overflowContainer: HTMLElement;
 }
 
+const COMPARE_DISABLED_ATTRIBUTE = 'data-compare-disabled';
+
+/**
+ * Disable (or re-enable) toolbar controls that act on the graph hidden behind
+ * the compare view. Uses aria-disabled + pointer-events so hover and clicks
+ * are blocked, and restores each control's previous inline styles.
+ */
+export function setGraphControlsDisabledForCompare(actions: HTMLElement, disabled: boolean): void {
+    const controls = Array.from(actions.querySelectorAll<HTMLElement>('button, [role="button"], select'))
+        .filter(control => !control.closest('[data-compare-safe="true"]'));
+    for (const control of controls) {
+        if (disabled) {
+            if (control.hasAttribute(COMPARE_DISABLED_ATTRIBUTE)) {
+                continue;
+            }
+            const nativeControl = control as HTMLButtonElement | HTMLSelectElement;
+            control.setAttribute(COMPARE_DISABLED_ATTRIBUTE, JSON.stringify({
+                opacity: control.style.opacity,
+                pointerEvents: control.style.pointerEvents,
+                ariaDisabled: control.getAttribute('aria-disabled'),
+                disabled: typeof nativeControl.disabled === 'boolean' ? nativeControl.disabled : null,
+            }));
+            control.setAttribute('aria-disabled', 'true');
+            // pointer-events alone still lets a focused button fire from the keyboard.
+            if (typeof nativeControl.disabled === 'boolean') {
+                nativeControl.disabled = true;
+            }
+            control.style.opacity = '0.35';
+            control.style.pointerEvents = 'none';
+        } else {
+            const saved = control.getAttribute(COMPARE_DISABLED_ATTRIBUTE);
+            if (saved === null) {
+                continue;
+            }
+            const previous = JSON.parse(saved) as {
+                opacity: string;
+                pointerEvents: string;
+                ariaDisabled: string | null;
+                disabled: boolean | null;
+            };
+            if (previous.disabled !== null) {
+                (control as HTMLButtonElement | HTMLSelectElement).disabled = previous.disabled;
+            }
+            control.style.opacity = previous.opacity;
+            control.style.pointerEvents = previous.pointerEvents;
+            if (previous.ariaDisabled === null) {
+                control.removeAttribute('aria-disabled');
+            } else {
+                control.setAttribute('aria-disabled', previous.ariaDisabled);
+            }
+            control.removeAttribute(COMPARE_DISABLED_ATTRIBUTE);
+        }
+    }
+}
+
 export function createActionButtons(deps: ActionGroupsDeps): ActionButtonsResult {
     const {
         callbacks,
@@ -53,6 +109,15 @@ export function createActionButtons(deps: ActionGroupsDeps): ActionButtonsResult
     actions.appendChild(createZoomGroup(callbacks, documentListeners, getListenerOptions, getBtnStyle));
     actions.appendChild(createFeatureGroup(callbacks, options, documentListeners));
     actions.appendChild(createExportGroup(callbacks, documentListeners));
+
+    // Compare mode overlays the graph below the toolbar. Controls that act on
+    // the hidden graph (zoom, layout, focus, lineage, export, ...) are disabled
+    // until it closes; controls marked data-compare-safe stay usable.
+    const compareModeHandler = ((event: CustomEvent) => {
+        setGraphControlsDisabledForCompare(actions, Boolean(event.detail?.active));
+    }) as EventListener;
+    document.addEventListener('compare-mode-state', compareModeHandler, listenerOptions);
+    documentListeners.push({ type: 'compare-mode-state', handler: compareModeHandler });
 
     const overflowContainer = document.createElement('div');
     overflowContainer.id = 'sql-crack-overflow-container';
@@ -118,6 +183,14 @@ export function createActionButtons(deps: ActionGroupsDeps): ActionButtonsResult
             positionDropdown();
         }
     }, listenerOptions);
+
+    attachMenuKeyboardNavigation({
+        trigger: overflowBtn,
+        menu: overflowDropdown,
+        isOpen: () => overflowDropdown.style.display === 'block',
+        close: () => { overflowDropdown.style.display = 'none'; },
+        listenerOptions,
+    });
 
     const overflowClickHandler = () => {
         overflowDropdown.style.display = 'none';
@@ -203,6 +276,14 @@ function createZoomGroup(
     zoomLevel.setAttribute('aria-atomic', 'true');
     zoomGroup.appendChild(zoomLevel);
 
+    // The label color was fixed at creation; after a theme toggle it kept the
+    // other theme's muted color (e.g. #94a3b8 on white, ~2.6:1).
+    const zoomLevelThemeHandler = ((event: CustomEvent<{ dark: boolean }>) => {
+        zoomLevel.style.color = event.detail?.dark ? '#94a3b8' : '#64748b';
+    }) as EventListener;
+    document.addEventListener('theme-change', zoomLevelThemeHandler, listenerOptions);
+    documentListeners.push({ type: 'theme-change', handler: zoomLevelThemeHandler });
+
     const zoomInBtn = createToolbarButton({
         label: '+',
         onClick: callbacks.onZoomIn,
@@ -220,17 +301,31 @@ function createZoomGroup(
         listenerOptions,
         ariaLabel: 'Fit to view',
     });
-    fitBtn.title = 'Fit to view (R)';
+    fitBtn.title = 'Fit to view (Esc)';
     fitBtn.style.borderLeft = `1px solid ${borderColor}`;
     zoomGroup.appendChild(fitBtn);
 
+    const applyHistoryButtonState = (button: HTMLButtonElement, enabled: boolean) => {
+        button.style.cursor = enabled ? 'pointer' : 'default';
+        // While compare mode has disabled the button, record the new state so
+        // closing compare restores it instead of a stale pre-compare value.
+        const compareSnapshot = button.getAttribute(COMPARE_DISABLED_ATTRIBUTE);
+        if (compareSnapshot !== null) {
+            const saved = JSON.parse(compareSnapshot) as Record<string, unknown>;
+            button.setAttribute(COMPARE_DISABLED_ATTRIBUTE, JSON.stringify({
+                ...saved,
+                disabled: !enabled,
+                opacity: enabled ? '1' : '0.45',
+            }));
+            return;
+        }
+        button.disabled = !enabled;
+        button.style.opacity = enabled ? '1' : '0.45';
+    };
+
     const updateUndoRedo = (canUndo: boolean, canRedo: boolean) => {
-        undoBtn.disabled = !canUndo;
-        redoBtn.disabled = !canRedo;
-        undoBtn.style.opacity = canUndo ? '1' : '0.45';
-        redoBtn.style.opacity = canRedo ? '1' : '0.45';
-        undoBtn.style.cursor = canUndo ? 'pointer' : 'default';
-        redoBtn.style.cursor = canRedo ? 'pointer' : 'default';
+        applyHistoryButtonState(undoBtn, canUndo);
+        applyHistoryButtonState(redoBtn, canRedo);
     };
 
     updateUndoRedo(callbacks.canUndo(), callbacks.canRedo());

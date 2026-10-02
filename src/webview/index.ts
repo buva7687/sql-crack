@@ -2,9 +2,9 @@
 import process from 'process/browser';
 (window as unknown as { process: typeof process }).process = process;
 
-import { isCancelledBatchParseResult, parseAsync, parseBatchAsync } from './parserClient';
+import { configureParseTimeout, isCancelledBatchParseResult, parseAsync, parseBatchAsync } from './parserClient';
 import { setMinimapMode, MinimapMode } from './minimapVisibility';
-import { detectDialect, setParseTimeout } from './sqlParser';
+import { detectDialect } from './sqlParser';
 import { getComponentUiColors } from './constants';
 import { BatchParseResult, LayoutType, ParseError, ParseResult, QueryLineRange, SqlDialect } from './types';
 import {
@@ -144,6 +144,8 @@ declare global {
         defaultDialect?: string;
         autoDetectDialect?: boolean;
         fileName?: string;
+        /** Source document identity (URI, else file name) for the current SQL. */
+        documentKey?: string | null;
         isPinnedView?: boolean;
         pinId?: string | null;
         viewLocation?: string;
@@ -197,11 +199,21 @@ let cursorFollowToken = 0;
 let userExplicitlySetDialect = false;
 let lastParsedDialect: SqlDialect | null = null;
 let compareModeActive = false;
+let compareRequestId = 0;
+let comparePending = false;
 let isInactiveEditor = false;
 let persistStateIntervalId: number | null = null;
 let persistStateDebounceId: number | null = null;
 let persistStateDirty = false;
+/**
+ * Document whose parse result is on screen. A refresh switches
+ * window.documentKey before the new parse finishes, and the page being
+ * replaced can still save; the host files each save under this key.
+ */
+let renderedDocumentKey: string | null = window.documentKey ?? window.fileName ?? null;
 let applyInitialStatePending = true;
+let dialectResyncAttempted = false;
+let renderedQueryIndex = 0;
 let cleanupDialectSuggestion: (() => void) | null = null;
 let hintActionListenerRegistered = false;
 const deferredQueryIndexes: Set<number> = new Set();
@@ -359,7 +371,7 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
     window.debugLogging = config.debugLogging;
 
     setMinimapMode(config.showMinimap as MinimapMode);
-    setParseTimeout(config.parseTimeoutSeconds * 1000);
+    configureParseTimeout(config.parseTimeoutSeconds * 1000);
     setRendererColorblindMode(config.colorblindMode);
 
     const requestedDefaultDialect = normalizeSqlDialect(config.defaultDialect);
@@ -600,7 +612,10 @@ function showDialectSwitchSuggestion(dialect: SqlDialect, sql: string): void {
 }
 
 function capturePersistedState(): PersistedWebviewState {
-    queryViewStates.set(currentQueryIndex, getViewState());
+    const persistedQueryViewStates = new Map(queryViewStates);
+    // The renderer may still show the previous query while a deferred target is
+    // hydrating. Record the live viewport under the query actually on screen.
+    persistedQueryViewStates.set(renderedQueryIndex, getViewState());
     return {
         version: 1,
         currentDialect,
@@ -608,7 +623,7 @@ function capturePersistedState(): PersistedWebviewState {
         userExplicitlySetDialect,
         compareModeActive,
         activeTabId: getActiveTabId(),
-        queryViewStates: Array.from(queryViewStates.entries()).map(([queryIndex, viewState]) => ({ queryIndex, viewState })),
+        queryViewStates: Array.from(persistedQueryViewStates.entries()).map(([queryIndex, viewState]) => ({ queryIndex, viewState })),
         renderer: {
             viewState: getViewState(),
             layout: getCurrentLayout(),
@@ -623,14 +638,28 @@ function capturePersistedState(): PersistedWebviewState {
     };
 }
 
-function persistUiStateNow(): void {
-    if (!window.vscodeApi) {
-        return;
+/**
+ * Whether the on-screen state may be saved. Until the saved state is restored
+ * the page shows defaults, and while a refresh loads another document the
+ * state is already reset for it but still shows the previous document's
+ * result; saving either would overwrite a document's real state.
+ */
+function canPersistUiState(): boolean {
+    return !applyInitialStatePending
+        && renderedDocumentKey === (window.documentKey ?? window.fileName ?? null);
+}
+
+/** Returns false when saving is deferred (see canPersistUiState). */
+function persistUiStateNow(): boolean {
+    if (!window.vscodeApi || !canPersistUiState()) {
+        return false;
     }
     window.vscodeApi.postMessage({
         command: 'persistUiState',
         state: capturePersistedState(),
+        documentKey: renderedDocumentKey,
     });
+    return true;
 }
 
 function schedulePersistUiState(delayMs = 150): void {
@@ -643,8 +672,9 @@ function schedulePersistUiState(delayMs = 150): void {
     }
     persistStateDebounceId = window.setTimeout(() => {
         persistStateDebounceId = null;
-        persistStateDirty = false;
-        persistUiStateNow();
+        if (persistUiStateNow()) {
+            persistStateDirty = false;
+        }
     }, delayMs);
 }
 
@@ -700,10 +730,13 @@ async function applyInitialUiStateIfAvailable(): Promise<void> {
     if (!applyInitialStatePending || !batchResult) {
         return;
     }
-    applyInitialStatePending = false;
-
     const state = parseInitialUiState(window.initialUiState);
-    if (!state || batchResult.queries.length === 0) {
+    if (!state) {
+        // Nothing (valid) to restore, so saving can start.
+        applyInitialStatePending = false;
+        return;
+    }
+    if (batchResult.queries.length === 0) {
         return;
     }
 
@@ -711,7 +744,11 @@ async function applyInitialUiStateIfAvailable(): Promise<void> {
 
     // If the restored dialect differs from the dialect used for the current parse,
     // re-visualize with the restored dialect instead of applying stale view state
-    if (state.currentDialect !== lastParsedDialect && lastParsedDialect !== null) {
+    if (state.userExplicitlySetDialect
+        && !dialectResyncAttempted
+        && state.currentDialect !== lastParsedDialect
+        && lastParsedDialect !== null) {
+        dialectResyncAttempted = true;
         currentDialect = state.currentDialect;
         const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement | null;
         if (dialectSelect) {
@@ -724,7 +761,9 @@ async function applyInitialUiStateIfAvailable(): Promise<void> {
         return;
     }
 
-    currentDialect = state.currentDialect;
+    currentDialect = state.userExplicitlySetDialect
+        ? state.currentDialect
+        : (lastParsedDialect || currentDialect);
     const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement | null;
     if (dialectSelect) {
         dialectSelect.value = currentDialect;
@@ -739,7 +778,7 @@ async function applyInitialUiStateIfAvailable(): Promise<void> {
 
     const targetIndex = Math.max(0, Math.min(state.currentQueryIndex, batchResult.queries.length - 1));
     if (targetIndex !== currentQueryIndex) {
-        await switchToQueryIndex(targetIndex);
+        await switchToQueryIndex(targetIndex, { skipSaveCurrent: true });
     }
 
     const activeQueryViewState = queryViewStates.get(currentQueryIndex) || state.renderer.viewState;
@@ -747,8 +786,23 @@ async function applyInitialUiStateIfAvailable(): Promise<void> {
         setViewState(activeQueryViewState);
     }
 
+    const restoreHistory = () => {
+        restoreLayoutHistoryState(state.renderer.layoutHistory);
+        // The history snapshot carries the viewport of the last recorded
+        // layout change. Wheel zoom and pan are not recorded, so the persisted
+        // viewport is newer; apply it last.
+        if (activeQueryViewState) {
+            setViewState(activeQueryViewState);
+        }
+        applyInitialStatePending = false;
+        if (persistStateDirty) {
+            schedulePersistUiState();
+        }
+    };
     if (state.renderer.layout !== getCurrentLayout()) {
-        switchLayout(state.renderer.layout);
+        switchLayout(state.renderer.layout, { recordHistory: false, onComplete: restoreHistory });
+    } else {
+        restoreHistory();
     }
     toggleLegend(state.renderer.legendVisible);
     toggleHints(state.renderer.hintsVisible);
@@ -760,8 +814,6 @@ async function applyInitialUiStateIfAvailable(): Promise<void> {
     } else {
         toggleFocusMode(false);
     }
-    restoreLayoutHistoryState(state.renderer.layoutHistory);
-
 }
 
 function clearDeferredQueryState(): void {
@@ -815,7 +867,11 @@ async function reparseStoredQuery(queryIndex: number, fallbackMessage: string): 
     }
 
     const parseToken = parseRequestId;
-    const query = batchResult.queries[queryIndex];
+    // visualize() bumps parseRequestId before the new result replaces
+    // batchResult, so the token alone cannot tell a hydration started during
+    // a refresh apart from one for the new result. Pin the owning batch.
+    const owningBatch = batchResult;
+    const query = owningBatch.queries[queryIndex];
     const querySql = query?.sql;
     if (!querySql) {
         deferredQueryIndexes.delete(queryIndex);
@@ -838,7 +894,7 @@ async function reparseStoredQuery(queryIndex: number, fallbackMessage: string): 
             'independent'
         );
 
-        if (!batchResult || parseToken !== parseRequestId) {
+        if (batchResult !== owningBatch || parseToken !== parseRequestId) {
             return;
         }
         // A newer full parse/interaction may intentionally cancel this
@@ -861,13 +917,13 @@ async function reparseStoredQuery(queryIndex: number, fallbackMessage: string): 
             hydratedQuery.error = query.error;
         }
 
-        const lineRange = batchResult.queryLineRanges?.[queryIndex];
+        const lineRange = owningBatch.queryLineRanges?.[queryIndex];
         if (lineRange?.startLine && lineRange.startLine > 0) {
             const lineOffset = lineRange.startLine - 1;
             applyLineOffsetToResult(hydratedQuery, lineOffset);
         }
 
-        batchResult.queries[queryIndex] = hydratedQuery;
+        replaceQueryResult(owningBatch, queryIndex, hydratedQuery);
         deferredQueryIndexes.delete(queryIndex);
     })();
 
@@ -875,8 +931,60 @@ async function reparseStoredQuery(queryIndex: number, fallbackMessage: string): 
     try {
         await hydrationPromise;
     } finally {
-        hydrationPromises.delete(queryIndex);
+        // A newer batch may have started its own hydration for this index.
+        if (hydrationPromises.get(queryIndex) === hydrationPromise) {
+            hydrationPromises.delete(queryIndex);
+        }
     }
+}
+
+/**
+ * Replace one query's result in place (hydration, recovery) and keep the
+ * batch's error totals and the toolbar error badge in step with it, using the
+ * same definitions as parseSqlBatch: a query with `error` is failed.
+ */
+function replaceQueryResult(batch: BatchParseResult, queryIndex: number, result: ParseResult): void {
+    batch.queries[queryIndex] = result;
+    const otherErrors = (batch.parseErrors || []).filter(error => error.queryIndex !== queryIndex);
+    if (result.error) {
+        const existing = batch.parseErrors?.find(error => error.queryIndex === queryIndex);
+        const querySql = result.sql || '';
+        otherErrors.push(existing ?? {
+            queryIndex,
+            line: batch.queryLineRanges?.[queryIndex]?.startLine,
+            message: result.error,
+            sql: querySql.substring(0, 500) + (querySql.length > 500 ? '...' : ''),
+        });
+        otherErrors.sort((a, b) => a.queryIndex - b.queryIndex);
+    }
+    batch.parseErrors = otherErrors.length > 0 ? otherErrors : undefined;
+    batch.errorCount = batch.queries.filter(query => query.error).length;
+    batch.successCount = batch.queries.length - batch.errorCount;
+    if (batch === batchResult) {
+        syncErrorBadge();
+        // A background hydration can settle after the user switches away;
+        // its switch then skips rendering, but the tab status still changed.
+        updateBatchTabsUI();
+    }
+}
+
+function syncErrorBadge(): void {
+    const owningBatch = batchResult;
+    if (!owningBatch || !owningBatch.errorCount) {
+        clearErrorBadge();
+        return;
+    }
+    const errorDetails = (owningBatch.parseErrors || []).map(e => {
+        const lineRange = owningBatch.queryLineRanges?.[e.queryIndex];
+        const sourceLine = extractSourceLineFromParseError(e, lineRange);
+        return {
+            queryIndex: e.queryIndex,
+            message: e.message.length > 100 ? e.message.substring(0, 100) + '...' : e.message,
+            line: e.line,
+            sourceLine
+        };
+    });
+    updateErrorBadge(owningBatch.errorCount, errorDetails);
 }
 
 function recoverQueryVisualization(queryIndex: number): void {
@@ -885,7 +993,8 @@ function recoverQueryVisualization(queryIndex: number): void {
     }
 
     const recoverToken = parseRequestId;
-    const querySql = batchResult.queries[queryIndex]?.sql || '';
+    const owningBatch = batchResult;
+    const querySql = owningBatch.queries[queryIndex]?.sql || '';
     const fallbackMessage = deferredQueryIndexes.has(queryIndex)
         ? 'Failed to hydrate deferred query'
         : 'Failed to recover query visualization';
@@ -893,15 +1002,15 @@ function recoverQueryVisualization(queryIndex: number): void {
     const loadingToken = beginQueryLoading();
     void reparseStoredQuery(queryIndex, fallbackMessage)
         .catch((error) => {
-            if (!batchResult || parseRequestId !== recoverToken) {
+            if (batchResult !== owningBatch || parseRequestId !== recoverToken) {
                 return;
             }
             const message = error instanceof Error ? error.message : fallbackMessage;
-            batchResult.queries[queryIndex] = buildFallbackQueryErrorResult(querySql, message);
+            replaceQueryResult(owningBatch, queryIndex, buildFallbackQueryErrorResult(querySql, message));
             deferredQueryIndexes.delete(queryIndex);
         })
         .finally(() => {
-            if (parseRequestId !== recoverToken || currentQueryIndex !== queryIndex) {
+            if (batchResult !== owningBatch || parseRequestId !== recoverToken || currentQueryIndex !== queryIndex) {
                 return;
             }
             endQueryLoading(loadingToken);
@@ -988,7 +1097,7 @@ function setupVSCodeMessageListener(): void {
             const message = event.data;
             switch (message.command) {
                 case 'refresh':
-                    handleRefresh(message.sql, message.options);
+                    handleRefresh(message.sql, message.options, message.documentKey);
                     break;
                 case 'cursorPosition':
                     void handleCursorPosition(message.line);
@@ -1007,8 +1116,16 @@ function setupVSCodeMessageListener(): void {
                     syncRefreshButtonState();
                     break;
                 case 'viewLocationOptions':
-                    break;
                 case 'pinCreated':
+                    // The host sends the current pin list after pin/unpin so
+                    // Compare picks its baseline from real pins, not the list
+                    // captured when this page was built.
+                    if (Array.isArray(message.pinnedTabs)) {
+                        window.persistedPinnedTabs = message.pinnedTabs;
+                        document.dispatchEvent(new CustomEvent('pinned-tabs-changed', {
+                            detail: { pins: message.pinnedTabs },
+                        }));
+                    }
                     break;
             }
         } catch (err) {
@@ -1017,8 +1134,27 @@ function setupVSCodeMessageListener(): void {
     });
 }
 
-function handleRefresh(sql: string, options: { dialect: string; fileName: string }): void {
+function handleRefresh(
+    sql: string,
+    options: { dialect: string; fileName: string },
+    documentKey?: string | null
+): void {
     window.initialSqlCode = sql;
+    // Refreshes of the same document keep the selected query (visualize()
+    // clamps it to the new statement count); a different document starts at Q1.
+    const nextDocumentKey = documentKey ?? options.fileName ?? null;
+    if (nextDocumentKey !== (window.documentKey ?? window.fileName ?? null)) {
+        // Save the outgoing document's state before resetting it for the new
+        // one; saves then pause until the new document's result is on screen.
+        if (persistStateDebounceId !== null) {
+            window.clearTimeout(persistStateDebounceId);
+            persistStateDebounceId = null;
+        }
+        persistUiStateNow();
+        currentQueryIndex = 0;
+    }
+    window.documentKey = nextDocumentKey;
+    window.fileName = options.fileName;
     if (!userExplicitlySetDialect) {
         currentDialect = options.dialect as SqlDialect;
     }
@@ -1134,8 +1270,9 @@ function init(): void {
     initRenderer(container);
     setRendererColorblindMode((window.colorblindMode as ColorblindMode) || 'off');
 
-    // R key triggers a full re-visualize (same as toolbar refresh)
-    document.addEventListener('sql-crack-reset-view', () => {
+    // R key / command bar trigger a full re-visualize (same as toolbar refresh).
+    // Fit-to-view (Escape, ⊡) is handled in the renderer and never re-parses.
+    document.addEventListener('sql-crack-refresh-visualization', () => {
         if (window.vscodeApi) {
             window.vscodeApi.postMessage({ command: 'requestRefresh' });
         } else {
@@ -1152,7 +1289,7 @@ function init(): void {
     setMinimapMode(minimapMode);
 
     // Apply configurable parse timeout
-    setParseTimeout(runtimeConfig.parseTimeoutSeconds * 1000);
+    configureParseTimeout(runtimeConfig.parseTimeoutSeconds * 1000);
 
     // Create toolbar with callbacks
     const toolbarResult = createToolbar(container, createToolbarCallbacks(), {
@@ -1182,8 +1319,14 @@ function init(): void {
     // Keyboard shortcuts for query navigation
     document.addEventListener('keydown', (e) => {
         // Don't trigger when typing in input fields
-        const isInputFocused = document.activeElement?.tagName === 'INPUT' ||
-                               document.activeElement?.tagName === 'TEXTAREA';
+        const activeElement = document.activeElement as HTMLElement | null;
+        const isMenuFocused = typeof activeElement?.closest === 'function'
+            && activeElement.closest('[role="menu"], [role="listbox"]') !== null;
+        const isInputFocused = activeElement?.tagName === 'INPUT'
+            || activeElement?.tagName === 'TEXTAREA'
+            || activeElement?.tagName === 'SELECT'
+            || activeElement?.isContentEditable === true
+            || isMenuFocused;
         if (isInputFocused) { return; }
 
         // Skip if modifier keys are pressed (except for these shortcuts)
@@ -1217,14 +1360,18 @@ function init(): void {
         window.clearInterval(persistStateIntervalId);
     }
     persistStateIntervalId = window.setInterval(() => {
-        if (batchResult && persistStateDirty) {
+        if (batchResult && persistStateDirty && persistUiStateNow()) {
             persistStateDirty = false;
-            persistUiStateNow();
         }
     }, 1500);
 
     // Mark persist dirty when renderer-side keyboard shortcuts mutate view state directly.
     document.addEventListener('layout-state-changed', () => {
+        persistStateDirty = true;
+    });
+    // Wheel zoom, pan, and pinch change the viewport without a layout change;
+    // the interval above saves them instead of waiting for beforeunload.
+    document.addEventListener('view-state-changed', () => {
         persistStateDirty = true;
     });
 
@@ -1292,6 +1439,12 @@ function resolveCompareBaseline(): { label: string; sql: string; dialect: SqlDia
 }
 
 async function toggleCompareMode(): Promise<void> {
+    if (comparePending) {
+        // A second click cancels the in-flight baseline parse.
+        compareRequestId++;
+        comparePending = false;
+        return;
+    }
     if (isCompareViewActive()) {
         hideCompareView();
         setCompareModeState(false);
@@ -1313,40 +1466,50 @@ async function toggleCompareMode(): Promise<void> {
         return;
     }
 
-    const currentQuery = batchResult.queries[currentQueryIndex];
-    if (!currentQuery?.sql) {
-        return;
-    }
-
-    const compareToken = parseRequestId;
+    const compareToken = ++compareRequestId;
+    const parseToken = parseRequestId;
     const compareQueryIndex = currentQueryIndex;
-    const baselineResult = await parseAsync(baseline.sql, baseline.dialect, {
-        allowDialectFallback: isDialectAutoDetectionEnabled(),
-    });
-    if (!batchResult || compareToken !== parseRequestId || currentQueryIndex !== compareQueryIndex) {
-        return;
+    const owningBatch = batchResult;
+    comparePending = true;
+    try {
+        // The visible query can still be a deferred placeholder. Wait for its
+        // existing hydration before capturing the graph to diff.
+        if (deferredQueryIndexes.has(compareQueryIndex) || querySwitchPromises.has(compareQueryIndex)) {
+            await switchToQueryIndex(compareQueryIndex);
+        }
+        if (batchResult !== owningBatch || parseToken !== parseRequestId
+            || currentQueryIndex !== compareQueryIndex || compareToken !== compareRequestId) {
+            return;
+        }
+        const currentQuery = owningBatch.queries[compareQueryIndex];
+        if (!currentQuery?.sql) {
+            return;
+        }
+
+        const baselineResult = await parseAsync(baseline.sql, baseline.dialect, {
+            allowDialectFallback: isDialectAutoDetectionEnabled(),
+        }, 'independent');
+        if (batchResult !== owningBatch || parseToken !== parseRequestId
+            || currentQueryIndex !== compareQueryIndex || compareToken !== compareRequestId) {
+            return;
+        }
+        const currentTitle = owningBatch.queries.length > 1
+            ? `Current • Q${compareQueryIndex + 1}`
+            : (window.fileName || 'Current query');
+
+        showCompareView({
+            container: root,
+            left: { label: baseline.label, result: baselineResult },
+            right: { label: currentTitle, result: currentQuery },
+            isDarkTheme: isDarkTheme(),
+            onClose: () => { setCompareModeState(false); },
+        });
+        setCompareModeState(true);
+    } finally {
+        if (compareToken === compareRequestId) {
+            comparePending = false;
+        }
     }
-    const currentTitle = batchResult.queries.length > 1
-        ? `Current • Q${currentQueryIndex + 1}`
-        : (window.fileName || 'Current query');
-
-    showCompareView({
-        container: root,
-        left: {
-            label: baseline.label,
-            result: baselineResult,
-        },
-        right: {
-            label: currentTitle,
-            result: currentQuery,
-        },
-        isDarkTheme: isDarkTheme(),
-        onClose: () => {
-            setCompareModeState(false);
-        },
-    });
-
-    setCompareModeState(true);
 }
 
 function createToolbarCallbacks(): ToolbarCallbacks {
@@ -1398,6 +1561,8 @@ function createToolbarCallbacks(): ToolbarCallbacks {
             toggleColumnFlows(show);
             schedulePersistUiState();
         },
+        isFocusModeEnabled,
+        isColumnFlowsVisible,
         onToggleHints: (show?: boolean) => {
             toggleHints(show);
             schedulePersistUiState();
@@ -1463,6 +1628,7 @@ function createToolbarCallbacks(): ToolbarCallbacks {
             }
         },
         onUnpinTab: (pinId: string) => {
+            window.persistedPinnedTabs = (window.persistedPinnedTabs || []).filter(pin => pin.id !== pinId);
             if (window.vscodeApi) {
                 window.vscodeApi.postMessage({
                     command: 'unpinTab',
@@ -1483,6 +1649,9 @@ function createToolbarCallbacks(): ToolbarCallbacks {
 
 async function visualize(sql: string): Promise<void> {
     const requestId = ++parseRequestId;
+    const documentKeyForParse = window.documentKey ?? window.fileName ?? null;
+    // Error and empty results below have a single entry, so they fall back to Q1.
+    let retainedQueryIndex = 0;
     cancelQueryLoading();
 
     // Clear view states when loading new SQL
@@ -1513,6 +1682,7 @@ async function visualize(sql: string): Promise<void> {
                 complexityScore: 0
             }
         };
+        renderedDocumentKey = documentKeyForParse;
         currentQueryIndex = 0;
         updateBatchTabsUI();
         renderCurrentQuery();
@@ -1563,12 +1733,18 @@ async function visualize(sql: string): Promise<void> {
                 allowDialectFallback: autoDetectDialect,
             }
         );
+        if (isCancelledBatchParseResult(result)) {
+            return;
+        }
         const t1 = performance.now();
         debugLog(`[SQL Crack] Parse completed in ${(t1 - t0).toFixed(1)}ms (${result.queries.length} queries, dialect: ${dialectForParse})`);
         if (requestId !== parseRequestId) {
             return;
         }
-        compactBatchResultMemory(result, 0, runtimeConfig.deferredQueryThreshold);
+        // Keep the query the user is on (including a switch made while this
+        // parse ran), clamped to the new statement count.
+        retainedQueryIndex = clampQueryIndex(currentQueryIndex, result.queries.length);
+        compactBatchResultMemory(result, retainedQueryIndex, runtimeConfig.deferredQueryThreshold);
         batchResult = result;
     } catch (error) {
         if (requestId !== parseRequestId) {
@@ -1599,6 +1775,8 @@ async function visualize(sql: string): Promise<void> {
             hideGlobalLoading();
         }
     }
+    // Stale and cancelled parses returned above, so this result is on screen.
+    renderedDocumentKey = documentKeyForParse;
 
     // Filter out dead column hints/warnings if the setting is disabled
     // This addresses false positives where columns are used by the application layer
@@ -1625,6 +1803,10 @@ async function visualize(sql: string): Promise<void> {
         const message = hasExecutableSql(sql)
             ? 'No SQL statements could be parsed from this input.'
             : 'No executable SQL found. File appears to contain only comments or whitespace.';
+        // Drop the previous result's tabs; they would stay clickable and
+        // report "N ok" beside this error.
+        currentQueryIndex = 0;
+        updateBatchTabsUI();
         updateErrorBadge(1, [{ queryIndex: 0, message }]);
         render(buildFallbackQueryErrorResult(sql, message));
         schedulePersistUiState();
@@ -1632,19 +1814,8 @@ async function visualize(sql: string): Promise<void> {
     }
 
     // Update error badge in toolbar if there are parse errors
+    syncErrorBadge();
     if (batchResult && batchResult.errorCount && batchResult.errorCount > 0) {
-        const errorDetails = batchResult.parseErrors?.map(e => {
-            const lineRange = batchResult?.queryLineRanges?.[e.queryIndex];
-            const sourceLine = extractSourceLineFromParseError(e, lineRange);
-            return {
-                queryIndex: e.queryIndex,
-                message: e.message.length > 100 ? e.message.substring(0, 100) + '...' : e.message,
-                line: e.line,
-                sourceLine
-            };
-        });
-        updateErrorBadge(batchResult.errorCount, errorDetails);
-
         const suggestedDialect = batchResult.parseErrors
             ?.map(error => getSuggestedDialectFromMessage(error.message))
             .find((dialect): dialect is SqlDialect => Boolean(dialect)) ?? null;
@@ -1652,15 +1823,21 @@ async function visualize(sql: string): Promise<void> {
             showDialectSwitchSuggestion(suggestedDialect, sql);
         }
     } else {
-        clearErrorBadge();
         clearDialectSwitchSuggestion();
     }
 
-    currentQueryIndex = 0;
+    currentQueryIndex = clampQueryIndex(retainedQueryIndex, batchResult?.queries.length ?? 0);
     updateBatchTabsUI();
     renderCurrentQuery();
     await applyInitialUiStateIfAvailable();
     schedulePersistUiState();
+}
+
+function clampQueryIndex(index: number, queryCount: number): number {
+    if (!Number.isInteger(index) || index < 0 || queryCount <= 0) {
+        return 0;
+    }
+    return Math.min(index, queryCount - 1);
 }
 
 function renderCurrentQuery(): void {
@@ -1683,20 +1860,36 @@ function renderCurrentQuery(): void {
     }
 
     render(query);
+    renderedQueryIndex = currentQueryIndex;
     schedulePersistUiState();
 }
 
 /**
  * Switch to a different query index, preserving view state
  */
-async function switchToQueryIndex(newIndex: number): Promise<void> {
+async function switchToQueryIndex(newIndex: number, options: { skipSaveCurrent?: boolean } = {}): Promise<void> {
     const existingSwitch = querySwitchPromises.get(newIndex);
     if (existingSwitch) {
+        // The query is still hydrating from an earlier request. Make it current
+        // again now, as a fresh switch would, so the in-flight switch renders it
+        // when hydration settles. Re-rendering after the await instead would
+        // override any newer switch the user made in the meantime.
+        if (currentQueryIndex !== newIndex) {
+            enterQueryIndex(newIndex, options);
+            updateBatchTabsUI();
+            const loadingToken = beginQueryLoading();
+            try {
+                await existingSwitch;
+            } finally {
+                endQueryLoading(loadingToken);
+            }
+            return;
+        }
         await existingSwitch;
         return;
     }
 
-    const switchPromise = performSwitchToQueryIndex(newIndex);
+    const switchPromise = performSwitchToQueryIndex(newIndex, options);
     querySwitchPromises.set(newIndex, switchPromise);
     try {
         await switchPromise;
@@ -1707,40 +1900,53 @@ async function switchToQueryIndex(newIndex: number): Promise<void> {
     }
 }
 
-async function performSwitchToQueryIndex(newIndex: number): Promise<void> {
+/** Leave the current query and make `newIndex` current, before any rendering. */
+function enterQueryIndex(newIndex: number, options: { skipSaveCurrent?: boolean }): void {
+    if (newIndex !== currentQueryIndex && comparePending) {
+        compareRequestId++;
+        comparePending = false;
+    }
+
+    // Save current view state before switching
+    if (!options.skipSaveCurrent) {
+        queryViewStates.set(currentQueryIndex, getViewState());
+    }
+
+    currentQueryIndex = newIndex;
+    hideCompareView();
+    setCompareModeState(false);
+    clearUndoHistory();
+}
+
+async function performSwitchToQueryIndex(newIndex: number, options: { skipSaveCurrent?: boolean } = {}): Promise<void> {
     // Number.isInteger also rejects NaN, which would otherwise slip past both
     // range comparisons (every NaN comparison is false) and leave
     // currentQueryIndex as NaN, crashing the next renderCurrentQuery().
     if (!batchResult || !Number.isInteger(newIndex) || newIndex < 0 || newIndex >= batchResult.queries.length) {
         return;
     }
-
-    // Save current view state before switching
-    queryViewStates.set(currentQueryIndex, getViewState());
-
-    // Switch to new query
-    currentQueryIndex = newIndex;
-    hideCompareView();
-    setCompareModeState(false);
-    clearUndoHistory();
+    enterQueryIndex(newIndex, options);
 
     if (deferredQueryIndexes.has(newIndex)) {
         const loadingToken = beginQueryLoading();
         const hydrateToken = parseRequestId;
+        const owningBatch = batchResult;
         try {
             await hydrateQueryIfNeeded(newIndex);
         } catch (error) {
-            // Only mutate if this is still the same parse cycle
-            if (batchResult && parseRequestId === hydrateToken) {
-                const querySql = batchResult.queries[newIndex]?.sql || '';
+            // Only mutate if this is still the same parse cycle and result
+            if (batchResult === owningBatch && parseRequestId === hydrateToken) {
+                const querySql = owningBatch.queries[newIndex]?.sql || '';
                 const msg = error instanceof Error ? error.message : 'Failed to load query details';
-                batchResult.queries[newIndex] = buildFallbackQueryErrorResult(querySql, msg);
+                replaceQueryResult(owningBatch, newIndex, buildFallbackQueryErrorResult(querySql, msg));
+                deferredQueryIndexes.delete(newIndex);
             }
-            deferredQueryIndexes.delete(newIndex);
         } finally {
             endQueryLoading(loadingToken);
         }
-        if (currentQueryIndex !== newIndex) {
+        // A refresh replaced the result while this query was loading; the
+        // new result's visualize() owns rendering from here.
+        if (currentQueryIndex !== newIndex || batchResult !== owningBatch) {
             return;
         }
     } else {

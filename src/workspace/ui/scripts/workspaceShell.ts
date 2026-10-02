@@ -107,19 +107,34 @@ export function getWorkspaceShellScriptFragment(): string {
                 return;
             }
 
+            // Node navigation keys belong to the graph. Only take Tab when focus
+            // is on the graph itself, and leave Enter/arrows alone while a
+            // toolbar button, tab, or menu item has focus; otherwise keyboard
+            // users could never reach the page controls.
+            const graphContainer = document.getElementById('graph-container');
+            const focusInGraph = !!(graphContainer && activeEl && (activeEl === graphContainer || graphContainer.contains(activeEl)));
+            const focusOnPage = !activeEl || activeEl === document.body || activeEl === document.documentElement;
+
             // Tab: Cycle through nodes in visual left-to-right, top-to-bottom order
             if (e.key === 'Tab') {
-                e.preventDefault();
+                if (!focusInGraph) return;
                 const allNodes = getNodesSortedByPosition();
                 if (allNodes.length === 0) return;
                 const currentIdx = selectedNodeId
                     ? allNodes.findIndex(function(n) { return n.getAttribute('data-id') === selectedNodeId; })
                     : -1;
-                const nextIdx = e.shiftKey
-                    ? (currentIdx <= 0 ? allNodes.length - 1 : currentIdx - 1)
-                    : (currentIdx + 1) % allNodes.length;
+                // Let focus leave the graph after the last node (or before the first).
+                if ((!e.shiftKey && currentIdx === allNodes.length - 1) || (e.shiftKey && currentIdx <= 0)) {
+                    return;
+                }
+                e.preventDefault();
+                const nextIdx = e.shiftKey ? currentIdx - 1 : currentIdx + 1;
                 updateSelectionPanel(allNodes[nextIdx]);
                 scrollNodeIntoView(allNodes[nextIdx]);
+                return;
+            }
+
+            if (!focusInGraph && !focusOnPage) {
                 return;
             }
 
@@ -166,13 +181,13 @@ export function getWorkspaceShellScriptFragment(): string {
                 return;
             }
 
-            // Enter: Open file for selected node
+            // Enter: Run the selected node's primary action.
             if (e.key === 'Enter') {
                 if (!selectedNodeId) return;
                 const sel = document.querySelector('.node[data-id="' + CSS.escape(selectedNodeId) + '"]');
                 if (sel) {
-                    const fp = sel.getAttribute('data-filepath');
-                    if (fp) openFile(fp);
+                    e.preventDefault();
+                    activatePrimaryGraphNode(sel);
                 }
                 return;
             }
@@ -286,7 +301,46 @@ export function getWorkspaceShellScriptFragment(): string {
 
         function switchGraphModeFromAction(mode) {
             if (!mode) return;
+            if (typeof clearPathState === 'function') { clearPathState(); }
             vscode.postMessage({ command: 'switchGraphMode', mode });
+        }
+
+        function showTablesForFile(filePath) {
+            if (!filePath) return;
+            vscode.postMessage({ command: 'showFileTables', filePath });
+        }
+
+        function activatePrimaryGraphNode(node) {
+            if (!node) return;
+            const nodeId = node.getAttribute('data-id') || '';
+            const nodeLabel = node.getAttribute('data-label') || nodeId;
+            const nodeType = node.getAttribute('data-type') || '';
+            const filePath = node.getAttribute('data-filepath') || '';
+
+            if (nodeType === 'file') {
+                showTablesForFile(filePath);
+                return;
+            }
+            if (!nodeId) return;
+
+            switchToView('lineage', false, nodeLabel, nodeType);
+            if (lineageTitle) {
+                lineageTitle.textContent = 'Data Lineage';
+            }
+            if (lineageContent) {
+                lineageContent.innerHTML = '<div class="loading-container"><div class="loading-spinner"></div><div class="loading-text">Loading lineage...</div></div>';
+            }
+            postWorkspaceMessage({
+                command: 'getLineageGraph',
+                nodeId,
+                nodeLabel,
+                nodeType,
+                direction: 'both',
+                depth: lineageDepth
+            });
+            if (typeof trackUxEvent === 'function') {
+                trackUxEvent('graph_primary_action', { nodeType: nodeType || 'unknown' });
+            }
         }
 
         function getSelectedGraphNodeContext() {
@@ -545,21 +599,7 @@ export function getWorkspaceShellScriptFragment(): string {
                     if (!filePath) {
                         break;
                     }
-                    if (typeof trackUxEvent === 'function') {
-                        trackUxEvent('graph_show_file_tables', { fromMode: currentGraphMode });
-                    }
-                    const queryValue = basenameFromPath(filePath) || filePath;
-                    switchGraphModeFromAction('tables');
-                    setTimeout(() => {
-                        if (searchInput) {
-                            searchInput.value = queryValue;
-                            if (typeof performSearch === 'function') {
-                                performSearch();
-                            } else {
-                                searchInput.dispatchEvent(new Event('input', { bubbles: true }));
-                            }
-                        }
-                    }, 140);
+                    showTablesForFile(filePath);
                     break;
                 }
                 case 'open-file': {

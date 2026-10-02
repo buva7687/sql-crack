@@ -21,6 +21,25 @@ export interface ToggleFullscreenOptions {
 }
 
 let fullscreenMouseMoveHandler: ((event: MouseEvent) => void) | null = null;
+
+/**
+ * Fullscreen hides chrome with an attribute + `!important` rule instead of
+ * snapshotting and restoring inline `display`. Panels that toggle their own
+ * display while fullscreen (stats, breadcrumbs, query tabs, error badge) then
+ * stay hidden until exit and come back in their current state, not a stale one.
+ */
+export const FULLSCREEN_HIDDEN_ATTRIBUTE = 'data-sql-crack-fullscreen-hidden';
+const FULLSCREEN_HIDDEN_STYLE_ID = 'sql-crack-fullscreen-hidden-style';
+
+function ensureFullscreenHiddenStyle(): void {
+    if (document.getElementById(FULLSCREEN_HIDDEN_STYLE_ID)) {
+        return;
+    }
+    const style = document.createElement('style');
+    style.id = FULLSCREEN_HIDDEN_STYLE_ID;
+    style.textContent = `[${FULLSCREEN_HIDDEN_ATTRIBUTE}] { display: none !important; }`;
+    document.head.appendChild(style);
+}
 let fullscreenFadeTimeout: ReturnType<typeof setTimeout> | null = null;
 
 export function toggleFullscreen(options: ToggleFullscreenOptions): boolean {
@@ -85,12 +104,9 @@ export function toggleFullscreen(options: ToggleFullscreenOptions): boolean {
         html.dataset.originalWidth = html.style.width || '';
         html.dataset.originalHeight = html.style.height || '';
 
+        ensureFullscreenHiddenStyle();
         uiElements.forEach(el => {
-            if (!el) {
-                return;
-            }
-            (el as HTMLElement).dataset.originalDisplay = (el as HTMLElement).style.display || '';
-            (el as HTMLElement).style.display = 'none';
+            el?.setAttribute(FULLSCREEN_HIDDEN_ATTRIBUTE, '');
         });
 
         rootElement.style.position = 'fixed';
@@ -130,11 +146,8 @@ export function toggleFullscreen(options: ToggleFullscreenOptions): boolean {
         onRequestFullscreen?.(false);
         removeFullscreenOverlays();
 
-        uiElements.forEach(el => {
-            if (el && (el as HTMLElement).dataset.originalDisplay !== undefined) {
-                (el as HTMLElement).style.display = (el as HTMLElement).dataset.originalDisplay || '';
-                delete (el as HTMLElement).dataset.originalDisplay;
-            }
+        document.querySelectorAll(`[${FULLSCREEN_HIDDEN_ATTRIBUTE}]`).forEach(el => {
+            el.removeAttribute(FULLSCREEN_HIDDEN_ATTRIBUTE);
         });
 
         rootElement.style.position = rootElement.dataset.originalPosition || '';

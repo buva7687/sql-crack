@@ -1,6 +1,8 @@
-import { getDollarQuoteDelimiterAt, isHashTempTableIdentifierAt } from '../../../shared/stringUtils';
+import { dialectSupportsBackslashEscapes, dialectSupportsHashComments, getDollarQuoteDelimiterAt, isHashTempTableIdentifierAt, isPostgresJsonPathOperatorAt } from '../../../shared/stringUtils';
+import type { SqlDialect } from '../../types/parser';
+import { maskStringsAndComments } from '../dialects/preprocessing';
 
-export function stripLeadingComments(sql: string): string {
+export function stripLeadingComments(sql: string, nestedBlockComments = true): string {
     let result = sql.trim();
     let changed = true;
 
@@ -20,7 +22,7 @@ export function stripLeadingComments(sql: string): string {
             let blockDepth = 1;
             let endIdx = 2;
             while (endIdx < result.length && blockDepth > 0) {
-                if (result[endIdx] === '/' && result[endIdx + 1] === '*') {
+                if (nestedBlockComments && result[endIdx] === '/' && result[endIdx + 1] === '*') {
                     blockDepth++;
                     endIdx += 2;
                 } else if (result[endIdx] === '*' && result[endIdx + 1] === '/') {
@@ -50,10 +52,36 @@ export function stripLeadingComments(sql: string): string {
     return result;
 }
 
-function scanSqlStatements(sql: string, onStatement: (statement: string) => void): void {
+/** A trimmed statement and the source offset of its first character. */
+export interface SqlStatementSpan {
+    sql: string;
+    start: number;
+}
+
+function scanSqlStatements(
+    sql: string,
+    onStatement: (statement: string, startOffset: number) => void,
+    dialect: SqlDialect = 'MySQL'
+): void {
+    // `current` always holds the contiguous source text sql[currentStart, i),
+    // so each emitted statement can report its exact source offset.
     let current = '';
+    let currentStart = 0;
+    // Only executable text prevents a DELIMITER directive. Comments may
+    // precede it, and this flag avoids rescanning a growing statement.
+    let currentHasCode = false;
+    let routineHeaderOpen = false;
+    let oracleDeclarationOpen = false;
+    const startCurrentAt = (offset: number): void => {
+        currentStart = offset;
+        currentHasCode = false;
+        routineHeaderOpen = false;
+        oracleDeclarationOpen = false;
+    };
     let inString = false;
     let stringChar = '';
+    let stringAllowsBackslashEscapes = false;
+    let inBracketIdentifier = false;
     let inLineComment = false;
     let blockCommentDepth = 0;
     let depth = 0;
@@ -61,9 +89,14 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
     // Track procedural blocks
     let beginEndDepth = 0;
     let caseDepth = 0;
+    let closingCaseKeywordAt = -1;
     let inDollarQuotes = false;
     let dollarQuoteTag = '';
     let customDelimiter = null as string | null;
+    // `#` is an operator in PostgreSQL (`#`, `#>`, `#>>`, `#-`) and has no
+    // comment meaning outside MySQL-family dialects.
+    const hashStartsComment = dialectSupportsHashComments(dialect);
+    const nestedBlockComments = dialect !== 'MySQL' && dialect !== 'MariaDB';
 
     const isIdentifierChar = (ch: string | undefined): boolean => {
         if (!ch) { return false; }
@@ -83,7 +116,7 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
                 return false;
             }
         }
-        if (idx > 0 && isIdentifierChar(sql[idx - 1])) { return false; }
+        if (idx > 0 && (isIdentifierChar(sql[idx - 1]) || /[@$#.]/.test(sql[idx - 1]))) { return false; }
         const afterIdx = idx + keyword.length;
         if (afterIdx < sql.length && isIdentifierChar(sql[afterIdx])) { return false; }
         return true;
@@ -100,10 +133,98 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
         return false;
     };
 
+    const isLineCommentAt = (offset: number): boolean =>
+        sql.startsWith('--', offset)
+        || (hashStartsComment && sql[offset] === '#'
+            && !isPostgresJsonPathOperatorAt(sql, offset)
+            && !isHashTempTableIdentifierAt(sql, offset));
+
+    /**
+     * `SELECT 1; -- note` attaches `-- note` to the next statement. When a
+     * statement starts on the same line as earlier source text, skip comments
+     * that trail that text so the statement (and its line range) begins on its
+     * own line instead of overlapping the previous statement.
+     */
+    const skipCommentsTrailingPreviousStatement = (start: number, end: number): number => {
+        const lineStart = sql.lastIndexOf('\n', start - 1) + 1;
+        if (!sql.slice(lineStart, start).trim()) {
+            return start;
+        }
+        let position = start;
+        while (position < end) {
+            if (isLineCommentAt(position)) {
+                const newline = sql.indexOf('\n', position);
+                if (newline === -1 || newline >= end) {
+                    return start;
+                }
+                position = newline + 1;
+                while (position < end && /\s/.test(sql[position])) {
+                    position++;
+                }
+                return position;
+            }
+            if (sql.startsWith('/*', position)) {
+                let depth = 1;
+                position += 2;
+                while (position < end && depth > 0) {
+                    if (sql.startsWith('/*', position)) {
+                        depth++;
+                        position += 2;
+                    } else if (sql.startsWith('*/', position)) {
+                        depth--;
+                        position += 2;
+                    } else {
+                        position++;
+                    }
+                }
+                while (position < end && (sql[position] === ' ' || sql[position] === '\t')) {
+                    position++;
+                }
+                if (sql[position] === '\r' || sql[position] === '\n') {
+                    while (position < end && /\s/.test(sql[position])) {
+                        position++;
+                    }
+                    return position;
+                }
+                continue;
+            }
+            // Code shares the line with the previous statement; keep it.
+            return start;
+        }
+        return start;
+    };
+
+    const flushStatement = (): void => {
+        const trimmed = current.trim();
+        if (trimmed) {
+            const withoutComments = stripLeadingComments(trimmed, nestedBlockComments).trim();
+            if (withoutComments) {
+                const rawStart = currentStart + (current.length - current.trimStart().length);
+                const rawEnd = rawStart + trimmed.length;
+                const start = skipCommentsTrailingPreviousStatement(rawStart, rawEnd);
+                onStatement(start === rawStart ? trimmed : sql.slice(start, rawEnd), start);
+            }
+        }
+    };
+
     for (let i = 0; i < sql.length; i++) {
         const char = sql[i];
         const nextChar = i < sql.length - 1 ? sql[i + 1] : '';
         const prevChar = i > 0 ? sql[i - 1] : '';
+        const atStatementStart = !currentHasCode;
+
+        if (inBracketIdentifier) {
+            current += char;
+            if (char === ']') {
+                if (nextChar === ']') {
+                    current += nextChar;
+                    i++;
+                } else {
+                    inBracketIdentifier = false;
+                }
+            }
+            continue;
+        }
 
         if (inLineComment) {
             current += char;
@@ -115,7 +236,7 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
 
         if (blockCommentDepth > 0) {
             current += char;
-            if (char === '/' && nextChar === '*') {
+            if (nestedBlockComments && char === '/' && nextChar === '*') {
                 current += '*';
                 i++;
                 blockCommentDepth++;
@@ -124,6 +245,18 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
                 i++;
                 blockCommentDepth--;
             }
+            continue;
+        }
+
+        // A custom DELIMITER (//, $$, ;;, ...) must win over comment and
+        // dollar-quote detection, otherwise `END //` opens a line comment and
+        // `END $$` opens a dollar-quoted body, merging the rest of the script.
+        if (customDelimiter && !inString && !inDollarQuotes && depth === 0 && beginEndDepth === 0
+            && sql.startsWith(customDelimiter, i)) {
+            flushStatement();
+            current = '';
+            i += customDelimiter.length - 1;
+            startCurrentAt(i + 1);
             continue;
         }
 
@@ -141,14 +274,16 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
                 i++;
                 continue;
             }
-            if (char === '#' && !isHashTempTableIdentifierAt(sql, i)) {
+            if (char === '#' && hashStartsComment
+                && !isPostgresJsonPathOperatorAt(sql, i)
+                && !isHashTempTableIdentifierAt(sql, i)) {
                 inLineComment = true;
                 current += char;
                 continue;
             }
         }
 
-        if (!inString && char === '$') {
+        if (!inString && char === '$' && dialect !== 'MySQL' && dialect !== 'MariaDB') {
             if (inDollarQuotes) {
                 const fullTag = `$${dollarQuoteTag}$`;
                 if (sql.startsWith(fullTag, i)) {
@@ -163,6 +298,7 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
                 if (fullTag) {
                     inDollarQuotes = true;
                     dollarQuoteTag = fullTag.slice(1, -1);
+                    currentHasCode = true;
                     current += fullTag;
                     i += fullTag.length - 1;
                     continue;
@@ -171,8 +307,7 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
         }
 
         if (!inString && !inDollarQuotes && blockCommentDepth === 0 && !inLineComment) {
-            const lineStart = current.trim();
-            if (lineStart === '' && (char === 'D' || char === 'd')) {
+            if ((char === 'D' || char === 'd') && !currentHasCode) {
                 const remaining = sql.substring(i, i + 20).toUpperCase();
                 if (remaining.startsWith('DELIMITER ')) {
                     const delimiterMatch = sql.substring(i).match(/^DELIMITER\s+(\S+)/i);
@@ -182,16 +317,27 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
                             i++;
                         }
                         current = '';
+                        startCurrentAt(i + 1);
                         continue;
                     }
                 }
             }
         }
 
+        if (!inString && !inDollarQuotes && !/\s/.test(char)) {
+            currentHasCode = true;
+        }
+
         if (!inDollarQuotes) {
-            if (inString && stringChar !== '`' && char === '\\' && nextChar) {
+            if (inString && stringChar !== '`' && stringAllowsBackslashEscapes && char === '\\' && nextChar) {
                 current += char + nextChar;
                 i++;
+                continue;
+            }
+
+            if (!inString && dialect === 'TransactSQL' && char === '[') {
+                inBracketIdentifier = true;
+                current += char;
                 continue;
             }
 
@@ -202,6 +348,8 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
                 if (!inString) {
                     inString = true;
                     stringChar = char;
+                    stringAllowsBackslashEscapes = dialectSupportsBackslashEscapes(dialect)
+                        || (char === '\'' && dialect === 'PostgreSQL' && /[Ee]/.test(prevChar));
                 } else if (char === stringChar) {
                     // SQL-standard doubled quote escape: '' or "" (and `` for backticks)
                     const nextChar = i + 1 < sql.length ? sql[i + 1] : '';
@@ -214,27 +362,46 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
                         continue;
                     }
                     inString = false;
+                    stringAllowsBackslashEscapes = false;
                 }
             }
         }
 
         if (!inString && !inDollarQuotes && blockCommentDepth === 0 && !inLineComment) {
             if (char === '(') { depth++; }
-            if (char === ')') { depth--; }
+            // Recover from a stray closing parenthesis instead of carrying a
+            // negative depth that disables every later semicolon split.
+            if (char === ')') { depth = Math.max(0, depth - 1); }
 
-            if (matchKeyword(i, 'CASE')) {
+            if (atStatementStart && matchKeyword(i, 'CREATE')
+                && /^CREATE\s+(?:OR\s+REPLACE\s+)?(?:FUNCTION|PROCEDURE|TRIGGER)\b/i.test(sql.slice(i, i + 100))) {
+                routineHeaderOpen = true;
+                oracleDeclarationOpen = dialect === 'Oracle';
+            }
+            if (dialect === 'Oracle' && atStatementStart && matchKeyword(i, 'DECLARE')) {
+                routineHeaderOpen = true;
+                oracleDeclarationOpen = true;
+            }
+
+            if (matchKeyword(i, 'CASE') && i !== closingCaseKeywordAt) {
                 caseDepth++;
             }
 
             if (matchKeyword(i, 'BEGIN')) {
-                if (isProceduralBegin(i)) {
+                if (routineHeaderOpen || isProceduralBegin(i)
+                    || (dialect === 'Oracle' && atStatementStart)) {
                     beginEndDepth++;
+                    routineHeaderOpen = false;
+                    oracleDeclarationOpen = false;
                 }
             }
 
             if (matchKeyword(i, 'END')) {
-                const afterEnd = sql.substring(i + 3, i + 15).trim().toUpperCase();
-                if (/^(TRY|CATCH|IF|LOOP|WHILE)\b/.test(afterEnd)) {
+                const qualifier = /^\s*(CASE|TRY|CATCH|IF|LOOP|WHILE|REPEAT|FOR)\b/i.exec(sql.slice(i + 3, i + 24));
+                if (qualifier?.[1].toUpperCase() === 'CASE') {
+                    caseDepth = Math.max(0, caseDepth - 1);
+                    closingCaseKeywordAt = i + 3 + qualifier[0].length - qualifier[1].length;
+                } else if (qualifier) {
                     // Block-qualifier END.
                 } else if (caseDepth > 0) {
                     caseDepth--;
@@ -246,49 +413,78 @@ function scanSqlStatements(sql: string, onStatement: (statement: string) => void
 
         const delimiter = customDelimiter || ';';
         const isDelimiter = delimiter === ';'
-            ? (char === ';' && !inString && !inDollarQuotes && depth === 0 && beginEndDepth === 0)
+            ? (char === ';' && !inString && !inDollarQuotes && depth === 0
+                && beginEndDepth === 0 && !oracleDeclarationOpen)
             : (sql.substring(i).startsWith(delimiter) && !inString && !inDollarQuotes && depth === 0 && beginEndDepth === 0);
 
         if (isDelimiter) {
-            const trimmed = current.trim();
-            if (trimmed) {
-                const withoutComments = stripLeadingComments(trimmed).trim();
-                if (withoutComments) {
-                    onStatement(trimmed);
-                }
-            }
+            flushStatement();
             current = '';
 
             if (delimiter !== ';') {
                 i += delimiter.length - 1;
             }
+            startCurrentAt(i + 1);
         } else {
             current += char;
         }
     }
 
-    const trimmed = current.trim();
-    if (trimmed) {
-        const withoutComments = stripLeadingComments(trimmed).trim();
-        if (withoutComments) {
-            onStatement(trimmed);
-        }
-    }
+    flushStatement();
 }
 
 // Split SQL into individual statements
-export function splitSqlStatements(sql: string): string[] {
+export function splitSqlStatements(sql: string, dialect: SqlDialect = 'MySQL'): string[] {
     const statements: string[] = [];
     scanSqlStatements(sql, (statement) => {
         statements.push(statement);
-    });
+    }, dialect);
     return statements;
 }
 
-export function countSqlStatements(sql: string): number {
+/** Split SQL into statements, keeping each statement's start offset in `sql`. */
+export function splitSqlStatementsWithOffsets(sql: string, dialect: SqlDialect = 'MySQL'): SqlStatementSpan[] {
+    const statements: SqlStatementSpan[] = [];
+    scanSqlStatements(sql, (statement, start) => {
+        statements.push({ sql: statement, start });
+    }, dialect);
+    return statements;
+}
+
+export function countSqlStatements(sql: string, dialect: SqlDialect = 'MySQL'): number {
     let count = 0;
     scanSqlStatements(sql, () => {
         count++;
-    });
+    }, dialect);
     return count;
+}
+
+/** Split SQL Server batches on a line containing only GO (optionally with a repeat count). */
+export function splitTransactSqlBatches(sql: string): string[] {
+    return splitTransactSqlBatchesWithOffsets(sql).map(batch => batch.sql);
+}
+
+/** Like `splitTransactSqlBatches`, keeping each trimmed batch's start offset in `sql`. */
+export function splitTransactSqlBatchesWithOffsets(sql: string): SqlStatementSpan[] {
+    const masked = maskStringsAndComments(sql);
+    const separator = /^[ \t]*GO(?:[ \t]+\d+)?[ \t]*(?:\r?\n|$)/gim;
+    const batches: SqlStatementSpan[] = [];
+    let batchStart = 0;
+    let match: RegExpExecArray | null;
+
+    const pushBatch = (rawStart: number, rawEnd: number): void => {
+        const raw = sql.slice(rawStart, rawEnd);
+        const batch = raw.trim();
+        if (batch && stripLeadingComments(batch).trim()) {
+            batches.push({ sql: batch, start: rawStart + (raw.length - raw.trimStart().length) });
+        }
+    };
+
+    while ((match = separator.exec(masked)) !== null) {
+        pushBatch(batchStart, match.index);
+        batchStart = match.index + match[0].length;
+    }
+
+    pushBatch(batchStart, sql.length);
+    return batches;
 }

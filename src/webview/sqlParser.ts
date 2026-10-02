@@ -23,7 +23,8 @@ import {
     rewriteGroupingSets,
     maskStringsAndComments,
     stripSqlComments,
-    stripFilterClauses
+    stripFilterClauses,
+    withSqlDialectLexing,
 } from './parser/dialects/preprocessing';
 import { preprocessJinjaTemplates } from './parser/dialects/jinjaPreprocessor';
 import { detectDialectSpecificSyntax } from './parser/dialects/warnings';
@@ -32,10 +33,12 @@ import {
     formatBytes,
     validateSql
 } from './parser/validation/validate';
-import { splitSqlStatements, stripLeadingComments } from './parser/validation/splitting';
+import { splitSqlStatements, splitSqlStatementsWithOffsets, splitTransactSqlBatchesWithOffsets, stripLeadingComments, type SqlStatementSpan } from './parser/validation/splitting';
+import { buildSegmentStarts, countStartsAtOrBefore } from '../shared/textOffsets';
 import { createFreshContext, type ParserContext } from './parser/context';
 import { layoutGraph } from './parser/layout';
 import { assignLineNumbers } from './parser/lineNumbers';
+import { applyLineOffsetToResult } from './state/lineOffsets';
 import {
     calculateColumnPositions,
     extractColumnLineage,
@@ -265,10 +268,11 @@ function extractLeadingCommentDialect(stmt: string): SqlDialect | null {
     return selected?.dialect ?? null;
 }
 
-function splitTransactSqlImplicitUpdateOutputStatements(statement: string): string[] {
+function splitTransactSqlImplicitUpdateOutputStatements(span: SqlStatementSpan): SqlStatementSpan[] {
+    const statement = span.sql;
     const stripped = stripLeadingComments(statement).trimStart();
     if (!/^INSERT\b/i.test(stripped) || !/\bUPDATE\b/i.test(stripped) || !/\bOUTPUT\b/i.test(stripped)) {
-        return [statement];
+        return [span];
     }
 
     const masked = maskStringsAndComments(statement);
@@ -298,25 +302,32 @@ function splitTransactSqlImplicitUpdateOutputStatements(statement: string): stri
             continue;
         }
 
+        // `statement` is already trimmed, so `before` starts at span.start and
+        // `after` starts exactly at the UPDATE keyword.
         const before = statement.slice(0, updateStart).trim();
         const after = statement.slice(updateStart).trim();
         if (!before || !after || !/^INSERT\b/i.test(stripLeadingComments(before).trimStart())) {
             continue;
         }
 
-        return [before, after];
+        return [
+            { sql: before, start: span.start },
+            { sql: after, start: span.start + updateStart },
+        ];
     }
 
-    return [statement];
+    return [span];
 }
 
-function splitSqlStatementsForDialect(sql: string, dialect: SqlDialect): string[] {
-    const statements = splitSqlStatements(sql);
+function splitSqlStatementsForDialect(sql: string, dialect: SqlDialect): SqlStatementSpan[] {
     if (dialect !== 'TransactSQL') {
-        return statements;
+        return splitSqlStatementsWithOffsets(sql, dialect);
     }
 
-    return statements.flatMap(splitTransactSqlImplicitUpdateOutputStatements);
+    return splitTransactSqlBatchesWithOffsets(sql)
+        .flatMap(batch => splitSqlStatementsWithOffsets(batch.sql, dialect)
+            .map(statement => ({ sql: statement.sql, start: batch.start + statement.start })))
+        .flatMap(splitTransactSqlImplicitUpdateOutputStatements);
 }
 
 // Parse multiple SQL statements
@@ -337,7 +348,7 @@ function parseSqlBatchInternal(
     statementLimit?: number
 ): BatchParseResult {
     // Validate SQL before parsing
-    const validationError = validateSql(sql, limits);
+    const validationError = validateSql(sql, limits, dialect);
     if (validationError) {
         // Empty input: return empty result
         if (validationError.type === 'empty_input') {
@@ -427,9 +438,10 @@ function parseSqlBatchInternal(
     const queries: ParseResult[] = [];
     const queryLineRanges: Array<{ startLine: number; endLine: number }> = [];
 
-    // Track line offsets for each statement
-    let currentLine = 1;
-    const lines = sql.split('\n');
+    // Statement start lines come from the splitter's source offsets. Matching
+    // statement text against source lines drifted whenever a trailing comment
+    // or a second statement shared a line with the previous `;`.
+    const lineStarts = buildSegmentStarts(sql, '\n');
 
     // Collect consecutive session commands to merge them
     let pendingSessionCommands: Array<{
@@ -465,9 +477,7 @@ function parseSqlBatchInternal(
         const absoluteStartLine = pendingSessionCommands[0].startLine;
         const absoluteEndLine = pendingSessionCommands[pendingSessionCommands.length - 1].endLine;
 
-        // Note: Node line numbers are already set relative to the combined SQL in createMergedSessionResult
-        // Don't override them here
-
+        anchorMergedResultLines(mergedResult, absoluteStartLine, absoluteEndLine);
         queries.push(mergedResult);
         queryLineRanges.push({ startLine: absoluteStartLine, endLine: absoluteEndLine });
 
@@ -487,10 +497,25 @@ function parseSqlBatchInternal(
         const absoluteStartLine = pendingDdlCommands[0].startLine;
         const absoluteEndLine = pendingDdlCommands[pendingDdlCommands.length - 1].endLine;
 
+        anchorMergedResultLines(mergedResult, absoluteStartLine, absoluteEndLine);
         queries.push(mergedResult);
         queryLineRanges.push({ startLine: absoluteStartLine, endLine: absoluteEndLine });
 
         pendingDdlCommands = [];
+    };
+
+    /**
+     * Merged session/DDL results number their node from the combined SQL text.
+     * Anchor it to the file lines the merged commands occupy so click-to-source
+     * and cursor-follow land on the commands instead of line 1.
+     */
+    const anchorMergedResultLines = (result: ParseResult, startLine: number, endLine: number): void => {
+        applyLineOffsetToResult(result, startLine - 1);
+        for (const node of result.nodes) {
+            if (node.endLine) {
+                node.endLine = Math.max(node.startLine ?? startLine, endLine);
+            }
+        }
     };
 
     const countLines = (text: string): number => {
@@ -503,43 +528,10 @@ function parseSqlBatchInternal(
         return count;
     };
 
-    const normalizeStatementLineForMatch = (line: string): string => {
-        return line.trim().replace(/;$/, '').trimEnd();
-    };
-
-    const lineMatchesStatementLine = (sourceLine: string, statementLine: string): boolean => {
-        return normalizeStatementLineForMatch(sourceLine) === normalizeStatementLineForMatch(statementLine);
-    };
-
-    for (const stmt of statements) {
+    for (const { sql: stmt, start: stmtStartOffset } of statements) {
         const statementDialect = extractLeadingCommentDialect(stmt) || dialect;
-        const stmtTrimmed = stmt.trim();
-        const firstNewlineIdx = stmtTrimmed.indexOf('\n');
-        const stmtFirstLine = firstNewlineIdx === -1
-            ? stmtTrimmed
-            : stmtTrimmed.slice(0, firstNewlineIdx);
         const stmtLineCount = countLines(stmt);
-
-        // Find the starting line of this statement in the original SQL
-        // Use the full first line for matching; for short lines also verify
-        // the next line to reduce false matches on duplicated prefixes
-        let stmtStartLine = currentLine;
-        const matchPrefix = stmtFirstLine.trimEnd();
-        const stmtSecondLine = firstNewlineIdx !== -1
-            ? stmtTrimmed.slice(firstNewlineIdx + 1).split('\n')[0]?.trim() || ''
-            : '';
-        for (let i = currentLine - 1; i < lines.length; i++) {
-            if (lineMatchesStatementLine(lines[i], matchPrefix)) {
-                if (stmtSecondLine && i + 1 < lines.length) {
-                    const secondLineMatches = lineMatchesStatementLine(lines[i + 1], stmtSecondLine);
-                    if (!secondLineMatches) {
-                        continue;
-                    }
-                }
-                stmtStartLine = i + 1;
-                break;
-            }
-        }
+        const stmtStartLine = countStartsAtOrBefore(lineStarts, stmtStartOffset);
 
         const stmtEndLine = stmtStartLine + stmtLineCount - 1;
 
@@ -606,31 +598,12 @@ function parseSqlBatchInternal(
                 if (result.error) {
                     result.error = offsetErrorLineNumber(result.error, lineOffset);
                 }
-                for (const node of result.nodes) {
-                    if (node.startLine) {
-                        node.startLine += lineOffset;
-                    }
-                    if (node.endLine) {
-                        node.endLine += lineOffset;
-                    }
-                }
-                // Also adjust line numbers for edges
-                for (const edge of result.edges) {
-                    if (edge.startLine) {
-                        edge.startLine += lineOffset;
-                    }
-                    if (edge.endLine) {
-                        edge.endLine += lineOffset;
-                    }
-                }
+                applyLineOffsetToResult(result, lineOffset);
 
                 queries.push(result);
                 queryLineRanges.push({ startLine: stmtStartLine, endLine: stmtEndLine });
             }
         }
-
-        // Update current line past this statement
-        currentLine = stmtStartLine + stmtLineCount;
     }
 
     // Flush any remaining session commands at the end
@@ -1051,7 +1024,7 @@ function tryParseMergeCompatibility(sql: string, dialect: SqlDialect): ParseResu
         return null;
     }
     layoutGraph(result.nodes, result.edges);
-    assignLineNumbers(result.nodes, sql);
+    assignLineNumbers(result.nodes, sql, result.edges);
     return result;
 }
 
@@ -1271,6 +1244,12 @@ function applyParserCompatibilityPreprocessing(
 }
 
 export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: ParseOptions = {}): ParseResult {
+    // Masking helpers used throughout parsing (DML/MERGE statement handlers,
+    // hints, regex fallback) apply this dialect's `#` comment rule.
+    return withSqlDialectLexing(dialect, () => parseSqlForDialect(sql, dialect, options));
+}
+
+function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOptions): ParseResult {
     // Keep the source text as the public result payload. Compatibility rewrites
     // below are parser implementation details and must never replace the SQL
     // shown, copied, pinned, or compared by the webview.
@@ -1291,7 +1270,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
     });
     if (bulkResult) {
         layoutGraph(bulkResult.nodes, bulkResult.edges);
-        assignLineNumbers(bulkResult.nodes, sql);
+        assignLineNumbers(bulkResult.nodes, sql, bulkResult.edges);
         return bulkResult;
     }
 
@@ -1303,7 +1282,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
     });
     if (warehouseDdlResult) {
         layoutGraph(warehouseDdlResult.nodes, warehouseDdlResult.edges);
-        assignLineNumbers(warehouseDdlResult.nodes, sql);
+        assignLineNumbers(warehouseDdlResult.nodes, sql, warehouseDdlResult.edges);
         return warehouseDdlResult;
     }
 
@@ -1327,7 +1306,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
     });
     if (deleteCompatibilityResult) {
         layoutGraph(deleteCompatibilityResult.nodes, deleteCompatibilityResult.edges);
-        assignLineNumbers(deleteCompatibilityResult.nodes, sql);
+        assignLineNumbers(deleteCompatibilityResult.nodes, sql, deleteCompatibilityResult.edges);
         return deleteCompatibilityResult;
     }
 
@@ -1339,7 +1318,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
     });
     if (updateCompatibilityResult) {
         layoutGraph(updateCompatibilityResult.nodes, updateCompatibilityResult.edges);
-        assignLineNumbers(updateCompatibilityResult.nodes, sql);
+        assignLineNumbers(updateCompatibilityResult.nodes, sql, updateCompatibilityResult.edges);
         return updateCompatibilityResult;
     }
 
@@ -1351,7 +1330,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
     });
     if (oracleInsertCompatibilityResult) {
         layoutGraph(oracleInsertCompatibilityResult.nodes, oracleInsertCompatibilityResult.edges);
-        assignLineNumbers(oracleInsertCompatibilityResult.nodes, sql);
+        assignLineNumbers(oracleInsertCompatibilityResult.nodes, sql, oracleInsertCompatibilityResult.edges);
         return oracleInsertCompatibilityResult;
     }
 
@@ -1438,7 +1417,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
             fallbackResult.sql = originalSql;
             fallbackResult.hints.unshift(timeoutHint);
             layoutGraph(fallbackResult.nodes, fallbackResult.edges);
-            assignLineNumbers(fallbackResult.nodes, originalSql);
+            assignLineNumbers(fallbackResult.nodes, originalSql, fallbackResult.edges);
             return fallbackResult;
         }
 
@@ -1525,7 +1504,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
         layoutGraph(nodes, edges);
 
         // Assign line numbers to nodes for editor sync
-        assignLineNumbers(nodes, originalSql);
+        assignLineNumbers(nodes, originalSql, edges);
 
         // Extract column lineage
         const columnLineage = extractColumnLineage(innerSelectStmt, nodes);
@@ -1556,7 +1535,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
 
         // Enhance error messages with helpful dialect suggestions for common issues
         // This helps users quickly identify when they need to switch SQL dialects
-        const upperSql = originalSql.toUpperCase();
+        const syntaxSql = maskStringsAndComments(originalSql).toUpperCase();
         const hasIntervalQuoted = /INTERVAL\s*'[^']+'/i.test(originalSql);
         const hasParenthesizedUnion = /\(\s*SELECT[\s\S]+\)\s*(UNION|INTERSECT|EXCEPT)/i.test(originalSql);
 
@@ -1596,14 +1575,15 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
                 }
             }
             // Check for INTERSECT/EXCEPT which are only supported in MySQL/PostgreSQL
-            else if (upperSql.includes('INTERSECT') || upperSql.includes('EXCEPT')) {
+            else if (/\b(?:INTERSECT|EXCEPT)\b/.test(syntaxSql)) {
                 const dialectsWithSupport = ['MySQL', 'PostgreSQL'];
                 if (!dialectsWithSupport.includes(context.dialect)) {
                     message = `INTERSECT/EXCEPT not supported in ${context.dialect}. Try MySQL or PostgreSQL dialect.`;
                 }
             }
             // Check for recursive CTE
-            else if (upperSql.includes('RECURSIVE') && !['PostgreSQL', 'MySQL', 'SQLite'].includes(context.dialect)) {
+            else if (/\bRECURSIVE\b/.test(syntaxSql)
+                && !['PostgreSQL', 'MySQL', 'SQLite'].includes(context.dialect)) {
                 message = `RECURSIVE CTE not supported in ${context.dialect}. Try PostgreSQL or MySQL dialect.`;
             }
             // Generic parse error - include original error details for better debugging
@@ -1654,7 +1634,7 @@ export function parseSql(sql: string, dialect: SqlDialect = 'MySQL', options: Pa
         fallbackResult.hints.push(...context.hints);
 
         layoutGraph(fallbackResult.nodes, fallbackResult.edges);
-        assignLineNumbers(fallbackResult.nodes, originalSql);
+        assignLineNumbers(fallbackResult.nodes, originalSql, fallbackResult.edges);
         return fallbackResult;
     }
 }
@@ -1742,14 +1722,35 @@ function processStatement(context: ParserContext, stmt: any, nodes: FlowNode[], 
                                 : undefined;
             const accessMode: 'write' = 'write';
 
+            // RENAME TABLE reports each target as an [old, new] pair; String()
+            // on the pair rendered "[object Object],[object Object]".
+            const getTargetNames = (target: any): string[] => {
+                if (Array.isArray(target)) {
+                    return target.flatMap(getTargetNames);
+                }
+                const name = typeof target === 'string'
+                    ? target
+                    : getTableName(target)
+                        || (typeof target?.table === 'string' ? target.table : '')
+                        || (typeof target?.name === 'string' ? target.name : '');
+                return name ? [name] : [];
+            };
+
             for (const t of tables) {
-                context.stats.tables++;
+                const targetNames = getTargetNames(t);
+                const tableName = targetNames.join(' → ');
+                if (!tableName) {
+                    continue;
+                }
+                // stats.tables is recomputed from tableUsageMap once the
+                // statement is processed, so record targets there; counting
+                // stats.tables directly left simple UPDATE/DELETE/INSERT at 0.
+                targetNames.forEach(name => trackTableUsage(context, name));
                 const tableId = genId(context, 'table');
-                const tableName = typeof t === 'string' ? t : (t.table || t.name || t);
                 nodes.push({
                     id: tableId,
                     type: 'table',
-                    label: String(tableName),
+                    label: tableName,
                     description: 'Target table',
                     accessMode: accessMode,
                     operationType: opType,

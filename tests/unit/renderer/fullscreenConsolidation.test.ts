@@ -42,6 +42,10 @@ describe('Item #6: Fullscreen Element List Consolidation', () => {
             expect(FULLSCREEN_HIDE_IDS).toContain('sql-crack-toolbar-wrapper');
         });
 
+        it('should contain the current legend bar ID', () => {
+            expect(FULLSCREEN_HIDE_IDS).toContain('sql-crack-legend-bar');
+        });
+
         it('should only contain strings', () => {
             FULLSCREEN_HIDE_IDS.forEach(id => {
                 expect(typeof id).toBe('string');
@@ -71,8 +75,8 @@ describe('Item #6: Fullscreen Element List Consolidation', () => {
             expect(FULLSCREEN_HIDE_SELECTORS).toContain('.hints-panel');
         });
 
-        it('should contain .legend-panel', () => {
-            expect(FULLSCREEN_HIDE_SELECTORS).toContain('.legend-panel');
+        it('should not retain the removed legacy legend selector', () => {
+            expect(FULLSCREEN_HIDE_SELECTORS).not.toContain('.legend-panel');
         });
 
         it('should contain .sql-preview-panel', () => {
@@ -113,8 +117,8 @@ describe('Item #6: Fullscreen Element List Consolidation', () => {
             expect(FULLSCREEN_HIDE_IDS.length).toBeGreaterThanOrEqual(6);
         });
 
-        it('should have at least 6 selectors to hide', () => {
-            expect(FULLSCREEN_HIDE_SELECTORS.length).toBeGreaterThanOrEqual(6);
+        it('should have the current panel selectors to hide', () => {
+            expect(FULLSCREEN_HIDE_SELECTORS.length).toBeGreaterThanOrEqual(5);
         });
 
         it('should cover all known panel classes', () => {
@@ -123,7 +127,6 @@ describe('Item #6: Fullscreen Element List Consolidation', () => {
                 '.details-panel',
                 '.stats-panel',
                 '.hints-panel',
-                '.legend-panel',
                 '.sql-preview-panel',
             ];
             knownPanels.forEach(panel => {

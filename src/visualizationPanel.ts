@@ -109,6 +109,12 @@ export class VisualizationPanel {
     private _isPinned: boolean = false;
     private _pinId: string | undefined;
     private _sourceDocumentUri: vscode.Uri | undefined; // Track source document for navigation
+    /**
+     * UI-state keys of documents this panel showed recently, by the webview's
+     * documentKey. Switching documents updates the panel before the old page
+     * (or an in-flight save) stops persisting, so saves name their document.
+     */
+    private readonly _uiStateKeysByDocument = new Map<string, string>();
     private _disposed: boolean = false;
     // One-shot first-run flag, resolved (and persisted) once at construction so
     // the first-run state is computed without mutating globalState during render.
@@ -139,12 +145,8 @@ export class VisualizationPanel {
         return store[key] ?? null;
     }
 
-    private static _persistUiState(
-        options: { documentUri?: vscode.Uri; isPinned: boolean; pinId?: string; fileName?: string },
-        state: unknown
-    ): void {
+    private static _persistUiState(key: string | null, state: unknown): void {
         if (!VisualizationPanel._context) { return; }
-        const key = VisualizationPanel._createUiStateKey(options);
         if (!key) { return; }
         const store = VisualizationPanel._context.workspaceState.get<Record<string, unknown>>(VisualizationPanel._uiStateStoreKey) || {};
         store[key] = state;
@@ -313,20 +315,30 @@ export class VisualizationPanel {
             VisualizationPanel.currentPanel._postMessage({
                 command: 'refresh',
                 sql: sqlCode,
-                options: options
+                options: options,
+                // Lets the webview keep the selected query across refreshes of
+                // the same document while resetting it for a different one.
+                documentKey: options.documentUri?.toString() ?? options.fileName ?? null
             });
             VisualizationPanel.currentPanel._currentSql = sqlCode;
             VisualizationPanel.currentPanel._currentOptions = options;
+            VisualizationPanel.currentPanel._rememberUiStateKey();
             VisualizationPanel.currentPanel._sourceDocumentUri = options.documentUri;
             VisualizationPanel.currentPanel._isStale = false;
         }
     }
 
     public static sendCursorPosition(line: number) {
-        if (VisualizationPanel.currentPanel) {
-            VisualizationPanel.currentPanel._postMessage({
+        const panel = VisualizationPanel.currentPanel;
+        if (panel) {
+            const range = panel._currentOptions.sourceRange;
+            if (range && (line <= range.start.line
+                || line > range.end.line + (range.end.character > 0 ? 1 : 0))) {
+                return;
+            }
+            panel._postMessage({
                 command: 'cursorPosition',
-                line: line
+                line: range ? line - range.start.line : line
             });
         }
     }
@@ -388,6 +400,24 @@ export class VisualizationPanel {
         );
     }
 
+    /**
+     * Send the current pin list to every open SQL Flow page. Each page keeps
+     * its own copy for the Compare baseline, and pinned pages would otherwise
+     * keep the list captured when they were built.
+     */
+    public static broadcastPinnedTabs() {
+        const config = vscode.workspace.getConfiguration('sqlCrack');
+        const location = config.get<ViewLocation>('viewLocation') || 'tab';
+        const pinnedTabs = VisualizationPanel.getPinnedTabs();
+        const panels = new Set<VisualizationPanel>(VisualizationPanel.pinnedPanels.values());
+        if (VisualizationPanel.currentPanel) {
+            panels.add(VisualizationPanel.currentPanel);
+        }
+        for (const panel of panels) {
+            panel._postMessage({ command: 'viewLocationOptions', currentLocation: location, pinnedTabs });
+        }
+    }
+
     public static sendViewLocationOptions() {
         if (VisualizationPanel.currentPanel) {
             const config = vscode.workspace.getConfiguration('sqlCrack');
@@ -414,6 +444,7 @@ export class VisualizationPanel {
         this._currentOptions = options;
         this._isPinned = isPinned;
         this._pinId = pinId;
+        this._rememberUiStateKey();
 
         // Resolve first-run state once, here, and persist it — so HTML rendering
         // stays a pure read of this instance flag rather than a globalState write.
@@ -458,7 +489,9 @@ export class VisualizationPanel {
                         this._goToLine(message.line);
                         return;
                     case 'traceInWorkspaceLineage':
-                        void this._traceInWorkspaceLineage(message.tableName, message.nodeType);
+                        this._traceInWorkspaceLineage(message.tableName, message.nodeType).catch(error => {
+                            logger.warn(`[VisualizationPanel] Failed to trace in workspace lineage: ${error instanceof Error ? error.message : String(error)}`);
+                        });
                         return;
                     case 'requestFullscreen':
                         // VS Code doesn't support programmatic fullscreen, but we can maximize the panel
@@ -480,20 +513,17 @@ export class VisualizationPanel {
                             );
                             this._postMessage({
                                 command: 'pinCreated',
-                                pinId: pinId
+                                pinId: pinId,
+                                pinnedTabs: VisualizationPanel.getPinnedTabs()
                             });
+                            VisualizationPanel.broadcastPinnedTabs();
                             vscode.window.showInformationMessage(`Pinned: ${message.name || this._currentOptions.fileName}`);
                         } else {
                             vscode.window.showErrorMessage('Cannot pin: extension context not available');
                         }
                         return;
                     case 'persistUiState':
-                        VisualizationPanel._persistUiState({
-                            documentUri: this._sourceDocumentUri,
-                            isPinned: this._isPinned,
-                            pinId: this._pinId,
-                            fileName: this._currentOptions.fileName
-                        }, message.state);
+                        VisualizationPanel._persistUiState(this._resolveUiStateKey(message.documentKey), message.state);
                         return;
                     case 'changeViewLocation':
                         this._changeViewLocation(message.location);
@@ -516,7 +546,7 @@ export class VisualizationPanel {
                             if (pinnedPanel) {
                                 pinnedPanel.dispose();
                             }
-                            VisualizationPanel.sendViewLocationOptions();
+                            VisualizationPanel.broadcastPinnedTabs();
                         }
                         return;
                     case 'savePng':
@@ -590,7 +620,7 @@ export class VisualizationPanel {
             return;
         }
         const safeLine = Math.max(1, Math.floor(line)); // 1-indexed, never below 1
-        const zeroBasedLine = safeLine - 1;
+        const zeroBasedLine = safeLine - 1 + (this._currentOptions.sourceRange?.start.line ?? 0);
 
         // Try to use the source document URI if available (preferred method)
         const targetUri = this._sourceDocumentUri;
@@ -737,10 +767,49 @@ export class VisualizationPanel {
     private _update(sqlCode: string, options: VisualizationOptions) {
         this._currentSql = sqlCode;
         this._currentOptions = options;
+        this._rememberUiStateKey();
         this._sourceDocumentUri = options.documentUri;
         this._isStale = false;
         const webview = this._panel.webview;
         this._panel.webview.html = this._getHtmlForWebview(webview, sqlCode, options);
+    }
+
+    /** Record the UI-state key for the document this panel now shows. */
+    private _rememberUiStateKey(): void {
+        const options = this._currentOptions;
+        // Mirrors the documentKey the page receives (see _getHtmlForWebview and refresh()).
+        const documentKey = options.documentUri?.toString() ?? options.fileName ?? null;
+        const key = VisualizationPanel._createUiStateKey({
+            documentUri: options.documentUri,
+            isPinned: this._isPinned,
+            pinId: this._pinId,
+            fileName: options.fileName,
+        });
+        if (!documentKey || !key) { return; }
+        this._uiStateKeysByDocument.delete(documentKey);
+        this._uiStateKeysByDocument.set(documentKey, key);
+        // Only saves still in flight from recently shown documents need this.
+        while (this._uiStateKeysByDocument.size > 8) {
+            const oldest = this._uiStateKeysByDocument.keys().next().value as string;
+            this._uiStateKeysByDocument.delete(oldest);
+        }
+    }
+
+    /**
+     * Storage key for a save from the page. A save that names its document is
+     * filed under that document; one naming a document this panel no longer
+     * tracks is dropped rather than written over the current document's state.
+     */
+    private _resolveUiStateKey(documentKey: unknown): string | null {
+        if (typeof documentKey === 'string') {
+            return this._uiStateKeysByDocument.get(documentKey) ?? null;
+        }
+        return VisualizationPanel._createUiStateKey({
+            documentUri: this._sourceDocumentUri,
+            isPinned: this._isPinned,
+            pinId: this._pinId,
+            fileName: this._currentOptions.fileName,
+        });
     }
 
     private _readRuntimeConfig(options: VisualizationOptions): SqlFlowRuntimeConfig {
@@ -780,15 +849,11 @@ export class VisualizationPanel {
         const parseTimeoutSeconds = normalizeAdvancedLimit(config.get<number>('advanced.parseTimeoutSeconds', 5), 5, 1, 60);
         const debugLogging = config.get<boolean>('advanced.debugLogging', false);
 
-        // Report the live configured default dialect (normalized) rather than the
-        // dialect the panel happened to open with. This is what propagates to the
-        // webview on a `sqlCrack.defaultDialect` settings change, so the runtime
-        // dialect no longer goes stale when the user updates the default. The
-        // initial HTML seed still uses options.dialect, so a pinned view's opened
-        // dialect is preserved on first render.
-        const configuredDefaultDialect = normalizeDialect(
-            config.get<string>('defaultDialect') || options.dialect || 'MySQL'
-        );
+        // Mutable panels follow the live default setting. A pinned snapshot
+        // keeps its saved dialect across theme and settings updates.
+        const configuredDefaultDialect = normalizeDialect(this._isPinned
+            ? options.dialect
+            : (config.get<string>('defaultDialect') || options.dialect || 'MySQL'));
 
         return {
             vscodeTheme,
@@ -918,6 +983,7 @@ export class VisualizationPanel {
         window.defaultDialect = ${this._escapeForInlineScript(options.dialect)};
         window.autoDetectDialect = ${this._escapeForInlineScript(runtimeConfig.autoDetectDialect)};
         window.fileName = ${this._escapeForInlineScript(options.fileName)};
+        window.documentKey = ${this._escapeForInlineScript(options.documentUri?.toString() ?? options.fileName ?? null)};
         window.isPinnedView = ${this._escapeForInlineScript(this._isPinned)};
         window.pinId = ${this._escapeForInlineScript(this._pinId || null)};
         window.viewLocation = ${this._escapeForInlineScript(runtimeConfig.viewLocation)};
