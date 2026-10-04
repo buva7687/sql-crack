@@ -10,6 +10,15 @@
  */
 
 jest.mock('vscode');
+jest.mock('../../src/diagnosticsClient', () => ({
+    DiagnosticsClient: jest.fn().mockImplementation(() => ({
+        analyze: jest.fn(async (_key, request) => {
+            const { parseSqlBatch } = require('../../src/webview/sqlParser');
+            return parseSqlBatch(request.sql, request.dialect, request.limits, request.options);
+        }),
+        cancel: jest.fn(), cancelAll: jest.fn(), dispose: jest.fn(),
+    })),
+}));
 jest.mock('../../src/visualizationPanel', () => ({
     VisualizationPanel: {
         setContext: jest.fn(),
@@ -48,6 +57,7 @@ import { normalizeDialect, activate, deactivate } from '../../src/extension';
 import { VisualizationPanel } from '../../src/visualizationPanel';
 import { logger } from '../../src/logger';
 import { isAggregateFunction } from '../../src/dialects/functionRegistry';
+import { DiagnosticsClient } from '../../src/diagnosticsClient';
 
 // ============================================================
 // Tests
@@ -554,6 +564,69 @@ describe('Extension Activation Wiring', () => {
             await Promise.resolve();
             expect(diagnostics.set).toHaveBeenCalledTimes(1);
             expect(diagnostics.set).toHaveBeenCalledWith(remaining.uri, expect.any(Array));
+        });
+
+        it.each(['resolve', 'reject'])('ignores a stale diagnostics %s after a newer parse completes', async outcome => {
+            const mockVscode = require('vscode');
+            mockVscode.__setMockConfig('sqlCrack', { 'advanced.showDiagnosticsInProblems': true });
+            activate(context);
+            const parser = (DiagnosticsClient as jest.Mock).mock.results[0].value;
+            const diagnostics = (vscode.languages.createDiagnosticCollection as jest.Mock).mock.results[0].value;
+            const saved = (vscode.workspace.onDidSaveTextDocument as jest.Mock).mock.calls[0][0];
+            const document = createDocument('/workspace/latest.sql');
+            let resolve!: (result: unknown) => void;
+            let reject!: (error: Error) => void;
+            parser.analyze.mockImplementationOnce(() => new Promise((res, rej) => { resolve = res; reject = rej; }));
+            saved(document);
+            saved(document);
+            await Promise.resolve();
+            expect(diagnostics.set).toHaveBeenCalledTimes(1);
+            if (outcome === 'resolve') { resolve({ queries: [], parseErrors: [] }); }
+            else { reject(new Error('old worker cancelled')); }
+            await Promise.resolve();
+            await Promise.resolve();
+            expect(diagnostics.set).toHaveBeenCalledTimes(1);
+            expect(diagnostics.delete).not.toHaveBeenCalled();
+        });
+
+        it('cancels active diagnostics on disable and prevents replies from restoring them', async () => {
+            const mockVscode = require('vscode');
+            mockVscode.__setMockConfig('sqlCrack', { 'advanced.showDiagnosticsInProblems': true });
+            activate(context);
+            const parser = (DiagnosticsClient as jest.Mock).mock.results[0].value;
+            const diagnostics = (vscode.languages.createDiagnosticCollection as jest.Mock).mock.results[0].value;
+            let resolve!: (result: unknown) => void;
+            parser.analyze.mockImplementationOnce(() => new Promise(res => { resolve = res; }));
+            (vscode.workspace.onDidSaveTextDocument as jest.Mock).mock.calls[0][0](createDocument('/workspace/disabled.sql'));
+            mockVscode.__setMockConfig('sqlCrack', { 'advanced.showDiagnosticsInProblems': false });
+            (vscode.workspace.onDidChangeConfiguration as jest.Mock).mock.calls[0][0]({
+                affectsConfiguration: (key: string) => key === 'sqlCrack.advanced.showDiagnosticsInProblems',
+            });
+            expect(parser.cancelAll).toHaveBeenCalledTimes(1);
+            expect(diagnostics.clear).toHaveBeenCalledTimes(1);
+            resolve({ queries: [], parseErrors: [] });
+            await Promise.resolve();
+            expect(diagnostics.set).not.toHaveBeenCalled();
+        });
+
+        it('passes dialect, limits, custom functions and timeout to the diagnostics worker', async () => {
+            const mockVscode = require('vscode');
+            mockVscode.__setMockConfig('sqlCrack', {
+                'advanced.showDiagnosticsInProblems': true, defaultDialect: 'SQL Server',
+                customAggregateFunctions: ['MY_SUM'], customWindowFunctions: ['MY_RANK'],
+                'advanced.parseTimeoutSeconds': 8, 'advanced.maxFileSizeKB': 200,
+                'advanced.maxStatements': 70, 'advanced.combineDdlStatements': true, autoDetectDialect: false,
+            });
+            activate(context);
+            const parser = (DiagnosticsClient as jest.Mock).mock.results[0].value;
+            const document = createDocument('/workspace/config.sql');
+            (vscode.workspace.onDidSaveTextDocument as jest.Mock).mock.calls[0][0](document);
+            expect(parser.analyze).toHaveBeenCalledWith(document.uri.toString(), expect.objectContaining({
+                dialect: 'TransactSQL', limits: { maxSqlSizeBytes: 204800, maxQueryCount: 70 },
+                options: { combineDdlStatements: true, allowDialectFallback: false }, parseTimeoutMs: 8000,
+                customAggregateFunctions: ['MY_SUM'], customWindowFunctions: ['MY_RANK'],
+            }));
+            await Promise.resolve();
         });
     });
 });

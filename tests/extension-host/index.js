@@ -49,5 +49,21 @@ exports.run = async () => {
     });
     worker.postMessage({sql: 'SELECT 1 FROM ' + Array.from({length: 10000}, (_, index) => 'table_' + index).join(', '), filePath: '/synthetic.sql', dialect: 'PostgreSQL'});
   });
+  // Exercise the installed extension's opt-in diagnostics path, including its
+  // separately packaged parser worker and configuration-change refresh.
+  const config = vscode.workspace.getConfiguration('sqlCrack');
+  const diagnosticsDocument = await vscode.workspace.openTextDocument({ language: 'sql', content: 'SELECT * FROM orders;' });
+  await config.update('advanced.showDiagnosticsInProblems', true, vscode.ConfigurationTarget.Workspace);
+  const diagnosticsDeadline = Date.now() + 15000;
+  while (!vscode.languages.getDiagnostics(diagnosticsDocument.uri).some(item => item.source === 'SQL Crack') && Date.now() < diagnosticsDeadline) {
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  assert(vscode.languages.getDiagnostics(diagnosticsDocument.uri).some(item => item.source === 'SQL Crack'), 'Problems diagnostics arrive from the installed parser worker');
+  await config.update('advanced.showDiagnosticsInProblems', false, vscode.ConfigurationTarget.Workspace);
+  const clearDeadline = Date.now() + 5000;
+  while (vscode.languages.getDiagnostics(diagnosticsDocument.uri).some(item => item.source === 'SQL Crack') && Date.now() < clearDeadline) {
+    await new Promise(resolve => setTimeout(resolve, 50));
+  }
+  assert(!vscode.languages.getDiagnostics(diagnosticsDocument.uri).some(item => item.source === 'SQL Crack'), 'Disabling Problems diagnostics clears the collection');
   console.log('SQL Crack extension-host smoke checks passed');
 };

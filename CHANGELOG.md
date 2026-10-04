@@ -16,7 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Open export dialogs beside the SQL source or workspace and bound persisted panel state.
 - Preserve the lineage panel and selected output when refreshing the same query.
 - Treat a table joined to itself under distinct aliases as an informational hint rather than recommending removal of an intentional self-join. Separate UNION branches, CTEs and subqueries that read the same table still report a repeated scan.
-- Show the **Start Analysis** choice in the Workspace Dependencies panel while the large-workspace notification is waiting, instead of a "Scanning SQL files..." spinner that never finished when the notification was hidden.
+- Keep the large-workspace **Start Analysis** choice in the panel, avoiding a notification that remains after analysis starts.
+- Restore large workspace indexes from compressed extension storage instead of rebuilding them on each open.
+- Stack statistics and hints in narrow SQL Flow panels and restore their saved widths when the view widens.
 - Return keyboard focus to the Export button when the export preview closes, name the Workspace panel's close button for screen readers, and raise muted text to at least 7:1 in the Workspace panel under high-contrast themes.
 - Keep Tab and Shift+Tab inside Export Preview while controls change, and raise SQL Flow muted-label contrast in high-contrast themes, including live theme changes.
 - Match hint severity labels, function badges, loading cards and clause-popup text to light and dark themes, including live high-contrast changes.
@@ -24,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Default to the VS Code theme and use **Cmd/Ctrl+K, then Q** for Visualize SQL Query. Existing custom keybindings and explicit theme settings remain available.
-- Parse workspace files in cancellable background workers with a per-file deadline and memory limit; lazy-load Problems diagnostics parsing.
+- Parse workspace files and optional Problems diagnostics in background workers with cancellation, deadlines and memory limits; ignore diagnostics from superseded document versions.
 - Reduce the webview bundle by excluding unused jsPDF HTML-rendering dependencies; preserve PDF graph export.
 - Refresh repeated visualizations without rebuilding the same document's webview, and embed bootstrap SQL once.
 - Improve keyboard and screen-reader controls for collapsible panels and hide development metrics unless instrumentation is enabled.

@@ -17,8 +17,8 @@ module.exports = (_env, argv = {}) => {
   const resolvedMode = argv.mode || process.env.NODE_ENV;
   const isProduction = resolvedMode === 'production';
   const sharedOutputKeep = isProduction
-    ? /^(?:extension|webview|parser\.worker|workspace\.worker)\.js$|^webview\.js\.LICENSE\.txt$/
-    : /^(?:extension|webview|parser\.worker|workspace\.worker)\.js(?:\.map)?$|^webview\.js\.LICENSE\.txt$/;
+    ? /^(?:extension|webview|parser\.worker|workspace\.worker|diagnostics\.worker)\.js$|^webview\.js\.LICENSE\.txt$/
+    : /^(?:extension|webview|parser\.worker|workspace\.worker|diagnostics\.worker)\.js(?:\.map)?$|^webview\.js\.LICENSE\.txt$/;
 
   /**@type {import('webpack').Configuration}*/
   const extensionConfig = {
@@ -136,5 +136,10 @@ module.exports = (_env, argv = {}) => {
     plugins: [new webpack.NormalModuleReplacementPlugin(/(?:^|\/)logger$/, path.resolve(__dirname, 'src/workspace/workerLogger.ts'))],
     output: { path: path.resolve(__dirname, 'dist'), filename: 'workspace.worker.js', libraryTarget: 'commonjs2' }
   };
-  return [extensionConfig, webviewConfig, workspaceWorkerConfig];
+  const diagnosticsWorkerConfig = {
+    ...workspaceWorkerConfig,
+    entry: './src/diagnostics.worker.ts',
+    output: { path: path.resolve(__dirname, 'dist'), filename: 'diagnostics.worker.js', libraryTarget: 'commonjs2' }
+  };
+  return [extensionConfig, webviewConfig, workspaceWorkerConfig, diagnosticsWorkerConfig];
 };

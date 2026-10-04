@@ -26,7 +26,8 @@ describe('extension diagnostics wiring', () => {
 
     it('rebuilds diagnostics when sqlCrack.autoDetectDialect changes', () => {
         expect(source).toContain("config.get<boolean>('autoDetectDialect') !== false");
-        expect(source).toContain("e.affectsConfiguration('sqlCrack.autoDetectDialect')");
+        expect(source).toContain("'autoDetectDialect'");
+        expect(source).toContain('diagnosticSettings.some(setting => e.affectsConfiguration(`sqlCrack.${setting}`))');
         expect(source).toContain('allowDialectFallback: autoDetectDialect');
     });
 
