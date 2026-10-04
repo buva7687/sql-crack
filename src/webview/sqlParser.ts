@@ -1457,7 +1457,7 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
         detectDialectSpecificSyntax(context, originalSql, effectiveDialect);
 
         // Detect advanced issues (unused CTEs, dead columns, etc.)
-        detectAdvancedIssues(context, nodes, originalSql);
+        detectAdvancedIssues(context, nodes, originalSql, edges);
 
         // Calculate enhanced complexity metrics
         calculateEnhancedMetrics(context, nodes, edges);
