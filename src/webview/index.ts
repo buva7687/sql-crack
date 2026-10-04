@@ -6,6 +6,7 @@ import { configureCustomFunctions, configureParseTimeout, isCancelledBatchParseR
 import { setMinimapMode, MinimapMode } from './minimapVisibility';
 import { detectDialect } from './sqlParser';
 import { getComponentUiColors, setHighContrastMode } from './constants';
+import { installCompactPanelLayout } from './ui/compactPanelLayout';
 import { BatchParseResult, LayoutType, ParseError, ParseResult, QueryLineRange, SqlDialect } from './types';
 import {
     initRenderer,
@@ -1279,6 +1280,7 @@ function init(): void {
 
     // Initialize SVG renderer
     initRenderer(container);
+    const cleanupCompactPanelLayout = installCompactPanelLayout(container);
     setRendererColorblindMode((window.colorblindMode as ColorblindMode) || 'off');
 
     // R key / command bar trigger a full re-visualize (same as toolbar refresh).
@@ -1388,6 +1390,7 @@ function init(): void {
     });
 
     window.addEventListener('beforeunload', () => {
+        cleanupCompactPanelLayout();
         if (persistStateIntervalId !== null) {
             window.clearInterval(persistStateIntervalId);
             persistStateIntervalId = null;
