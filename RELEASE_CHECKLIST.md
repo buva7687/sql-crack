@@ -13,7 +13,7 @@
 - [ ] Run the extension-host smoke test against VS Code 1.85 and stable.
 - [ ] Manually verify keyboard-only navigation, high contrast, exports, and a clean install/update from the previous stable extension.
 - [ ] Confirm bundled walkthrough assets and THIRD_PARTY_NOTICES.txt are in the VSIX.
-- [ ] Run the full dependency audit (`npm run audit:all`) and investigate new advisories; CI and the release build also enforce this gate.
+- [ ] Run the full dependency audit (`npm run audit:all`) and investigate new advisories; CI reports it as a separate `audit` job and the release build enforces it.
 - [ ] Exercise Restricted Mode, a remote filesystem workspace and multi-root workspace indexing; virtual workspaces are unsupported.
 - [ ] Verify saved pins, cache-version migration, custom aggregate/window settings and duplicate-column selection after refresh.
 

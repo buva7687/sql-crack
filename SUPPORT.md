@@ -8,7 +8,7 @@ SQL Crack performs static, best-effort SQL analysis. Vendor-specific syntax may 
 
 ## Environment coverage
 
-CI defines installed-extension smoke tests for Linux, macOS and Windows on VS Code 1.85 and current stable, plus Restricted Mode checks on stable. Local macOS checks passed on VS Code 1.85 and 1.140, including a clean packaged installation and an untrusted workspace on 1.140; Linux and Windows results must pass in CI before the release is approved. Filesystem-backed workspaces are required. Virtual workspaces are unsupported; remote filesystem behavior has a separate acceptance check in the release checklist.
+CI defines installed-extension smoke tests for Linux, macOS and Windows on VS Code 1.85 and current stable, plus Restricted Mode checks on stable. Local macOS checks passed on VS Code 1.85 and 1.140, including a clean packaged installation and an untrusted workspace on 1.140. An upgrade from the installed 0.9.4 package on macOS (VS Code 1.140) kept its pinned query and panel preferences and rebuilt the workspace index in the new format across a two-folder workspace. Linux and Windows results must pass in CI before the release is approved. Filesystem-backed workspaces are required. Virtual workspaces are unsupported; remote filesystem behavior has a separate acceptance check in the release checklist.
 
 ## Saved data and index recovery
 

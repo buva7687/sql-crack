@@ -141,7 +141,7 @@ Analyze change impact (MODIFY/RENAME/DROP) with severity indicators, grouped tra
 - **Layout Picker** — Toolbar picker with SVG icons for vertical, horizontal, compact, force, and radial layouts
 - **Layout Shortcuts** — Cycle layouts with `H` or jump directly with keys `1`-`5`
 - **Auto-Refresh** — Updates automatically as you edit (configurable debounce)
-- **Export Options** — PNG, SVG, PDF, DOT, Mermaid.js, or clipboard copy
+- **Export Options** — PNG, SVG, PDF, Mermaid.js, or clipboard copy from SQL Flow; the Workspace graph also exports DOT (Graphviz) and JSON
 - **View Modes** — Display beside editor or in a new tab
 - **Pin Visualizations** — Save snapshots as persistent tabs
 - **Fullscreen** — Press `F` for distraction-free viewing

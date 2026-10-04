@@ -10,6 +10,30 @@ permissions:
   contents: read
 
 jobs:
+  # Kept separate from the test jobs so a newly published advisory is reported
+  # on its own instead of failing type checks and tests for unrelated changes.
+  # The release build enforces the same audit before anything is published.
+  audit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit all dependencies
+        run: npm run audit:all
+
   test:
     runs-on: ubuntu-latest
 
@@ -31,9 +55,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-
-      - name: Audit all dependencies
-        run: npm run audit:all
 
       - name: Run type check
         run: npm run typecheck

@@ -15,7 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Package walkthrough illustrations and show a useful partial card for unsupported CREATE TABLE syntax.
 - Open export dialogs beside the SQL source or workspace and bound persisted panel state.
 - Preserve the lineage panel and selected output when refreshing the same query.
-- Treat distinct-alias table references as informational hints rather than recommending removal of intentional self-joins.
+- Treat a table joined to itself under distinct aliases as an informational hint rather than recommending removal of an intentional self-join. Separate UNION branches, CTEs and subqueries that read the same table still report a repeated scan.
+- Show the **Start Analysis** choice in the Workspace Dependencies panel while the large-workspace notification is waiting, instead of a "Scanning SQL files..." spinner that never finished when the notification was hidden.
+- Return keyboard focus to the Export button when the export preview closes, name the Workspace panel's close button for screen readers, and raise muted text to at least 7:1 in the Workspace panel under high-contrast themes.
+- Use the current theme background on the Workspace loading, empty and manual-analysis pages, and render keys in the walkthrough as code instead of literal backticks.
 
 ### Changed
 - Default to the VS Code theme and use **Cmd/Ctrl+K, then Q** for Visualize SQL Query. Existing custom keybindings and explicit theme settings remain available.
@@ -25,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improve keyboard and screen-reader controls for collapsible panels and hide development metrics unless instrumentation is enabled.
 
 ### Security and release tooling
-- Update dependency tooling, enforce full dependency audits, pin VS Code types to the minimum supported API, and isolate release credentials from install/test/build steps.
+- Update dependency tooling, enforce full dependency audits in the release build and report them as a separate CI job, pin VS Code types to the minimum supported API, and isolate release credentials from install/test/build steps.
 - Declare Restricted Mode support, document static-analysis limits and private vulnerability reporting, and include third-party license notices.
 - Test installed VSIX activation, packaged assets and worker responsiveness on VS Code 1.85 and stable on Linux, macOS and Windows, with Restricted Mode checks on stable.
 
