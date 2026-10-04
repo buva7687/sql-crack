@@ -74,13 +74,13 @@ describe('remaining audit state and lifecycle regressions', () => {
         expect(workspaceCommandBarSource).toContain("event.code === 'KeyK'");
     });
 
-    it('discards partial AST references before whole-file regex fallback', () => {
+    it('discards only the failed statement before regex fallback', () => {
         const catchBlock = referenceExtractorSource.slice(
             referenceExtractorSource.indexOf('} catch (error) {'),
             referenceExtractorSource.indexOf('// MERGE remains unsupported')
         );
-        expect(catchBlock).toContain('references.length = 0;');
-        expect(catchBlock).toContain('parsedStatements.length = 0;');
+        expect(catchBlock).toContain('references.length = referenceStart;');
+        expect(catchBlock).toContain('parsedStatements.length = parsedStart;');
     });
 
     it('reuses masked SQL and statement boundaries for reference locations', () => {

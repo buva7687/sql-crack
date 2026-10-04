@@ -2,7 +2,7 @@
 import process from 'process/browser';
 (window as unknown as { process: typeof process }).process = process;
 
-import { configureParseTimeout, isCancelledBatchParseResult, parseAsync, parseBatchAsync } from './parserClient';
+import { configureCustomFunctions, configureParseTimeout, isCancelledBatchParseResult, parseAsync, parseBatchAsync } from './parserClient';
 import { setMinimapMode, MinimapMode } from './minimapVisibility';
 import { detectDialect } from './sqlParser';
 import { getComponentUiColors } from './constants';
@@ -106,6 +106,8 @@ import { applyLineOffsetToResult } from './state/lineOffsets';
 type HostPostMessagePayload = { command: string; [key: string]: unknown };
 
 interface SqlCrackWebviewBootstrapConfig {
+    customAggregateFunctions?: string[];
+    customWindowFunctions?: string[];
     initialSqlCode: string;
     vscodeTheme: string;
     isHighContrast: boolean;
@@ -325,6 +327,8 @@ function normalizeRuntimeConfigUpdate(raw: unknown): SqlCrackRuntimeConfigUpdate
         deferredQueryThreshold: normalizeAdvancedLimit(payload.deferredQueryThreshold, window.deferredQueryThreshold || DEFERRED_QUERY_THRESHOLD, 1, 500),
         parseTimeoutSeconds: normalizeAdvancedLimit(payload.parseTimeoutSeconds, window.parseTimeoutSeconds || 5, 1, 60),
         debugLogging: normalizeBool(payload.debugLogging, window.debugLogging === true),
+        customAggregateFunctions: Array.isArray(payload.customAggregateFunctions) ? payload.customAggregateFunctions.filter((value): value is string => typeof value === 'string') : (window.sqlCrackConfig?.customAggregateFunctions || []),
+        customWindowFunctions: Array.isArray(payload.customWindowFunctions) ? payload.customWindowFunctions.filter((value): value is string => typeof value === 'string') : (window.sqlCrackConfig?.customWindowFunctions || []),
     };
 }
 
@@ -335,6 +339,8 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
     }
 
     const previous = {
+        customAggregateFunctions: JSON.stringify(window.sqlCrackConfig?.customAggregateFunctions || []),
+        customWindowFunctions: JSON.stringify(window.sqlCrackConfig?.customWindowFunctions || []),
         vscodeTheme: window.vscodeTheme || 'dark',
         isHighContrast: window.isHighContrast === true,
         autoDetectDialect: (window.autoDetectDialect ?? true) !== false,
@@ -372,6 +378,7 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
 
     setMinimapMode(config.showMinimap as MinimapMode);
     configureParseTimeout(config.parseTimeoutSeconds * 1000);
+    configureCustomFunctions(config.customAggregateFunctions || [], config.customWindowFunctions || []);
     setRendererColorblindMode(config.colorblindMode);
 
     const requestedDefaultDialect = normalizeSqlDialect(config.defaultDialect);
@@ -408,6 +415,8 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
     const requiresRevisualize =
         autoDetectChanged ||
         defaultDialectChanged ||
+        previous.customAggregateFunctions !== JSON.stringify(config.customAggregateFunctions || []) ||
+        previous.customWindowFunctions !== JSON.stringify(config.customWindowFunctions || []) ||
         previous.showDeadColumnHints !== config.showDeadColumnHints ||
         previous.combineDdlStatements !== config.combineDdlStatements ||
         previous.maxFileSizeKB !== config.maxFileSizeKB ||
@@ -1290,6 +1299,7 @@ function init(): void {
 
     // Apply configurable parse timeout
     configureParseTimeout(runtimeConfig.parseTimeoutSeconds * 1000);
+    configureCustomFunctions(window.sqlCrackConfig?.customAggregateFunctions || [], window.sqlCrackConfig?.customWindowFunctions || []);
 
     // Create toolbar with callbacks
     const toolbarResult = createToolbar(container, createToolbarCallbacks(), {

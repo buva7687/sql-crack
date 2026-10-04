@@ -7,6 +7,7 @@ import type {
     ViewState,
 } from '../types';
 import { Z_INDEX } from '../../shared';
+import { getComponentUiColors } from '../constants/colors';
 import { restoreNodeBorderDasharray, restoreNodeBorderState } from '../nodeBorderState';
 
 export interface ColumnLineageRuntimeState {
@@ -80,6 +81,8 @@ function createColumnItemFeature(
     const { runtime, isDarkTheme, escapeHtml, onFlowSelected } = options;
     const item = document.createElement('div');
     item.setAttribute('data-flow-id', flow.id);
+    item.setAttribute('role', 'button');
+    item.tabIndex = 0;
     item.style.cssText = `
         padding: 8px 10px;
         background: ${isDarkTheme ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.03)'};
@@ -90,6 +93,7 @@ function createColumnItemFeature(
     `;
 
     const firstStep = flow.lineagePath[0];
+    item.setAttribute('aria-label', `Trace ${flow.outputColumn} from ${firstStep ? firstStep.nodeName + '.' + firstStep.columnName : 'unknown source'}`);
     const hasAggregation = flow.lineagePath.some((step) => step.transformation === 'aggregated');
     const hasCalculation = flow.lineagePath.some((step) => step.transformation === 'calculated');
     const hasRename = flow.lineagePath.some((step) => step.transformation === 'renamed');
@@ -137,6 +141,9 @@ function createColumnItemFeature(
         }
     });
 
+    item.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') {event.preventDefault(); item.click();}
+    });
     item.addEventListener('click', () => {
         runtime.selectedColumnLineage = flow;
         const allItems = runtime.columnLineagePanel?.querySelectorAll('div[style*="cursor: pointer"]');
@@ -266,17 +273,27 @@ export function showColumnLineagePanelFeature(options: ShowColumnLineagePanelOpt
     }
     runtime.columnLineagePanel.appendChild(columnList);
 
+    const emptySearch = document.createElement('div');
+    emptySearch.textContent = 'No matching columns';
+    emptySearch.setAttribute('role', 'status');
+    emptySearch.style.cssText = `display: none; padding: 8px; color: ${getComponentUiColors(isDarkTheme).textMuted};`;
+    runtime.columnLineagePanel.appendChild(emptySearch);
+    const flowsById = new Map(currentColumnFlows.map(flow => [flow.id, flow]));
+
     searchInput.addEventListener('input', (e) => {
         const query = (e.target as HTMLInputElement).value.toLowerCase();
-        const items = columnList.querySelectorAll('[data-column-name]');
+        const items = columnList.querySelectorAll('[data-flow-id]');
+        let matchingCount = 0;
         items.forEach((item) => {
             const columnName = item.getAttribute('data-column-name') || '';
-            const flow = currentColumnFlows.find((candidate) => candidate.outputColumn.toLowerCase() === columnName);
+            const flow = flowsById.get(item.getAttribute('data-flow-id') || '');
             const matchesQuery = columnName.includes(query)
                 || Boolean(flow && flow.lineagePath.some((step) =>
                     step.columnName.toLowerCase().includes(query) || step.nodeName.toLowerCase().includes(query)));
             (item as HTMLElement).style.display = matchesQuery ? 'block' : 'none';
+            if (matchesQuery) {matchingCount++;}
         });
+        emptySearch.style.display = matchingCount ? 'none' : 'block';
     });
 
     document.body.appendChild(runtime.columnLineagePanel);

@@ -187,6 +187,21 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
         const parts = raw.split('.').map((part) => part.replace(identifierWrapperPattern, '')).filter(Boolean);
         return parts[parts.length - 1] || raw.replace(identifierWrapperPattern, '');
     };
+    // Unsupported table options still deserve a useful, explicitly partial DDL card.
+    const ddlPattern = new RegExp(`\\bCREATE\\s+(?:GLOBAL\\s+TEMPORARY\\s+|TEMP(?:ORARY)?\\s+|UNLOGGED\\s+)?TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(${qualifiedIdentifier})`, 'giu');
+    let ddlMatch: RegExpExecArray | null;
+    while ((ddlMatch = ddlPattern.exec(commentStripped))) {
+        if (isInsideQuotedToken(ddlMatch.index)) {continue;}
+        const tableName = normalizeObjectName(ddlMatch[1]);
+        const id = genId('ddl');
+        tableNames.add(tableName);
+        trackTableUsage(tableName);
+        nodes.push({id, type: 'table', label: tableName, description: 'CREATE TABLE (partial analysis)',
+            details: ['Table definition detected; unsupported options and column lineage are not analyzed.'],
+            operationType: 'CREATE_TABLE', accessMode: 'write', tableCategory: 'physical',
+            x: 0, y: 0, width: 220, height: 80});
+    }
+
     const functionFromKeywords = new Set(['EXTRACT', 'SUBSTRING', 'TRIM', 'POSITION', 'OVERLAY']);
     const isFunctionFromDelimiter = (text: string, fromIndex: number): boolean => {
         let nestedDepth = 0;

@@ -415,7 +415,7 @@ export function updateStatsPanelContent(options: StatsPanelOptions): void {
         .join('');
 
     statsPanel.innerHTML = `
-        <div id="stats-header" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;${statsMinimized ? '' : ' margin-bottom: 8px;'} cursor: pointer; user-select: none;" title="${statsMinimized ? 'Expand' : 'Minimize'}">
+        <div id="stats-header" role="button" tabindex="0" aria-label="Query Stats" aria-expanded="${!statsMinimized}" aria-controls="stats-body" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;${statsMinimized ? '' : ' margin-bottom: 8px;'} cursor: pointer; user-select: none;" title="${statsMinimized ? 'Expand' : 'Minimize'}">
             <span style="display: inline-flex; align-items: center; gap: 8px;">
                 <span style="font-weight: 600; color: ${textColor};">Query Stats</span>
                 <span style="
@@ -490,9 +490,17 @@ export function updateStatsPanelContent(options: StatsPanelOptions): void {
     `;
 
     const statsHeader = statsPanel.querySelector('#stats-header') as HTMLElement | null;
-    statsHeader?.addEventListener('click', () => {
+    const toggleStats = () => {
         setStatsMinimized(!statsMinimized);
         onRequestRerender();
+        document.getElementById('stats-header')?.focus();
+    };
+    statsHeader?.addEventListener('click', toggleStats);
+    statsHeader?.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            toggleStats();
+        }
     });
 
     const copyBtn = statsPanel.querySelector('#copy-tables-btn') as HTMLButtonElement | null;
@@ -659,7 +667,7 @@ export function updateHintsPanelContent(options: HintsPanelOptions): void {
     const remainingCount = Math.max(0, sortedHints.length - visibleHints.length);
 
     hintsPanel.innerHTML = `
-        <div id="hints-header" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;${hintsMinimized ? '' : ' margin-bottom: 10px;'} cursor: pointer; user-select: none;" title="${hintsMinimized ? 'Expand' : 'Minimize'}">
+        <div id="hints-header" role="button" tabindex="0" aria-label="Performance Hints" aria-expanded="${!hintsMinimized}" aria-controls="hints-body" style="display: flex; align-items: center; justify-content: space-between; gap: 8px;${hintsMinimized ? '' : ' margin-bottom: 10px;'} cursor: pointer; user-select: none;" title="${hintsMinimized ? 'Expand' : 'Minimize'}">
             <span style="font-weight: 600; color: ${textColor}; display: inline-flex; align-items: center; gap: 6px;">
                 <span style="display: inline-flex; width: 14px; height: 14px;">${ICONS.bolt}</span>
                 <span>Performance Hints</span>
@@ -669,7 +677,7 @@ export function updateHintsPanelContent(options: HintsPanelOptions): void {
                 <span style="display: inline-flex; width: 14px; height: 14px; color: ${textColorMuted}; transform: rotate(${hintsMinimized ? '-90deg' : '0deg'}); transition: transform 0.2s ease;">${ICONS.chevronDown}</span>
             </span>
         </div>
-        <div class="hints-list" style="display: ${hintsMinimized ? 'none' : 'flex'}; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
+        <div id="hints-body" class="hints-list" style="display: ${hintsMinimized ? 'none' : 'flex'}; flex-direction: column; gap: 8px; max-height: 300px; overflow-y: auto;">
             ${visibleHints.map((hint) => {
                 const style = HINT_COLORS[hint.type] || HINT_COLORS.info;
                 const severity = hint.severity || 'low';
@@ -789,9 +797,17 @@ export function updateHintsPanelContent(options: HintsPanelOptions): void {
     });
 
     const hintsHeader = hintsPanel.querySelector('#hints-header') as HTMLElement | null;
-    hintsHeader?.addEventListener('click', () => {
+    const toggleHints = () => {
         setHintsMinimized(!hintsMinimized);
         onRequestRerender();
+        document.getElementById('hints-header')?.focus();
+    };
+    hintsHeader?.addEventListener('click', toggleHints);
+    hintsHeader?.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault();
+            toggleHints();
+        }
     });
 
     onSyncViewportBounds(panelBottom);

@@ -1,3 +1,4 @@
+import { getExportDefaultUri } from '../exportPaths';
 // Workspace Panel - VS Code webview panel for workspace dependency visualization
 
 import * as vscode from 'vscode';
@@ -934,7 +935,7 @@ ${bodyContent}
         const defaultFilename = `impact-report-${safeTarget}.${extension}`;
 
         const uri = await vscode.window.showSaveDialog({
-            defaultUri: vscode.Uri.file(defaultFilename),
+            defaultUri: getExportDefaultUri(defaultFilename),
             filters: format === 'markdown'
                 ? { 'Markdown': ['md'] }
                 : { 'JSON': ['json'] }

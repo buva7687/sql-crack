@@ -469,7 +469,7 @@ describe('Extension Activation Wiring', () => {
             });
         });
 
-        it('debounces diagnostics independently for edits in different documents', () => {
+        it('debounces diagnostics independently for edits in different documents', async () => {
             jest.useFakeTimers();
             let documentChangeHandler: ((event: vscode.TextDocumentChangeEvent) => void) | undefined;
             (vscode.workspace.onDidChangeTextDocument as jest.Mock)
@@ -504,12 +504,14 @@ describe('Extension Activation Wiring', () => {
 
             jest.advanceTimersByTime(50);
 
+            await Promise.resolve();
+            await Promise.resolve();
             expect(diagnostics.set).toHaveBeenCalledTimes(2);
             expect(diagnostics.set.mock.calls.map((call: unknown[]) => String(call[0])))
                 .toEqual(expect.arrayContaining([first.uri.toString(), second.uri.toString()]));
         });
 
-        it('cancels only the closed document diagnostics timer', () => {
+        it('cancels only the closed document diagnostics timer', async () => {
             jest.useFakeTimers();
             let documentChangeHandler: ((event: vscode.TextDocumentChangeEvent) => void) | undefined;
             let documentCloseHandler: ((document: vscode.TextDocument) => void) | undefined;
@@ -548,6 +550,8 @@ describe('Extension Activation Wiring', () => {
             jest.advanceTimersByTime(50);
 
             expect(diagnostics.delete).toHaveBeenCalledWith(closed.uri);
+            await Promise.resolve();
+            await Promise.resolve();
             expect(diagnostics.set).toHaveBeenCalledTimes(1);
             expect(diagnostics.set).toHaveBeenCalledWith(remaining.uri, expect.any(Array));
         });

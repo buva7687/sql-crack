@@ -49,6 +49,7 @@ examples/sample_queries/
 
 # Local docs/notes
 docs/
+/RELEASE_READINESS.md
 
 # YouTube video scripts
 youtube/
@@ -56,3 +57,6 @@ youtube/
 # Test coverage reports (generated)
 coverage/
 junit.xml
+
+# Production bundle module inventory used to regenerate license notices
+webpack-stats.json

@@ -32,8 +32,8 @@ let customTableValuedFunctions: string[] = [];
  * Call this from the extension when initializing or when settings change.
  */
 export function setCustomFunctions(aggregates: string[], window: string[], tableValued: string[] = []): void {
-    customAggregateFunctions = aggregates.map(f => f.toUpperCase());
-    customWindowFunctions = window.map(f => f.toUpperCase());
+    customAggregateFunctions = aggregates.filter(f => typeof f === 'string' && f.trim()).map(f => f.trim().toUpperCase());
+    customWindowFunctions = window.filter(f => typeof f === 'string' && f.trim()).map(f => f.trim().toUpperCase());
     customTableValuedFunctions = tableValued.map(f => f.toUpperCase());
 }
 
@@ -83,13 +83,13 @@ export function getFunctionsForDialect(dialect: string): { aggregates: Set<strin
     // Merge all sources
     const aggregates = new Set<string>([
         ...commonAggregates.map(f => f.toUpperCase()),
-        ...dialectFuncs.aggregates.map(f => f.toUpperCase()),
+        ...dialectFuncs.aggregates.filter(f => typeof f === 'string' && f.trim()).map(f => f.trim().toUpperCase()),
         ...customFunctions.aggregates
     ]);
 
     const window = new Set<string>([
         ...commonWindow.map(f => f.toUpperCase()),
-        ...dialectFuncs.window.map(f => f.toUpperCase()),
+        ...dialectFuncs.window.filter(f => typeof f === 'string' && f.trim()).map(f => f.trim().toUpperCase()),
         ...customFunctions.window
     ]);
 

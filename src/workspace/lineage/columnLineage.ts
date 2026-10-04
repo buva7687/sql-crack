@@ -279,6 +279,8 @@ export class ColumnLineageTracker {
      * Handles formats like "table:customers" or "view:my_view"
      */
     private getTableName(nodeId: string): string {
+        const node = this.graph.nodes.get(nodeId);
+        if (node) {return node.name;}
         const prefixed = /^(table|view|cte|external):(.+)$/.exec(nodeId);
         if (prefixed && prefixed[2]) {
             return prefixed[2];

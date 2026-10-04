@@ -129,7 +129,7 @@ Analyze change impact (MODIFY/RENAME/DROP) with severity indicators, grouped tra
 - **Layout Picker** — Toolbar picker with SVG icons for vertical, horizontal, compact, force, and radial layouts
 - **Layout Shortcuts** — Cycle layouts with `H` or jump directly with keys `1`-`5`
 - **Auto-Refresh** — Updates automatically as you edit (configurable debounce)
-- **Export Options** — PNG, SVG, Mermaid.js, or clipboard copy
+- **Export Options** — PNG, SVG, PDF, DOT, Mermaid.js, or clipboard copy
 - **View Modes** — Display beside editor or in a new tab
 - **Pin Visualizations** — Save snapshots as persistent tabs
 - **Fullscreen** — Press `F` for distraction-free viewing
@@ -167,8 +167,9 @@ Or install from [Open VSX Registry](https://open-vsx.org/extension/buvan/sql-cra
 ```bash
 git clone https://github.com/buva7687/sql-crack.git
 cd sql-crack
-npm install
+npm ci
 npm run package
+npx @vscode/vsce@3.9.2 package --no-dependencies
 ```
 
 Install the generated `.vsix` file via **Extensions → ••• → Install from VSIX**.
@@ -182,7 +183,7 @@ Install the generated `.vsix` file via **Extensions → ••• → Install fr
 1. Open any `.sql` file
 2. Visualize using one of:
    - Click the **graph icon** in the editor title bar
-   - Press `Cmd+Shift+L` (Mac) / `Ctrl+Shift+L` (Windows/Linux)
+   - Press `Cmd+K, then Q` (Mac) / `Ctrl+K, then Q` (Windows/Linux)
    - Right-click → **"SQL Crack: Visualize SQL Query"**
 
 > Cursor note: Some Cursor builds do not render custom editor-title icons consistently. If the title icon is not visible, run **SQL Crack: Visualize SQL Query** from the Command Palette (`Cmd/Ctrl+Shift+P`) or use the context menu.
@@ -203,7 +204,7 @@ Analyze cross-file dependencies:
 
 | Shortcut | Action |
 |----------|--------|
-| `Cmd/Ctrl + Shift + L` | Open visualization |
+| `Cmd/Ctrl + K`, then `Q` | Open visualization |
 | `Alt + P` | Open SQL Crack quick actions |
 | `Cmd/Ctrl + F` or `/` | Search nodes |
 | `Enter` | Next search result |
@@ -310,7 +311,7 @@ Files with these extensions will show the SQL Crack icon in the editor title bar
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `sqlCrack.advanced.defaultTheme` | `light` | Theme: `auto`, `dark`, `light` |
+| `sqlCrack.advanced.defaultTheme` | `auto` | Theme: `auto`, `dark`, `light` |
 | `sqlCrack.advanced.showDiagnosticsInProblems` | `false` | Show SQL Crack hints/errors in VS Code Problems panel |
 | `sqlCrack.advanced.showDeadColumnHints` | `true` | Show warnings for unused columns |
 | `sqlCrack.advanced.combineDdlStatements` | `false` | Merge consecutive DDL into single tab |
@@ -354,6 +355,12 @@ If the extension behaves unexpectedly:
 3. For workspace index issues, re-run **"SQL Crack: Analyze Workspace Dependencies"** to rebuild the index, or set **Cache TTL** to `0` (Advanced) and reload the window
 
 ---
+
+## Analysis Limits
+
+SQL Crack performs static analysis; it does not connect to a database or execute SQL. Unknown schemas, dynamic SQL, wildcard columns, and unsupported syntax can produce incomplete lineage. Parse warnings and partial-result hints identify these limits. Nested CTEs that cannot be flattened without changing scope return a partial visualization rather than inferred bindings. Review the SQL before using a dependency or impact result to make a production change.
+
+Workspace parsing runs in bounded background workers. A file that exceeds the analysis timeout is skipped with an error so the remaining files can be indexed. SQL Flow follows the VS Code theme by default; choose an explicit theme in Settings to override it. File reading and visualization are available in Restricted Mode. Filesystem-backed local and remote workspaces are supported; virtual workspaces are not.
 
 ## Privacy
 
@@ -439,7 +446,7 @@ src/
 - ✅ **Phase 6** — Large-file modular refactor (parser/renderer/workspace UI split into focused modules)
 - ✅ **Phase 7** — Export preview with PDF support
 
-`0.9.4` is a stable release focused on consistent Workspace Graph navigation, explicit index trust signals, reproducible publishing, cross-platform smoke testing, and release documentation. New dialect and parser features resume in later releases.
+The 1.0 release focuses on accurate analysis, responsive workspace indexing, accessible navigation, secure local processing, and reproducible packaging. See [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) for publication gates.
 
 `0.9.0`: Security & reliability hardening — production dependency upgrades (`npm audit --omit=dev` reports 0 advisories), cryptographically strong CSP nonces and collision-free pin/tab IDs, stricter HTML-attribute / DOT / Mermaid export escaping, source-scoped auto-refresh and cursor-follow, a workspace index cache keyed by scope/dialect/config, and a non-blocking parser-worker timeout.
 

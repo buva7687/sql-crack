@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main, dev]
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -17,6 +20,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
@@ -61,6 +66,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -81,6 +88,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -92,7 +101,10 @@ jobs:
         run: npm ci
 
       - name: Build extension
-        run: npm run package
+        run: npm run package -- --json=webpack-stats.json
+
+      - name: Verify third-party notices
+        run: npm run notices && git diff --exit-code -- THIRD_PARTY_NOTICES.txt
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -100,3 +112,31 @@ jobs:
           name: extension-build
           path: dist/
           retention-days: 7
+
+  extension-host:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        vscode: ['1.85.0', stable]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+      - run: npm ci
+      - run: npm run package
+      - name: Test extension host (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:extension-host
+        env:
+          VSCODE_TEST_VERSION: ${{ matrix.vscode }}
+      - name: Test extension host (macOS and Windows)
+        if: runner.os != 'Linux'
+        run: npm run test:extension-host
+        env:
+          VSCODE_TEST_VERSION: ${{ matrix.vscode }}

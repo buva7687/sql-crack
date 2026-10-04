@@ -81,7 +81,7 @@ let createdElements: FakeElement[] = [];
  */
 export function createFakeElement(tagName: string, namespaceURI: string | null = null): FakeElement {
     const attrs = new Map<string, string>();
-    const listeners = new Map<string, Function[]>();
+    const listeners = new Map<string, ((...args: any[]) => any)[]>();
 
     const el: FakeElement = {
         tagName,
@@ -168,13 +168,13 @@ export function createFakeElement(tagName: string, namespaceURI: string | null =
             return findAllDescendants(el, selector);
         }),
 
-        addEventListener: jest.fn((type: string, handler: Function) => {
+        addEventListener: jest.fn((type: string, handler: ((...args: any[]) => any)) => {
             if (!listeners.has(type)) {
                 listeners.set(type, []);
             }
             listeners.get(type)!.push(handler);
         }),
-        removeEventListener: jest.fn((type: string, handler: Function) => {
+        removeEventListener: jest.fn((type: string, handler: ((...args: any[]) => any)) => {
             const arr = listeners.get(type);
             if (arr) {
                 const idx = arr.indexOf(handler);

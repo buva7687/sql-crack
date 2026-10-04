@@ -85,7 +85,7 @@ describe('# is only a comment in MySQL-family dialects', () => {
             'schema.sql',
             'PostgreSQL'
         );
-        expect(definitions.map(definition => `${definition.name}:${definition.sql}`).sort()).toEqual([
+        expect(definitions.map(definition => `${definition.name}:${definition.sql?.replace(/;$/, '')}`).sort()).toEqual([
             't9:CREATE TABLE t9 (id INT)',
             'v1:CREATE VIEW v1 AS SELECT a # b AS x FROM t1',
         ]);

@@ -6,10 +6,14 @@
 - [ ] Confirm `package.json` and `package-lock.json` contain the release version.
 - [ ] Confirm `release.config.json` uses `pre-release` for a candidate or `stable` for a normal release.
 - [ ] Date the versioned `CHANGELOG.md` heading on the intended publication day.
-- [ ] Run `node scripts/validateReleaseChangelog.js 0.9.4` after setting the date and before merging; a push to `main` starts publication.
+- [ ] Run `node scripts/validateReleaseChangelog.js <version>` after setting the date and before merging; a push to `main` starts publication.
 - [ ] Run `npm run audit:prod`, `npm run typecheck`, `npm run lint`, `npm run test`, `npm run test:perf`, and `npm run package`.
 - [ ] Package a local VSIX with `npx @vscode/vsce@3.9.2 package --no-dependencies` (add `--pre-release` for a candidate) and inspect its file list.
-- [ ] Wait for the required Node 20, Node 22, performance, and build checks on the PR.
+- [ ] Wait for Node 20/22, performance, packaging, and Linux/macOS/Windows extension-host checks on the PR.
+- [ ] Run the extension-host smoke test against VS Code 1.85 and stable.
+- [ ] Manually verify keyboard-only navigation, high contrast, exports, and a clean install/update from the previous stable extension.
+- [ ] Confirm bundled walkthrough assets and THIRD_PARTY_NOTICES.txt are in the VSIX.
+- [ ] Run the full dependency audit (`npm audit`) and investigate new advisories.
 
 ## Publish
 
@@ -19,9 +23,9 @@
 - [ ] Confirm the GitHub release contains `sql-crack-vX.Y.Z.vsix`.
 - [ ] Confirm the version appears on the VS Code Marketplace and Open VSX.
 
-## 0.9.4 Stable Release
+## Stable Release
 
-- Keep `package.json` at `0.9.4` and `release.config.json` set to `stable`. The workflow publishes the GitHub, Marketplace, and Open VSX artifacts as stable releases.
+- Set the intended release version in both package files and keep `release.config.json` set to `stable`. The workflow publishes the GitHub, Marketplace, and Open VSX artifacts as stable releases.
 - Confirm both a clean install and an update from the previous stable extension before publication.
 
 ## Resume a Partial Release

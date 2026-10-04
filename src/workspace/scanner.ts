@@ -3,33 +3,31 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { WorkspaceAnalysisClient, WorkspaceAnalysisError } from './analysisClient';
 import { ProgressCallback, CancellationToken } from './types';
 import { normalizeFileExtensions } from '../shared/fileExtensions';
 import {
     FileAnalysis,
     SqlDialect,
-    SchemaExtractor,
-    ReferenceExtractor
 } from './extraction';
 
 /**
  * Scans workspace for SQL files and analyzes them
  */
 export class WorkspaceScanner {
-    private schemaExtractor: SchemaExtractor;
-    private referenceExtractor: ReferenceExtractor;
+    private readonly analysisClient = new WorkspaceAnalysisClient();
     private dialect: SqlDialect;
     private maxFileSize: number;
     private scopeUri: vscode.Uri | undefined;
     private readonly maxConcurrentAnalyses = 4;
 
     constructor(dialect: SqlDialect = 'MySQL', maxFileSize: number = 10 * 1024 * 1024, scopeUri?: vscode.Uri) {
-        this.schemaExtractor = new SchemaExtractor();
-        this.referenceExtractor = new ReferenceExtractor();
         this.dialect = dialect;
         this.maxFileSize = maxFileSize; // Default 10MB
         this.scopeUri = scopeUri;
     }
+
+    dispose(): void {this.analysisClient.dispose();}
 
     /**
      * Get the list of file extensions to scan, including .sql and any
@@ -116,9 +114,10 @@ export class WorkspaceScanner {
     /**
      * Analyze a single SQL file
      */
-    async analyzeFile(uri: vscode.Uri): Promise<FileAnalysis> {
+    async analyzeFile(uri: vscode.Uri, cancellationToken?: CancellationToken): Promise<FileAnalysis> {
         const filePath = uri.fsPath;
         const fileName = path.basename(filePath);
+        let fileMetadata: {lastModified: number; contentHash: string; fileSize?: number} = {lastModified: Date.now(), contentHash: ''};
 
         try {
             // Check file size first
@@ -142,22 +141,10 @@ export class WorkspaceScanner {
 
             // Generate content hash for change detection
             const contentHash = this.generateContentHash(sql);
+            fileMetadata = {lastModified: stat.mtime, contentHash, fileSize: stat.size};
 
-            // Extract definitions and references
-            const definitionResult = this.schemaExtractor.extractDefinitionsWithStatus(
-                sql,
-                filePath,
-                this.dialect
-            );
-            const referenceResult = this.referenceExtractor.extractReferencesWithStatus(
-                sql,
-                filePath,
-                this.dialect
-            );
-            const parseWarnings = [
-                ...definitionResult.warnings,
-                ...referenceResult.warnings,
-            ];
+            const analysis = await this.analysisClient.analyze(sql, filePath, this.dialect, cancellationToken);
+            const parseWarnings = analysis.warnings;
 
             return {
                 filePath,
@@ -165,12 +152,16 @@ export class WorkspaceScanner {
                 lastModified: stat.mtime,
                 contentHash,
                 fileSize: stat.size,
-                definitions: definitionResult.definitions,
-                references: referenceResult.references,
-                queries: referenceResult.queries,
+                definitions: analysis.definitions,
+                references: analysis.references,
+                queries: analysis.queries,
                 ...(parseWarnings.length > 0 ? { parseWarnings } : {})
             };
         } catch (error) {
+            if (error instanceof WorkspaceAnalysisError) {
+                return { filePath, fileName, ...fileMetadata,
+                    definitions: [], references: [], parseError: error.message };
+            }
             const readError = error instanceof Error ? error.message : 'Unknown error';
             const readErrorCode = error && typeof error === 'object' && 'code' in error
                 ? String(error.code)
@@ -226,7 +217,7 @@ export class WorkspaceScanner {
                     progressCallback(currentIndex + 1, files.length, fileName);
                 }
 
-                const analysis = await this.analyzeFile(file);
+                const analysis = await this.analyzeFile(file, cancellationToken);
                 results[currentIndex] = analysis;
             }
         };

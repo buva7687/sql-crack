@@ -73,6 +73,7 @@ export function attachResizablePanel({
     const toggleBtn = document.createElement('button');
     toggleBtn.type = 'button';
     toggleBtn.className = 'sql-crack-resize-toggle';
+    toggleBtn.setAttribute('aria-controls', panel.id);
     toggleBtn.setAttribute('data-panel-key', storageKey);
     toggleBtn.style.cssText = `
         width: 12px;
@@ -117,6 +118,8 @@ export function attachResizablePanel({
 
     const applyCollapseState = (nextCollapsed: boolean): void => {
         collapsed = nextCollapsed;
+        toggleBtn.setAttribute('aria-label', `${collapsed ? 'Expand' : 'Collapse'} ${storageKey} panel`);
+        toggleBtn.setAttribute('aria-expanded', String(!collapsed));
         try { window.localStorage.setItem(collapsedKey, String(collapsed)); } catch (e) { window.debugLogging && console.debug('[resizablePanel] localStorage write failed:', e); }
 
         if (collapsed) {

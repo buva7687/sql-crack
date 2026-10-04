@@ -17,8 +17,8 @@ module.exports = (_env, argv = {}) => {
   const resolvedMode = argv.mode || process.env.NODE_ENV;
   const isProduction = resolvedMode === 'production';
   const sharedOutputKeep = isProduction
-    ? /^(?:extension|webview|parser\.worker)\.js$|^webview\.js\.LICENSE\.txt$/
-    : /^(?:extension|webview|parser\.worker)\.js(?:\.map)?$|^webview\.js\.LICENSE\.txt$/;
+    ? /^(?:extension|webview|parser\.worker|workspace\.worker)\.js$|^webview\.js\.LICENSE\.txt$/
+    : /^(?:extension|webview|parser\.worker|workspace\.worker)\.js(?:\.map)?$|^webview\.js\.LICENSE\.txt$/;
 
   /**@type {import('webpack').Configuration}*/
   const extensionConfig = {
@@ -79,6 +79,8 @@ module.exports = (_env, argv = {}) => {
     },
     resolve: {
       extensions: ['.ts', '.js'],
+      // PDF export only uses addImage; jsPDF's optional HTML renderer is unused.
+      alias: { html2canvas: false, canvg: false, dompurify: false },
       fallback: {
         "process": require.resolve("process/browser"),
         "path": false,
@@ -128,5 +130,11 @@ module.exports = (_env, argv = {}) => {
     devtool: isProduction ? false : 'source-map'
   };
 
-  return [extensionConfig, webviewConfig];
+  const workspaceWorkerConfig = {
+    ...extensionConfig,
+    entry: './src/workspace/analysis.worker.ts',
+    plugins: [new webpack.NormalModuleReplacementPlugin(/(?:^|\/)logger$/, path.resolve(__dirname, 'src/workspace/workerLogger.ts'))],
+    output: { path: path.resolve(__dirname, 'dist'), filename: 'workspace.worker.js', libraryTarget: 'commonjs2' }
+  };
+  return [extensionConfig, webviewConfig, workspaceWorkerConfig];
 };

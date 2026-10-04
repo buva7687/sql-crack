@@ -35,7 +35,7 @@ Thank you for your interest in contributing. Here’s how to get started.
 2. **Make your changes** and ensure:
    - `npm install` has been run (required before any build/test commands).
    - `npx tsc --noEmit` passes with zero errors.
-   - `npx jest --silent` passes — all tests green.
+   - `npm run test` passes. Run `npm run test:perf` separately for the performance gates.
    - `npm run compile` succeeds.
    - `npm run lint` passes.
 
@@ -54,3 +54,5 @@ Thank you for your interest in contributing. Here’s how to get started.
 - Follow existing code style and patterns in the project.
 
 Thanks for contributing.
+
+When changing bundled runtime dependencies, regenerate license notices with `npm run package -- --json=webpack-stats.json` followed by `npm run notices`. Commit the updated `THIRD_PARTY_NOTICES.txt`; CI checks that it matches the production bundle. Use `npm run test:extension-host` to test the real desktop extension (set `VSCODE_TEST_VERSION=1.85.0` for the minimum supported release). These tests use a temporary workspace and profile.

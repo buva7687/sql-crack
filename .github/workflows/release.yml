@@ -33,6 +33,9 @@ concurrency:
   group: release-${{ github.workflow }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -46,6 +49,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 0
 
       - name: Determine whether a release is needed
@@ -104,24 +108,24 @@ jobs:
           fi
           echo "release_channel=$RELEASE_CHANNEL" >> "$GITHUB_OUTPUT"
 
-  release:
+  build:
     needs: check
     if: needs.check.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: read
     env:
       VERSION: ${{ needs.check.outputs.version }}
       TAG_NAME: v${{ needs.check.outputs.version }}
       RELEASE_CHANNEL: ${{ needs.check.outputs.release_channel }}
       RELEASE_MODE: ${{ needs.check.outputs.release_mode }}
-      VSCE_PAT: ${{ secrets.VSCE_PAT }}
-      OVSX_PAT: ${{ secrets.OVSX_PAT }}
+
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           fetch-depth: 0
           ref: ${{ needs.check.outputs.checkout_ref }}
 
@@ -179,7 +183,10 @@ jobs:
         run: npm run test:perf
 
       - name: Build extension
-        run: npm run package
+        run: npm run package -- --json=webpack-stats.json
+
+      - name: Verify third-party notices
+        run: npm run notices && git diff --exit-code -- THIRD_PARTY_NOTICES.txt
 
       - name: Package VSIX
         run: |
@@ -190,18 +197,47 @@ jobs:
           fi
           npx --yes @vscode/vsce@3.9.2 package "${PRERELEASE_ARGS[@]}" --no-dependencies --out "sql-crack-${TAG_NAME}.vsix"
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-vsix
+          path: sql-crack-${{ env.TAG_NAME }}.vsix
+          if-no-files-found: error
+
+  release:
+    needs: [check, build]
+    if: needs.check.outputs.should_release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      TAG_NAME: v${{ needs.check.outputs.version }}
+      RELEASE_CHANNEL: ${{ needs.check.outputs.release_channel }}
+      RELEASE_MODE: ${{ needs.check.outputs.release_mode }}
+      HAS_VSCE_PAT: ${{ secrets.VSCE_PAT != '' }}
+      HAS_OVSX_PAT: ${{ secrets.OVSX_PAT != '' }}
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-vsix
       - name: Create GitHub release and tag
         if: ${{ env.RELEASE_MODE == 'full-release' || env.RELEASE_MODE == 'github-release' }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG_NAME }}
+          target_commitish: ${{ needs.check.outputs.checkout_ref }}
           name: ${{ env.TAG_NAME }}
           files: sql-crack-${{ env.TAG_NAME }}.vsix
           generate_release_notes: true
           prerelease: ${{ env.RELEASE_CHANNEL == 'pre-release' }}
 
       - name: Publish to VS Code Marketplace
-        if: ${{ (env.RELEASE_MODE == 'full-release' || env.RELEASE_MODE == 'vscode-marketplace') && env.VSCE_PAT != '' }}
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        if: ${{ (env.RELEASE_MODE == 'full-release' || env.RELEASE_MODE == 'vscode-marketplace') && env.HAS_VSCE_PAT == 'true' }}
         run: |
           set -euo pipefail
           PRERELEASE_ARGS=()
@@ -211,17 +247,19 @@ jobs:
           npx --yes @vscode/vsce@3.9.2 publish "${PRERELEASE_ARGS[@]}" --packagePath "sql-crack-${TAG_NAME}.vsix"
 
       - name: Skip VS Code Marketplace publish
-        if: ${{ env.RELEASE_MODE == 'full-release' && env.VSCE_PAT == '' }}
+        if: ${{ env.RELEASE_MODE == 'full-release' && env.HAS_VSCE_PAT != 'true' }}
         run: echo "VSCE_PAT not configured; skipping VS Code Marketplace publish."
 
       - name: Require VS Code Marketplace token for targeted retry
-        if: ${{ env.RELEASE_MODE == 'vscode-marketplace' && env.VSCE_PAT == '' }}
+        if: ${{ env.RELEASE_MODE == 'vscode-marketplace' && env.HAS_VSCE_PAT != 'true' }}
         run: |
           echo "VSCE_PAT is required for a VS Code Marketplace retry." >&2
           exit 1
 
       - name: Publish to Open VSX
-        if: ${{ (env.RELEASE_MODE == 'full-release' || env.RELEASE_MODE == 'open-vsx') && env.OVSX_PAT != '' }}
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        if: ${{ (env.RELEASE_MODE == 'full-release' || env.RELEASE_MODE == 'open-vsx') && env.HAS_OVSX_PAT == 'true' }}
         run: |
           set -euo pipefail
           PRERELEASE_ARGS=()
@@ -231,11 +269,11 @@ jobs:
           npx --yes ovsx@1.2.0 publish "sql-crack-${TAG_NAME}.vsix" "${PRERELEASE_ARGS[@]}"
 
       - name: Skip Open VSX publish
-        if: ${{ env.RELEASE_MODE == 'full-release' && env.OVSX_PAT == '' }}
+        if: ${{ env.RELEASE_MODE == 'full-release' && env.HAS_OVSX_PAT != 'true' }}
         run: echo "OVSX_PAT not configured; skipping Open VSX publish."
 
       - name: Require Open VSX token for targeted retry
-        if: ${{ env.RELEASE_MODE == 'open-vsx' && env.OVSX_PAT == '' }}
+        if: ${{ env.RELEASE_MODE == 'open-vsx' && env.HAS_OVSX_PAT != 'true' }}
         run: |
           echo "OVSX_PAT is required for an Open VSX retry." >&2
           exit 1

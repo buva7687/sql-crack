@@ -1,3 +1,4 @@
+jest.mock('../../../src/workspace/analysisClient', () => require('../../__mocks__/workspaceAnalysisClient'));
 /**
  * WorkspaceScanner Scope Tests
  *

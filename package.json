@@ -31,7 +31,8 @@
     "onCommand:sql-crack.visualize",
     "onCommand:sql-crack.analyzeWorkspace",
     "onCommand:sql-crack.restorePinnedTabs",
-    "onCommand:sql-crack.showWorkspaceUxMetrics"
+    "onCommand:sql-crack.showWorkspaceUxMetrics",
+    "onStartupFinished"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -91,7 +92,7 @@
       "commandPalette": [
         {
           "command": "sql-crack.visualize",
-          "when": "editorLangId == sql || sqlCrack.isAdditionalSqlFile",
+          "when": "resourceExtname == .sql || editorLangId == sql || sqlCrack.isAdditionalSqlFile",
           "group": "navigation"
         },
         {
@@ -100,7 +101,7 @@
         },
         {
           "command": "sql-crack.showWorkspaceUxMetrics",
-          "when": "workspaceFolderCount > 0"
+          "when": "workspaceFolderCount > 0 && config.sqlCrack.advanced.workspaceUxInstrumentation"
         },
         {
           "command": "sql-crack.restorePinnedTabs",
@@ -111,8 +112,8 @@
     "keybindings": [
       {
         "command": "sql-crack.visualize",
-        "key": "ctrl+shift+l",
-        "mac": "cmd+shift+l",
+        "key": "ctrl+k q",
+        "mac": "cmd+k q",
         "when": "resourceExtname == .sql || editorLangId == sql || sqlCrack.isAdditionalSqlFile"
       }
     ],
@@ -301,16 +302,16 @@
         },
         "sqlCrack.advanced.defaultTheme": {
           "type": "string",
-          "default": "light",
+          "default": "auto",
           "enum": [
             "auto",
             "dark",
             "light"
           ],
           "enumDescriptions": [
-            "Automatically match VS Code theme",
+            "Automatically match VS Code theme (default)",
             "Always use dark theme",
-            "Always use light theme (default)"
+            "Always use light theme"
           ],
           "description": "Default theme for SQL Crack visualizations. 'auto' matches VS Code theme, 'dark' or 'light' forces a specific theme. (Advanced)"
         },
@@ -403,25 +404,37 @@
             "id": "openSqlFile",
             "title": "Open a SQL file",
             "description": "Open any `.sql` file in your workspace to get started.\n\n[Open a SQL file](command:workbench.action.quickOpen)",
-            "media": { "image": "assets/video_demo.gif", "altText": "SQL Crack query visualization demo" }
+            "media": {
+              "image": "assets/walkthrough/openSqlFile.svg",
+              "altText": "SQL Crack query visualization demo"
+            }
           },
           {
             "id": "visualizeQuery",
             "title": "Visualize your query",
-            "description": "Press `Cmd+Shift+L` (Mac) or `Ctrl+Shift+L` (Windows/Linux) to open the interactive flow diagram.\n\n[Visualize SQL Query](command:sql-crack.visualize)",
-            "media": { "image": "assets/video_demo.gif", "altText": "Interactive SQL flow diagram demo" }
+            "description": "Press `Cmd+K, then Q` (Mac) or `Ctrl+K, then Q` (Windows/Linux) to open the interactive flow diagram.\n\n[Visualize SQL Query](command:sql-crack.visualize)",
+            "media": {
+              "image": "assets/walkthrough/visualizeQuery.svg",
+              "altText": "Interactive SQL flow diagram demo"
+            }
           },
           {
             "id": "exploreWorkspace",
             "title": "Explore workspace dependencies",
             "description": "See how your SQL files relate to each other. Right-click a folder in Explorer and choose **Analyze Workspace Dependencies**.\n\n[Analyze Workspace](command:sql-crack.analyzeWorkspace)",
-            "media": { "image": "assets/video_demo.gif", "altText": "SQL workspace dependency visualization demo" }
+            "media": {
+              "image": "assets/walkthrough/exploreWorkspace.svg",
+              "altText": "SQL workspace dependency visualization demo"
+            }
           },
           {
             "id": "columnLineage",
             "title": "Try column lineage",
             "description": "Press `C` while viewing a query visualization to toggle column-level lineage. Click a column to trace its data flow through the query.",
-            "media": { "image": "assets/video_demo.gif", "altText": "Column lineage visualization demo" }
+            "media": {
+              "image": "assets/walkthrough/columnLineage.svg",
+              "altText": "Column lineage visualization demo"
+            }
           }
         ]
       }
@@ -444,19 +457,22 @@
     "audit:prod": "npm audit --omit=dev --audit-level=moderate",
     "precheck": "npm run typecheck && npm run lint && npm run test:ci",
     "prepare": "node scripts/install-hooks.js || true",
-    "benchmark": "npx ts-node tests/benchmark/parseBenchmark.ts"
+    "benchmark": "npx ts-node tests/benchmark/parseBenchmark.ts",
+    "test:extension-host": "node scripts/runExtensionHostTests.js",
+    "notices": "node scripts/generateThirdPartyNotices.js"
   },
   "devDependencies": {
     "@types/d3-force": "^3.0.10",
     "@types/dagre": "^0.7.53",
     "@types/jest": "^30.0.0",
     "@types/node": "^20.x",
-    "@types/vscode": "^1.85.0",
-    "@typescript-eslint/eslint-plugin": "^6.15.0",
-    "@typescript-eslint/parser": "^6.15.0",
+    "@types/vscode": "1.85.0",
+    "@typescript-eslint/eslint-plugin": "^8.71.0",
+    "@typescript-eslint/parser": "^8.71.0",
+    "@vscode/test-electron": "^3.1.0",
     "eslint": "^8.56.0",
     "jest": "^30.2.0",
-    "jest-junit": "^16.0.0",
+    "jest-junit": "17.0.0",
     "process": "^0.11.10",
     "ts-jest": "^29.4.6 || ^30.0.0",
     "ts-loader": "^9.5.1",
@@ -473,5 +489,22 @@
   "overrides": {
     "lodash": "^4.18.1",
     "dompurify": "^3.4.16"
+  },
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "Workspace indexing and lineage navigation require filesystem-backed workspace folders."
+    }
+  },
+  "bugs": {
+    "url": "https://github.com/buva7687/sql-crack/issues"
+  },
+  "homepage": "https://github.com/buva7687/sql-crack#readme",
+  "galleryBanner": {
+    "color": "#111827",
+    "theme": "dark"
   }
 }

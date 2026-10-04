@@ -65,3 +65,9 @@ CONTRIBUTING.md
 RELEASE_CHECKLIST.md
 SECURITY.md
 WORKSPACE_GRAPH_PROGRESS_TODO.md
+
+# Production bundle module inventory used to regenerate license notices
+webpack-stats.json
+
+# Internal release review, not Marketplace documentation
+RELEASE_READINESS.md

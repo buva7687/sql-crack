@@ -32,10 +32,13 @@ describe('fullscreen hide/restore (M13)', () => {
     const originalRequestAnimationFrame = (global as any).requestAnimationFrame;
 
     beforeEach(() => {
+        jest.useFakeTimers();
         (global as any).requestAnimationFrame = () => 0;
     });
 
     afterEach(() => {
+        jest.runAllTimers();
+        jest.useRealTimers();
         (global as any).document = originalDocument;
         (global as any).requestAnimationFrame = originalRequestAnimationFrame;
     });

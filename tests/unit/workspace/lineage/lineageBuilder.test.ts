@@ -20,6 +20,7 @@ import { getQualifiedKey } from '../../../../src/workspace/identifiers';
 import { logger } from '../../../../src/logger';
 import { SchemaExtractor } from '../../../../src/workspace/extraction/schemaExtractor';
 import { ReferenceExtractor } from '../../../../src/workspace/extraction/referenceExtractor';
+import { buildDependencyGraph } from '../../../../src/workspace/dependencyGraph';
 import type { WorkspaceIndex, SchemaDefinition, FileAnalysis, TableReference } from '../../../../src/workspace/types';
 import type { ColumnInfo } from '../../../../src/workspace/extraction/types';
 
@@ -113,8 +114,78 @@ function makeFileAnalysis(
 // --- Tests ---
 
 describe('LineageBuilder', () => {
+    it('keeps repeated CTE names independent across statements on one line', () => {
+        const filePath = '/same-line.sql';
+        const sql = 'CREATE TABLE a (id INT); CREATE TABLE b (id INT); CREATE VIEW va AS WITH x AS (SELECT id FROM a) SELECT id FROM x; CREATE VIEW vb AS WITH x AS (SELECT id FROM b) SELECT id FROM x;';
+        const defs = new SchemaExtractor().extractDefinitions(sql, filePath, 'PostgreSQL');
+        const result = new ReferenceExtractor().extractReferencesWithStatus(sql, filePath, 'PostgreSQL');
+        const index = makeIndex(defs, new Map([[filePath, makeFileAnalysis(filePath, defs, result.references, result.queries)]]));
+        const graph = new LineageBuilder().buildFromIndex(index);
+        expect([...graph.nodes.values()].filter(node => node.type === 'cte')).toHaveLength(2);
+        expect(graph.edges.filter(edge => edge.targetId.startsWith('view:')).map(edge => `${edge.sourceId}->${edge.targetId}`).sort()).toEqual(['table:a->view:va','table:b->view:vb']);
+        const ctes = [...graph.nodes.values()].filter(node => node.type === 'cte');
+        for (const [source, view] of [['a', 'va'], ['b', 'vb']]) {
+            const edge = graph.columnEdges.find(edge => edge.sourceTableId === `table:${source}`);
+            expect(edge).toBeDefined();
+            expect(ctes.some(cte => cte.id === edge!.targetTableId)).toBe(true);
+            expect(graph.columnEdges).toEqual(expect.arrayContaining([expect.objectContaining({sourceTableId: edge!.targetTableId, targetTableId: `view:${view}`})]));
+        }
+    });
+
+    it('does not reopen or reparse a file whose worker analysis failed', async () => {
+        const analysis = makeFileAnalysis('/timeout.sql');
+        analysis.parseError = 'Workspace analysis exceeded 10s; file skipped';
+        await new LineageBuilder().buildFromIndexAsync(makeIndex([], new Map([['/timeout.sql', analysis]])));
+        expect(mockedFs.promises.readFile).not.toHaveBeenCalled();
+    });
+
+    it('does not attach another statement to a literal-only view', () => {
+        const filePath = '/audit.sql';
+        const sql = 'CREATE TABLE unrelated (id INT);\nCREATE VIEW constants AS SELECT 1 AS value;\nSELECT id FROM unrelated;';
+        const defs = new SchemaExtractor().extractDefinitions(sql, filePath, 'PostgreSQL');
+        const result = new ReferenceExtractor().extractReferencesWithStatus(sql, filePath, 'PostgreSQL');
+        const index = makeIndex(defs, new Map([[filePath, makeFileAnalysis(filePath, defs, result.references, result.queries)]]));
+        const graph = new LineageBuilder().buildFromIndex(index);
+        expect(graph.edges.filter(edge => edge.targetId === 'view:constants')).toEqual([]);
+        expect(buildDependencyGraph(index, 'tables').edges).toEqual([]);
+    });
+
     beforeEach(() => {
         jest.resetAllMocks();
+    });
+
+    it('preserves supported column lineage when another statement needs fallback', () => {
+        const filePath = '/mixed.sql';
+        const sql = 'CREATE TABLE accounts (id INT); CREATE VIEW account_ids (id) AS SELECT id FROM accounts; VACUUM accounts;';
+        const defs = new SchemaExtractor().extractDefinitions(sql, filePath, 'PostgreSQL');
+        const result = new ReferenceExtractor().extractReferencesWithStatus(sql, filePath, 'PostgreSQL');
+        expect(result.warnings.length).toBeGreaterThan(0);
+        expect(defs.find(def => def.name === 'account_ids')?.columns.map(column => column.name)).toEqual(['id']);
+        const graph = new LineageBuilder().buildFromIndex(makeIndex(defs, new Map([[filePath, makeFileAnalysis(filePath, defs, result.references, result.queries)]])));
+        expect(graph.columnEdges).toEqual(expect.arrayContaining([
+            expect.objectContaining({sourceTableId: 'table:accounts', sourceColumnName: 'id', targetTableId: 'view:account_ids', targetColumnName: 'id'}),
+        ]));
+    });
+
+    it('keeps equal CTE names in separate files independent', () => {
+        const files = new Map<string, FileAnalysis>();
+        const definitions: SchemaDefinition[] = [];
+        for (const prefix of ['a', 'b']) {
+            const filePath = `/${prefix}.sql`;
+            const sql = `CREATE TABLE ${prefix}_source (id INT); CREATE VIEW ${prefix}_view AS WITH source AS (SELECT id FROM ${prefix}_source) SELECT id FROM source;`;
+            const defs = new SchemaExtractor().extractDefinitions(sql, filePath, 'PostgreSQL');
+            const result = new ReferenceExtractor().extractReferencesWithStatus(sql, filePath, 'PostgreSQL');
+            definitions.push(...defs);
+            files.set(filePath, makeFileAnalysis(filePath, defs, result.references, result.queries));
+        }
+        const graph = new LineageBuilder({includeExternal: true, includeColumns: true, dialect: 'PostgreSQL'}).buildFromIndex(makeIndex(definitions, files));
+        const ctes = [...graph.nodes.values()].filter(node => node.type === 'cte' && node.name === 'source');
+        expect(ctes).toHaveLength(2);
+        for (const prefix of ['a', 'b']) {
+            const cte = ctes.find(node => node.filePath === `/${prefix}.sql`)!;
+            expect(graph.columnEdges.filter(edge => edge.targetTableId === cte.id).map(edge => edge.sourceTableId)).toEqual([`table:${prefix}_source`]);
+            expect(graph.columnEdges.filter(edge => edge.sourceTableId === cte.id).map(edge => edge.targetTableId)).toEqual([`view:${prefix}_view`]);
+        }
     });
 
     describe('buildFromIndex', () => {
@@ -187,7 +258,7 @@ describe('LineageBuilder', () => {
                 expect.objectContaining({
                     sourceTableId: 'table:source',
                     sourceColumnName: 'name',
-                    targetTableId: 'cte:c',
+                    targetTableId: expect.stringMatching(/^cte:.*:c$/),
                     targetColumnName: 'uname',
                 }),
             ]));
@@ -195,7 +266,7 @@ describe('LineageBuilder', () => {
                 expect.objectContaining({
                     sourceTableId: 'table:source',
                     sourceColumnName: 'uname',
-                    targetTableId: 'cte:c',
+                    targetTableId: expect.stringMatching(/^cte:.*:c$/),
                 }),
             ]));
             expect(builder.columnEdges.some(edge => edge.targetTableId === 'table:source')).toBe(false);
@@ -375,8 +446,8 @@ describe('LineageBuilder', () => {
             const builder = new LineageBuilder();
             builder.buildFromIndex(index);
 
-            expect(builder.nodes.has('cte:recent_orders')).toBe(true);
-            expect(builder.nodes.get('cte:recent_orders')!.type).toBe('cte');
+            expect([...builder.nodes.values()].some(node => node.type === 'cte' && node.name === 'recent_orders')).toBe(true);
+            expect([...builder.nodes.values()].find(node => node.type === 'cte' && node.name === 'recent_orders')!.type).toBe('cte');
         });
 
         it('logs parser fallback when CTE AST parsing fails and regex extraction is used', async () => {
@@ -834,7 +905,7 @@ describe('LineageBuilder', () => {
                 await builder.buildFromIndexAsync(index);
 
                 // Column-list CTEs are only recoverable from the AST.
-                expect(builder.nodes.get('cte:q')).toEqual(expect.objectContaining({ name: 'q' }));
+                expect([...builder.nodes.values()].find(node => node.type === 'cte' && node.name === 'q')).toEqual(expect.objectContaining({ name: 'q' }));
                 expect(astifySpy).toHaveBeenCalled();
                 for (const [input] of astifySpy.mock.calls) {
                     expect(String(input)).toMatch(/^\s*WITH q/);
@@ -856,7 +927,7 @@ describe('LineageBuilder', () => {
             const builder = new LineageBuilder();
             await builder.buildFromIndexAsync(index);
 
-            expect(builder.nodes.has('cte:my_cte')).toBe(true);
+            expect([...builder.nodes.values()].some(node => node.type === 'cte' && node.name === 'my_cte')).toBe(true);
         });
 
         it('extracts multiline RECURSIVE CTEs with the correct name line', async () => {
@@ -870,7 +941,7 @@ describe('LineageBuilder', () => {
             const builder = new LineageBuilder();
             await builder.buildFromIndexAsync(index);
 
-            expect(builder.nodes.get('cte:e')).toEqual(expect.objectContaining({
+            expect([...builder.nodes.values()].find(node => node.type === 'cte' && node.name === 'e')).toEqual(expect.objectContaining({
                 name: 'e',
                 lineNumber: 2
             }));
@@ -917,13 +988,13 @@ describe('LineageBuilder', () => {
 
             (builder as any).extractCTEsWithRegex(sql, 'comments.sql', cteNames);
 
-            expect(Array.from(cteNames.keys())).toEqual(['first_cte', 'second_cte']);
-            expect(cteNames.get('first_cte')).toEqual({
+            expect(Array.from(cteNames.values()).map(cte => cte.name)).toEqual(['first_cte', 'second_cte']);
+            expect(Array.from(cteNames.values()).find(cte => cte.name === 'first_cte')).toEqual({
                 name: 'first_cte',
                 filePath: 'comments.sql',
                 lineNumber: 5
             });
-            expect(cteNames.get('second_cte')).toEqual({
+            expect(Array.from(cteNames.values()).find(cte => cte.name === 'second_cte')).toEqual({
                 name: 'second_cte',
                 filePath: 'comments.sql',
                 lineNumber: 8
@@ -945,8 +1016,8 @@ describe('LineageBuilder', () => {
 
             (builder as any).extractCTEsWithRegex(sql, 'quoted.sql', cteNames);
 
-            expect(Array.from(cteNames.keys())).toEqual(['real_cte']);
-            expect(cteNames.get('real_cte')?.lineNumber).toBe(3);
+            expect(Array.from(cteNames.values()).map(cte => cte.name)).toEqual(['real_cte']);
+            expect(Array.from(cteNames.values()).find(cte => cte.name === 'real_cte')?.lineNumber).toBe(3);
         });
 
         it('ignores CTE-like text inside PostgreSQL dollar-quoted strings', () => {
@@ -963,8 +1034,8 @@ describe('LineageBuilder', () => {
 
             (builder as any).extractCTEsWithRegex(sql, 'dollar-quoted.sql', cteNames);
 
-            expect(Array.from(cteNames.keys())).toEqual(['real_cte']);
-            expect(cteNames.get('real_cte')?.lineNumber).toBe(2);
+            expect(Array.from(cteNames.values()).map(cte => cte.name)).toEqual(['real_cte']);
+            expect(Array.from(cteNames.values()).find(cte => cte.name === 'real_cte')?.lineNumber).toBe(2);
         });
     });
 

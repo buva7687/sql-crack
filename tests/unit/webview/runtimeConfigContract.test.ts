@@ -8,7 +8,7 @@ describe('webview runtime config contract', () => {
     it('injects typed bootstrap config from visualization panel', () => {
         const panelSource = readSource('src/visualizationPanel.ts');
         expect(panelSource).toContain('window.sqlCrackConfig = {');
-        expect(panelSource).toContain('window.initialSqlCode =');
+        expect(panelSource).toContain('Object.assign(window, window.sqlCrackConfig)');
     });
 
     it('declares typed sqlCrackConfig on Window and uses it for runtime limits', () => {

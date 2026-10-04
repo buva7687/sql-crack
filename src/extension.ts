@@ -3,7 +3,6 @@ import * as path from 'path';
 import { VisualizationPanel } from './visualizationPanel';
 import { setCustomFunctions } from './dialects';
 import { logger } from './logger';
-import { parseSqlBatch, DEFAULT_VALIDATION_LIMITS } from './webview/sqlParser';
 import {
     createDiagnosticsFromBatch,
     SqlCrackCodeActionProvider,
@@ -13,6 +12,9 @@ import { normalizeDialect } from './shared/dialect';
 import { normalizeFileExtensions } from './shared/fileExtensions';
 import { normalizeAdvancedLimit } from './shared/limits';
 import { preprocessJinjaTemplates } from './webview/parser/dialects/jinjaPreprocessor';
+
+let diagnosticsParser: Promise<typeof import('./webview/sqlParser')> | undefined;
+const loadDiagnosticsParser = () => diagnosticsParser ??= import('./webview/sqlParser');
 
 // Track the last active SQL document for refresh functionality
 let lastActiveSqlDocument: vscode.TextDocument | null = null;
@@ -56,7 +58,7 @@ function loadAdditionalExtensions(): void {
  */
 function isSqlLikeDocument(document: vscode.TextDocument): boolean {
     // Check if it's a SQL language file
-    if (document.languageId === 'sql') {
+    if (document.languageId === 'sql' || path.extname(document.fileName).toLowerCase() === '.sql') {
         return true;
     }
 
@@ -77,6 +79,7 @@ function isSqlLikeDocument(document: vscode.TextDocument): boolean {
  */
 function getSqlCodeActionDocumentSelector(): vscode.DocumentSelector {
     const selectors: vscode.DocumentFilter[] = [
+        { scheme: 'file', pattern: '**/*.sql' },
         { language: 'sql', scheme: 'file' },
         { language: 'sql', scheme: 'untitled' },
     ];
@@ -156,7 +159,11 @@ export function activate(context: vscode.ExtensionContext) {
         return getConfig().get<boolean>('advanced.showDiagnosticsInProblems', false);
     };
 
-    const updateDiagnosticsForDocument = (document: vscode.TextDocument): void => {
+    const diagnosticRequests = new Map<string, number>();
+    const updateDiagnosticsForDocument = async (document: vscode.TextDocument): Promise<void> => {
+        const key = document.uri.toString();
+        const request = (diagnosticRequests.get(key) || 0) + 1;
+        diagnosticRequests.set(key, request);
         if (!isSqlLikeDocument(document)) {
             diagnosticsCollection.delete(document.uri);
             return;
@@ -184,12 +191,16 @@ export function activate(context: vscode.ExtensionContext) {
             const maxFileSizeKB = normalizeAdvancedLimit(config.get<number>('advanced.maxFileSizeKB', 100), 100, 10, 10000);
             const maxStatements = normalizeAdvancedLimit(config.get<number>('advanced.maxStatements', 50), 50, 1, 500);
             const combineDdlStatements = config.get<boolean>('advanced.combineDdlStatements', false);
+            const version = document.version;
+            const { parseSqlBatch } = await loadDiagnosticsParser();
+            if (diagnosticRequests.get(key) !== request || document.version !== version
+                || !shouldShowDiagnosticsInProblems() || document.isClosed) {return;}
             const batch = parseSqlBatch(
                 sql,
                 defaultDialect as any,
                 {
                     maxSqlSizeBytes: maxFileSizeKB * 1024,
-                    maxQueryCount: maxStatements || DEFAULT_VALIDATION_LIMITS.maxQueryCount,
+                    maxQueryCount: maxStatements,
                 },
                 {
                     combineDdlStatements,
@@ -462,6 +473,7 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     const documentCloseListener = vscode.workspace.onDidCloseTextDocument((document) => {
+        diagnosticRequests.delete(document.uri.toString());
         diagnosticsCollection.delete(document.uri);
         // Cancel any pending diagnostics refresh for the closed document.
         const docKey = document.uri.toString();
