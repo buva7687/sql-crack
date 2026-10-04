@@ -102,7 +102,7 @@ describe('phase 2.5 shared monospace font stack', () => {
         expect(renderer).toContain("import { MONO_FONT_STACK } from '../shared/themeTokens';");
         expect(renderer).toContain('font-family: ${MONO_FONT_STACK};');
         expect(edgeRenderer).toContain("import { EDGE_THEME, MONO_FONT_STACK } from '../../shared/themeTokens';");
-        expect(edgeRenderer).toContain('font-family: ${MONO_FONT_STACK};');
+        expect(edgeRenderer).toContain('monoFontStack: MONO_FONT_STACK,');
     });
 
     it('removes previous inline monospace stacks from updated renderers', () => {

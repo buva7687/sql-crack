@@ -2,10 +2,12 @@
 // Extracted from renderer.ts for modularity
 
 import { FlowEdge, FlowNode, LayoutType } from '../types';
-import { EDGE_COLORS, EDGE_DASH_PATTERNS, UI_COLORS, CONDITION_COLORS, getEdgeDashPattern } from '../constants/colors';
+import { EDGE_COLORS, EDGE_DASH_PATTERNS, CONDITION_COLORS, getEdgeDashPattern } from '../constants/colors';
 import { EDGE_THEME, MONO_FONT_STACK } from '../../shared/themeTokens';
 import { Z_INDEX } from '../../shared/zIndex';
 import { escapeHtml } from '../../shared/stringUtils';
+import { ICONS } from '../../shared/icons';
+import { showSqlClausePanelContent } from '../panels/sqlPanels';
 import {
     calculateEdgePath as calculateEdgePathPure,
     contrastTextForBadge,
@@ -181,87 +183,17 @@ function getClauseTypeColor(clauseType: string): string {
 /**
  * Show a panel with SQL clause details for a clicked edge.
  */
-export function showSqlClausePanel(edge: FlowEdge, containerElement: HTMLElement | null): void {
-    let clausePanel = document.getElementById('sql-clause-panel') as HTMLDivElement;
-
-    if (!clausePanel) {
-        clausePanel = document.createElement('div');
-        clausePanel.id = 'sql-clause-panel';
-        clausePanel.style.cssText = `
-            position: fixed;
-            bottom: 16px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: ${UI_COLORS.backgroundPanelSolid};
-            border: 1px solid ${UI_COLORS.borderMedium};
-            border-radius: 12px;
-            padding: 16px 20px;
-            max-width: 600px;
-            z-index: ${Z_INDEX.dropdown};
-            box-shadow: ${UI_COLORS.shadowMedium};
-            font-family: ${MONO_FONT_STACK};
-        `;
-        containerElement?.appendChild(clausePanel);
-    }
-
-    const clauseType = edge.clauseType || 'flow';
-    const clauseTypeLabel = clauseType.toUpperCase();
-    const clauseColor = getClauseTypeColor(clauseType);
-
-    clausePanel.innerHTML = `
-        <button style="
-            position: absolute;
-            top: 8px;
-            right: 8px;
-            background: transparent;
-            border: none;
-            color: ${UI_COLORS.textMuted};
-            font-size: 16px;
-            cursor: pointer;
-            padding: 4px 8px;
-        " class="clause-panel-close-btn">&#x2715;</button>
-        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
-            <div style="
-                background: ${clauseColor};
-                color: white;
-                padding: 4px 12px;
-                border-radius: 6px;
-                font-size: 11px;
-                font-weight: 700;
-                letter-spacing: 0.5px;
-            ">${clauseTypeLabel}</div>
-            <div style="color: ${UI_COLORS.textSubtle}; font-size: 13px; font-weight: 600;">
-                ${escapeHtml(edge.label || 'Data Flow')}
-            </div>
-        </div>
-        <div style="
-            background: ${UI_COLORS.backgroundSubtleDark};
-            border: 1px solid ${UI_COLORS.border};
-            border-radius: 8px;
-            padding: 12px;
-            color: ${UI_COLORS.textBright};
-            font-size: 13px;
-            line-height: 1.6;
-            white-space: pre-wrap;
-            word-break: break-word;
-            max-height: 200px;
-            overflow-y: auto;
-        ">${escapeHtml(edge.sqlClause || 'No SQL clause information available')}</div>
-        ${edge.startLine ? `
-            <div style="color: ${UI_COLORS.textMuted}; font-size: 11px; margin-top: 8px;">
-                Line ${edge.startLine}${edge.endLine && edge.endLine !== edge.startLine ? `-${edge.endLine}` : ''}
-            </div>
-        ` : ''}
-    `;
-
-    const closeBtn = clausePanel.querySelector<HTMLButtonElement>('.clause-panel-close-btn');
-    closeBtn?.addEventListener('click', () => {
-        if (clausePanel) {
-            clausePanel.style.display = 'none';
-        }
+export function showSqlClausePanel(edge: FlowEdge, containerElement: HTMLElement | null, isDarkTheme = true): void {
+    showSqlClausePanelContent({
+        edge,
+        containerElement,
+        isDarkTheme,
+        zIndex: Z_INDEX.dropdown,
+        pinIcon: ICONS.pin,
+        escapeHtml,
+        getClauseTypeColor,
+        monoFontStack: MONO_FONT_STACK,
     });
-
-    clausePanel.style.display = 'block';
 }
 
 // ============================================================

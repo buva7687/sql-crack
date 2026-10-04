@@ -11,6 +11,7 @@ import {
     HINT_COLORS,
     STATUS_COLORS,
     UI_COLORS,
+    getHighContrastTextColor,
     getNodeColor,
 } from '../constants';
 import { MONO_FONT_STACK } from '../../shared/themeTokens';
@@ -129,7 +130,7 @@ export function updateDetailsPanelContent(options: DetailsPanelOptions): void {
                 <div style="color: ${sectionLabelColor}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Window Functions</div>
                 ${node.windowDetails.functions.map((func) => `
                     <div style="background: ${detailCardBg}; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
-                        <div style="color: ${BADGE_COLORS.functionName}; font-weight: 600; font-size: 11px; font-family: ${MONO_FONT_STACK}; margin-bottom: 4px;">
+                        <div style="color: ${getHighContrastTextColor(isDarkTheme ? BADGE_COLORS.functionName : '#92400e', isDarkTheme)}; font-weight: 600; font-size: 11px; font-family: ${MONO_FONT_STACK}; margin-bottom: 4px;">
                             ${escapeHtml(func.name)}()
                         </div>
                         ${func.partitionBy && func.partitionBy.length > 0 ? `
@@ -162,7 +163,7 @@ export function updateDetailsPanelContent(options: DetailsPanelOptions): void {
                 <div style="color: ${sectionLabelColor}; font-size: 10px; text-transform: uppercase; margin-bottom: 6px;">Aggregate Functions</div>
                 ${node.aggregateDetails.functions.map((func) => `
                     <div style="background: ${detailCardBg}; border-radius: 4px; padding: 6px 8px; margin-bottom: 6px;">
-                        <div style="color: ${BADGE_COLORS.frame}; font-weight: 600; font-size: 11px; font-family: ${MONO_FONT_STACK}; margin-bottom: 2px;">
+                        <div style="color: ${getHighContrastTextColor(isDarkTheme ? BADGE_COLORS.frame : '#92400e', isDarkTheme)}; font-weight: 600; font-size: 11px; font-family: ${MONO_FONT_STACK}; margin-bottom: 2px;">
                             ${escapeHtml(func.expression)}
                         </div>
                         ${func.alias ? `
@@ -316,6 +317,7 @@ export function updateStatsPanelContent(options: StatsPanelOptions): void {
     const textColorDim = isDarkTheme ? UI_COLORS.textDim : UI_COLORS.textLightDim;
     const tableTextColor = isDarkTheme ? UI_COLORS.textSubtle : UI_COLORS.textLightSubtle;
     const borderColor = isDarkTheme ? UI_COLORS.border : UI_COLORS.borderMedium;
+    const amberTextColor = getHighContrastTextColor(isDarkTheme ? BADGE_COLORS.frame : '#92400e', isDarkTheme);
 
     let tableListHtml = '';
     if (currentTableUsage && currentTableUsage.size > 0) {
@@ -371,7 +373,7 @@ export function updateStatsPanelContent(options: StatsPanelOptions): void {
                             <span style="color: ${tableTextColor}; font-family: ${MONO_FONT_STACK};">${escapeHtml(tableName)}</span>
                             <span style="
                                 background: ${count > 1 ? 'rgba(245, 158, 11, 0.2)' : (isDarkTheme ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.15)')};
-                                color: ${count > 1 ? '#f59e0b' : textColorMuted};
+                                color: ${count > 1 ? amberTextColor : textColorMuted};
                                 padding: 2px 6px;
                                 border-radius: 4px;
                                 font-weight: 600;
@@ -445,9 +447,9 @@ export function updateStatsPanelContent(options: StatsPanelOptions): void {
                     unknown: isDarkTheme ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.15)',
                 };
                 const categoryTextColors: Record<string, string> = {
-                    aggregate: '#f59e0b',
-                    window: isDarkTheme ? '#a78bfa' : '#7c3aed',
-                    tvf: isDarkTheme ? '#34d399' : '#059669',
+                    aggregate: amberTextColor,
+                    window: getHighContrastTextColor(isDarkTheme ? '#a78bfa' : '#7c3aed', isDarkTheme),
+                    tvf: getHighContrastTextColor(isDarkTheme ? '#34d399' : '#047857', isDarkTheme),
                     scalar: textColorMuted,
                     unknown: textColorMuted,
                 };
@@ -681,7 +683,11 @@ export function updateHintsPanelContent(options: HintsPanelOptions): void {
             ${visibleHints.map((hint) => {
                 const style = HINT_COLORS[hint.type] || HINT_COLORS.info;
                 const severity = hint.severity || 'low';
-                const severityColor = severity === 'high' ? STATUS_COLORS.errorDark : severity === 'medium' ? STATUS_COLORS.warningDark : UI_COLORS.textDim;
+                const severityColor = severity === 'high'
+                    ? getHighContrastTextColor(isDarkTheme ? STATUS_COLORS.error : '#b91c1c', isDarkTheme)
+                    : severity === 'medium'
+                        ? getHighContrastTextColor(isDarkTheme ? STATUS_COLORS.warningDark : '#92400e', isDarkTheme)
+                        : isDarkTheme ? UI_COLORS.textDim : UI_COLORS.textLightDim;
                 const hasNodeTarget = Boolean(hint.nodeId);
                 const hasAction = Boolean(hint.action?.command && hint.action?.label);
                 return `

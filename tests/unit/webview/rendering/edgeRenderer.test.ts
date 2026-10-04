@@ -15,7 +15,10 @@ import {
     highlightConnectedEdges,
     createTransformationBadge,
     clearLineageBadges,
+    showSqlClausePanel,
 } from '../../../../src/webview/rendering/edgeRenderer';
+import { setHighContrastMode, UI_COLORS } from '../../../../src/webview/constants';
+import { MONO_FONT_STACK } from '../../../../src/shared/themeTokens';
 import type { FlowEdge, FlowNode } from '../../../../src/webview/types';
 
 // ============================================================
@@ -70,7 +73,26 @@ function defaultOptions(overrides: Partial<RenderEdgeOptions> = {}): RenderEdgeO
 
 describe('edgeRenderer', () => {
     beforeEach(() => installFakeDocument());
-    afterEach(() => uninstallFakeDocument());
+    afterEach(() => {
+        setHighContrastMode(false);
+        uninstallFakeDocument();
+    });
+
+    it('uses the light palette for clause details and updates a reused popup for dark mode', () => {
+        setHighContrastMode(true);
+        const container = createFakeElement('div');
+        const edge = makeEdge({ sqlClause: 'WHERE total > 100', startLine: 3 });
+        showSqlClausePanel(edge, container as unknown as HTMLElement, false);
+        const panel = container.children[0];
+        expect(panel.style.cssText).toContain(`font-family: ${MONO_FONT_STACK};`);
+        expect(panel.style.cssText).toContain(`background: ${UI_COLORS.backgroundPanelLightSolid}`);
+        expect(panel.innerHTML).toContain(`color: ${UI_COLORS.textLightMuted}`);
+        expect(panel.innerHTML).not.toContain(`color: ${UI_COLORS.textMuted}`);
+        showSqlClausePanel(edge, container as unknown as HTMLElement, true);
+        expect(container.children).toHaveLength(1);
+        expect(panel.style.cssText).toContain(`background: ${UI_COLORS.backgroundPanelSolid}`);
+        expect(panel.innerHTML).toContain(`color: ${UI_COLORS.textMuted}`);
+    });
 
     describe('renderEdge', () => {
         it('creates a path element appended to parent', () => {
