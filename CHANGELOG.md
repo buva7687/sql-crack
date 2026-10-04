@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Treat a table joined to itself under distinct aliases as an informational hint rather than recommending removal of an intentional self-join. Separate UNION branches, CTEs and subqueries that read the same table still report a repeated scan.
 - Show the **Start Analysis** choice in the Workspace Dependencies panel while the large-workspace notification is waiting, instead of a "Scanning SQL files..." spinner that never finished when the notification was hidden.
 - Return keyboard focus to the Export button when the export preview closes, name the Workspace panel's close button for screen readers, and raise muted text to at least 7:1 in the Workspace panel under high-contrast themes.
+- Keep Tab and Shift+Tab inside Export Preview while controls change, and raise SQL Flow muted-label contrast in high-contrast themes, including live theme changes.
 - Use the current theme background on the Workspace loading, empty and manual-analysis pages, and render keys in the walkthrough as code instead of literal backticks.
 
 ### Changed

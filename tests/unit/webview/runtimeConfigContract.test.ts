@@ -5,6 +5,13 @@ const readSource = (relativePath: string): string =>
     readFileSync(join(__dirname, '../../../', relativePath), 'utf8');
 
 describe('webview runtime config contract', () => {
+    it('applies high-contrast colors at startup and when only contrast mode changes', () => {
+        const indexSource = readSource('src/webview/index.ts');
+        expect(indexSource).toContain('setHighContrastMode(window.isHighContrast === true)');
+        expect(indexSource).toContain('setHighContrastMode(config.isHighContrast)');
+        expect(indexSource).toContain('previous.isHighContrast !== config.isHighContrast');
+    });
+
     it('injects typed bootstrap config from visualization panel', () => {
         const panelSource = readSource('src/visualizationPanel.ts');
         expect(panelSource).toContain('window.sqlCrackConfig = {');

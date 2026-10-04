@@ -10,6 +10,7 @@
 
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { UI_COLORS, setHighContrastMode } from '../../src/webview/constants';
 
 const readSource = (relativePath: string): string =>
     readFileSync(join(__dirname, '../../', relativePath), 'utf8');
@@ -55,7 +56,8 @@ describe('phase 2.2 dark muted text values', () => {
         expect(theme).toContain("import { UI_SURFACE, WORKSPACE_ACCENT_COLORS } from './themeTokens';");
         expect(theme).toContain('textMuted: UI_SURFACE.dark.textMuted,');
         expect(colors).toContain("import { NODE_SURFACE as SHARED_NODE_SURFACE, UI_SURFACE } from '../../shared/themeTokens';");
-        expect(colors).toContain('textMuted: UI_SURFACE.dark.textMuted,');
+        setHighContrastMode(false);
+        expect(UI_COLORS.textMuted).toBe('#71717A');
         // CSS variables are now in the extracted variables module
         expect(variablesStyles).toContain('--text-muted: #71717a;');
     });

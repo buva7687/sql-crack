@@ -40,6 +40,14 @@ describe('export preview wiring', () => {
         expect(exportDropdownSource).toContain("btn.setAttribute('aria-label', 'Export visualization');");
     });
 
+    it('contains dialog Tab navigation before background keyboard handlers run', () => {
+        expect(exportPreviewSource).toContain('trapDialogFocus(event, overlay);');
+        expect(exportPreviewSource).toContain('{ signal, capture: true }');
+        expect(exportPreviewSource).toContain('role="radiogroup" aria-label="Export format"');
+        expect(exportPreviewSource).not.toMatch(/type="radio"[^\n]*display:none/);
+        expect(exportPreviewSource).toContain('document.getElementById(focusedControlId)?.focus();');
+    });
+
     it('defines a dedicated export preview modal with live preview callbacks', () => {
         expect(exportPreviewSource).toContain("export function showExportPreview");
         expect(exportPreviewSource).toContain('buildPngPreview');

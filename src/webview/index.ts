@@ -5,7 +5,7 @@ import process from 'process/browser';
 import { configureCustomFunctions, configureParseTimeout, isCancelledBatchParseResult, parseAsync, parseBatchAsync } from './parserClient';
 import { setMinimapMode, MinimapMode } from './minimapVisibility';
 import { detectDialect } from './sqlParser';
-import { getComponentUiColors } from './constants';
+import { getComponentUiColors, setHighContrastMode } from './constants';
 import { BatchParseResult, LayoutType, ParseError, ParseResult, QueryLineRange, SqlDialect } from './types';
 import {
     initRenderer,
@@ -360,6 +360,7 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
     };
     window.vscodeTheme = config.vscodeTheme;
     window.isHighContrast = config.isHighContrast;
+    setHighContrastMode(config.isHighContrast);
     window.defaultDialect = config.defaultDialect;
     window.autoDetectDialect = config.autoDetectDialect;
     window.viewLocation = config.viewLocation;
@@ -405,7 +406,7 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
     }
 
     const isDark = config.vscodeTheme !== 'light';
-    if (previous.vscodeTheme !== config.vscodeTheme) {
+    if (previous.vscodeTheme !== config.vscodeTheme || previous.isHighContrast !== config.isHighContrast) {
         toggleTheme(isDark);
     } else if (previous.gridStyle !== config.gridStyle || previous.nodeAccentPosition !== config.nodeAccentPosition) {
         // Re-apply existing theme to refresh style-dependent visuals without changing theme mode.
@@ -1265,6 +1266,7 @@ function init(): void {
     const container = document.getElementById('root');
     if (!container) { return; }
     const runtimeConfig = normalizeRuntimeConfig();
+    setHighContrastMode(window.isHighContrast === true);
 
     // Setup container styles
     container.style.cssText = `

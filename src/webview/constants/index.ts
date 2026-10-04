@@ -31,4 +31,6 @@ export {
     getTransformationColor,
     getScrollbarColors,
     getComponentUiColors,
+    getHighContrastTextColor,
+    setHighContrastMode,
 } from './colors';

@@ -7,6 +7,17 @@ import { COMPLEXITY_COLORS as SHARED_COMPLEXITY_COLORS, COMPLEXITY_TEXT_COLORS a
 import { ICONS } from '../../shared/icons';
 import { NODE_SURFACE as SHARED_NODE_SURFACE, UI_SURFACE } from '../../shared/themeTokens';
 
+let highContrastMode = false;
+
+export function setHighContrastMode(enabled: boolean): void {
+    highContrastMode = enabled;
+}
+
+/** Preserve regular themes while making muted labels readable in high contrast. */
+export function getHighContrastTextColor(regularColor: string, isDarkTheme: boolean): string {
+    return highContrastMode ? (isDarkTheme ? '#CBD5E1' : '#334155') : regularColor;
+}
+
 // ============================================================
 // UI Colors - General interface elements
 // ============================================================
@@ -36,15 +47,15 @@ export const UI_COLORS = {
 
     // Text colors - Dark theme
     text: UI_SURFACE.dark.text,
-    textMuted: UI_SURFACE.dark.textMuted,
-    textDim: UI_SURFACE.dark.textDim,
+    get textMuted(): string { return getHighContrastTextColor(UI_SURFACE.dark.textMuted, true); },
+    get textDim(): string { return getHighContrastTextColor(UI_SURFACE.dark.textDim, true); },
     textSubtle: '#cbd5e1',
     textBright: '#e2e8f0',
 
     // Text colors - Light theme
     textLight: UI_SURFACE.light.text,
-    textLightMuted: UI_SURFACE.light.textMuted,
-    textLightDim: UI_SURFACE.light.textDim,
+    get textLightMuted(): string { return getHighContrastTextColor(UI_SURFACE.light.textMuted, false); },
+    get textLightDim(): string { return getHighContrastTextColor(UI_SURFACE.light.textDim, false); },
     textLightSubtle: '#334155',
 
     // Focus/Selection
@@ -225,8 +236,8 @@ export const COMPONENT_UI_COLORS = {
         border: 'rgba(148, 163, 184, 0.2)',
         text: UI_SURFACE.dark.text,
         textBright: '#e2e8f0',
-        textMuted: UI_SURFACE.dark.textMuted,
-        textDim: UI_SURFACE.dark.textDim,
+        get textMuted(): string { return UI_COLORS.textMuted; },
+        get textDim(): string { return UI_COLORS.textDim; },
         hover: 'rgba(148, 163, 184, 0.1)',
         hoverStrong: 'rgba(148, 163, 184, 0.2)',
         accent: '#818cf8',
@@ -254,8 +265,8 @@ export const COMPONENT_UI_COLORS = {
         border: 'rgba(148, 163, 184, 0.3)',
         text: UI_SURFACE.light.text,
         textBright: UI_SURFACE.light.text,
-        textMuted: UI_SURFACE.light.textMuted,
-        textDim: UI_SURFACE.light.textDim,
+        get textMuted(): string { return UI_COLORS.textLightMuted; },
+        get textDim(): string { return UI_COLORS.textLightDim; },
         hover: 'rgba(0, 0, 0, 0.04)',
         hoverStrong: 'rgba(15, 23, 42, 0.06)',
         accent: '#6366f1',

@@ -3,6 +3,7 @@ import { escapeHtml } from '../../shared/stringUtils';
 import { MONO_FONT_STACK } from '../../shared/themeTokens';
 import { Z_INDEX } from '../../shared/zIndex';
 import { prefersReducedMotion } from './motion';
+import { trapDialogFocus } from './focusTrap';
 import type {
     ExportPreviewAsset,
     ExportPreviewFormat,
@@ -58,6 +59,7 @@ export function showExportPreview(options: ExportPreviewOptions): void {
     overlay.setAttribute('role', 'dialog');
     overlay.setAttribute('aria-modal', 'true');
     overlay.setAttribute('aria-labelledby', 'sql-crack-export-preview-title');
+    overlay.tabIndex = -1;
     overlay.style.cssText = `
         position: fixed;
         inset: 0;
@@ -210,18 +212,21 @@ export function showExportPreview(options: ExportPreviewOptions): void {
         const pdfHidden = state.format === 'pdf' ? '' : 'display:none;';
 
         return `
-            <div style="display:flex; gap:8px; margin-bottom:18px;">
+            <div role="radiogroup" aria-label="Export format" style="display:flex; gap:8px; margin-bottom:18px;">
                 <label style="flex:1; cursor:pointer;">
-                    <input type="radio" name="export-format" value="png" ${pngChecked} style="display:none;">
-                    <span style="display:block; padding:10px 12px; border-radius:12px; border:1px solid ${palette.border}; background:${state.format === 'png' ? palette.accentBg : palette.surfaceElevated}; color:${state.format === 'png' ? palette.textBright : palette.text}; font-weight:600; text-align:center;">PNG</span>
+                    <span style="display:flex; align-items:center; justify-content:center; gap:6px; padding:10px 12px; border-radius:12px; border:1px solid ${palette.border}; background:${state.format === 'png' ? palette.accentBg : palette.surfaceElevated}; color:${state.format === 'png' ? palette.textBright : palette.text}; font-weight:600;">
+                        <input id="export-format-png" type="radio" name="export-format" value="png" ${pngChecked} style="margin:0; accent-color:${palette.accent};">PNG
+                    </span>
                 </label>
                 <label style="flex:1; cursor:pointer;">
-                    <input type="radio" name="export-format" value="svg" ${svgChecked} style="display:none;">
-                    <span style="display:block; padding:10px 12px; border-radius:12px; border:1px solid ${palette.border}; background:${state.format === 'svg' ? palette.accentBg : palette.surfaceElevated}; color:${state.format === 'svg' ? palette.textBright : palette.text}; font-weight:600; text-align:center;">SVG</span>
+                    <span style="display:flex; align-items:center; justify-content:center; gap:6px; padding:10px 12px; border-radius:12px; border:1px solid ${palette.border}; background:${state.format === 'svg' ? palette.accentBg : palette.surfaceElevated}; color:${state.format === 'svg' ? palette.textBright : palette.text}; font-weight:600;">
+                        <input id="export-format-svg" type="radio" name="export-format" value="svg" ${svgChecked} style="margin:0; accent-color:${palette.accent};">SVG
+                    </span>
                 </label>
                 <label style="flex:1; cursor:pointer;">
-                    <input type="radio" name="export-format" value="pdf" ${pdfChecked} style="display:none;">
-                    <span style="display:block; padding:10px 12px; border-radius:12px; border:1px solid ${palette.border}; background:${state.format === 'pdf' ? palette.accentBg : palette.surfaceElevated}; color:${state.format === 'pdf' ? palette.textBright : palette.text}; font-weight:600; text-align:center;">PDF</span>
+                    <span style="display:flex; align-items:center; justify-content:center; gap:6px; padding:10px 12px; border-radius:12px; border:1px solid ${palette.border}; background:${state.format === 'pdf' ? palette.accentBg : palette.surfaceElevated}; color:${state.format === 'pdf' ? palette.textBright : palette.text}; font-weight:600;">
+                        <input id="export-format-pdf" type="radio" name="export-format" value="pdf" ${pdfChecked} style="margin:0; accent-color:${palette.accent};">PDF
+                    </span>
                 </label>
             </div>
 
@@ -343,6 +348,7 @@ export function showExportPreview(options: ExportPreviewOptions): void {
     };
 
     const syncStateFromControls = (): void => {
+        const focusedControlId = form.contains(document.activeElement) ? (document.activeElement as HTMLElement).id : '';
         const selectedFormat = (form.querySelector('input[name="export-format"]:checked') as HTMLInputElement | null)?.value;
         if (selectedFormat === 'png' || selectedFormat === 'svg' || selectedFormat === 'pdf') {
             state.format = selectedFormat;
@@ -379,6 +385,9 @@ export function showExportPreview(options: ExportPreviewOptions): void {
 
         form.innerHTML = buildControlHtml();
         bindFormEvents();
+        if (focusedControlId) {
+            document.getElementById(focusedControlId)?.focus();
+        }
         void refreshPreview();
     };
 
@@ -396,11 +405,13 @@ export function showExportPreview(options: ExportPreviewOptions): void {
         }
     }, { signal });
     document.addEventListener('keydown', (event) => {
+        trapDialogFocus(event, overlay);
         if (event.key === 'Escape') {
             event.preventDefault();
+            event.stopPropagation();
             close();
         }
-    }, { signal });
+    }, { signal, capture: true });
     closeButton.addEventListener('click', close, { signal });
     cancelButton.addEventListener('click', close, { signal });
     saveButton.addEventListener('click', async () => {
