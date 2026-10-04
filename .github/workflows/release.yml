@@ -170,6 +170,9 @@ jobs:
       - name: Audit production dependencies
         run: npm run audit:prod
 
+      - name: Audit all dependencies
+        run: npm run audit:all
+
       - name: Run type check
         run: npm run typecheck
 

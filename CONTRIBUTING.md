@@ -56,3 +56,7 @@ Thank you for your interest in contributing. Here’s how to get started.
 Thanks for contributing.
 
 When changing bundled runtime dependencies, regenerate license notices with `npm run package -- --json=webpack-stats.json` followed by `npm run notices`. Commit the updated `THIRD_PARTY_NOTICES.txt`; CI checks that it matches the production bundle. Use `npm run test:extension-host` to test the real desktop extension (set `VSCODE_TEST_VERSION=1.85.0` for the minimum supported release). These tests use a temporary workspace and profile.
+
+Set `VSCODE_TEST_VSIX` to a packaged `.vsix` path to run those checks against a clean installation instead of the development checkout. CI uses this mode so missing assets and worker bundles fail the platform smoke tests.
+
+Set `VSCODE_TEST_RESTRICTED=1` with a packaged VSIX to test an untrusted temporary workspace. This mode asserts that Restricted Mode is active before checking SQL Crack activation and visualization.

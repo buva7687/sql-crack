@@ -1,6 +1,15 @@
 import { parseSql } from '../../../src/webview/sqlParser';
 
 describe('performance hint deduplication', () => {
+    it('does not recommend collapsing an intentional employee-manager self-join', () => {
+        const result = parseSql('SELECT a.id AS employee_id, b.id AS manager_id FROM employees a JOIN employees b ON a.manager_id = b.id', 'PostgreSQL');
+        const repeated = result.hints.filter(hint => /table ["']employees["'].*2 times/i.test(hint.message));
+        expect(repeated).toHaveLength(1);
+        expect(repeated[0].type).toBe('info');
+        expect(repeated[0].suggestion).not.toMatch(/scan.*once|single CTE/i);
+        expect(result.nodes.flatMap(node => node.warnings || []).filter(warning => warning.type === 'repeated-scan')).toEqual([]);
+    });
+
     it('emits a single repeated-table hint for the same table usage pattern', () => {
         const sql = `
             SELECT oi1.order_id
@@ -14,8 +23,8 @@ describe('performance hint deduplication', () => {
         );
 
         expect(repeatedTableHints).toHaveLength(1);
-        expect(repeatedTableHints[0].message.toLowerCase()).toContain('scanned');
-        expect(result.hints.some(h => /table 'order_items' is accessed 2 times/i.test(h.message))).toBe(false);
+        expect(repeatedTableHints[0].type).toBe('info');
+        expect(repeatedTableHints[0].message).toContain('distinct aliases');
     });
 
     it('does not emit overlapping scanned/accessed hints for Query 4 style repeated tables', () => {

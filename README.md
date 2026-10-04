@@ -23,11 +23,23 @@
 
 ---
 
-SQL Crack is a VS Code extension that visualizes SQL queries as interactive execution flow diagrams. Understand complex queries at a glance, track data lineage across your entire workspace, and identify optimization opportunities with professional-grade visual analysis.
+SQL Crack visualizes the logical flow of SQL queries, table dependencies and column lineage in VS Code. Analysis runs locally without executing SQL or connecting to a database. Performance hints are heuristics to check against your database's execution plan.
 
 > Inspired by [JSON Crack](https://jsoncrack.com/) and Snowflake Query Profile
 
 ![SQL Crack Demo](https://raw.githubusercontent.com/buva7687/sql-crack/main/assets/video_demo.gif)
+
+## Quick Start
+
+Open a `.sql` file containing a query such as:
+
+```sql
+SELECT customer_id, SUM(total) AS order_total
+FROM orders
+GROUP BY customer_id;
+```
+
+Run **SQL Crack: Visualize SQL Query**, or press `Cmd/Ctrl+K`, then `Q`. Click an output column to inspect its sources. To explore dependencies between files, right-click a SQL folder in Explorer and choose **Analyze Workspace Dependencies**.
 
 ## Features
 
@@ -35,7 +47,7 @@ SQL Crack is a VS Code extension that visualizes SQL queries as interactive exec
 
 | Feature | Description |
 |---------|-------------|
-| **Execution Flow** | See how your SQL executes step-by-step with color-coded operation nodes |
+| **Logical Query Flow** | Follow tables and operations through a static query diagram |
 | **Multi-Query Support** | Visualize multiple statements with tab navigation (Q1, Q2, Q3...) |
 | **Column Lineage** | Click any output column to trace its transformation path through JOINs, aggregations, and calculations |
 | **Legend Bar (Default On)** | Bottom legend is visible on first open, dismissable, and remembers your preference |
@@ -335,7 +347,7 @@ Files with these extensions will show the SQL Crack icon in the editor title bar
 | **Parse error on valid SQL** | Try a different dialect from the dropdown. SQL Crack auto-retries when it detects a stronger dialect match, but some vendor-specific syntax may still require manually switching (PostgreSQL is usually the most permissive fallback). |
 | **Graph is slow with large files** | SQL files over 100KB or 50+ statements may be slow. Try visualizing smaller sections by selecting text first. |
 | **CTE/Subquery not expanding** | Double-click the node. If it has no children, it may be a simple reference. |
-| **Workspace indexing stuck** | Click Cancel in the notification, then try again. For very large workspaces, increase `workspaceAutoIndexThreshold`. |
+| **Workspace indexing stuck** | Cancel the scan, analyze a smaller folder, and inspect skipped files and parser warnings in the workspace panel or SQL Crack output. Refresh to retry after simplifying an expensive query. `workspaceAutoIndexThreshold` controls the automatic-indexing prompt, not parsing speed. |
 | **Columns not highlighting** | Press `C` to enable column lineage mode first, then click output columns in the SELECT node. |
 
 ### Debug Mode
@@ -352,13 +364,25 @@ For lower-level diagnostics you can also open **Help → Toggle Developer Tools 
 If the extension behaves unexpectedly:
 1. Run **"Developer: Reload Window"** from Command Palette
 2. If issues persist, disable/re-enable the extension
-3. For workspace index issues, re-run **"SQL Crack: Analyze Workspace Dependencies"** to rebuild the index, or set **Cache TTL** to `0` (Advanced) and reload the window
+3. For workspace index issues, click **Refresh** in the workspace panel to rebuild. To bypass saved cache restoration, set `sqlCrack.advanced.cacheTTLHours` to `0`, close the workspace panel, and run **SQL Crack: Analyze Workspace Dependencies** again. Restore the normal TTL afterward if you want cached startup.
+
+Pinned SQL snapshots and panel preferences are stored in VS Code's local workspace state. Use the `×` on a pinned query tab to remove that snapshot; closing its panel alone does not unpin it. The workspace index also uses local workspace state and is rebuilt when its version, dialect, scope or source files change. No SQL Crack cloud account or server stores this data.
 
 ---
 
 ## Analysis Limits
 
 SQL Crack performs static analysis; it does not connect to a database or execute SQL. Unknown schemas, dynamic SQL, wildcard columns, and unsupported syntax can produce incomplete lineage. Parse warnings and partial-result hints identify these limits. Nested CTEs that cannot be flattened without changing scope return a partial visualization rather than inferred bindings. Review the SQL before using a dependency or impact result to make a production change.
+
+| Result or limit | What to expect |
+| --- | --- |
+| AST analysis | Logical operations and lineage inferred from supported SQL syntax; no runtime plan or timings |
+| Compatibility rewrite | A hint identifies syntax rewritten for parser compatibility; some dialect semantics may be omitted |
+| Partial fallback | A warning identifies incomplete parsing; regex-derived relationships are best effort |
+| SQL Flow defaults | 100 KiB, 50 statements and a 5-second parsing budget; configurable in Advanced settings |
+| Workspace analysis | Files above 10 MiB are skipped; extraction runs in cancellable workers with a 10-second per-file deadline |
+| Unknown schemas and dynamic SQL | Wildcard expansion and column resolution may be incomplete |
+| Custom functions | Settings add classification rules, not new parser grammar. For example, the PostgreSQL parser currently falls back for a custom function with `OVER`; MySQL and Snowflake accept that syntax. |
 
 Workspace parsing runs in bounded background workers. A file that exceeds the analysis timeout is skipped with an error so the remaining files can be indexed. SQL Flow follows the VS Code theme by default; choose an explicit theme in Settings to override it. File reading and visualization are available in Restricted Mode. Filesystem-backed local and remote workspaces are supported; virtual workspaces are not.
 
@@ -376,6 +400,8 @@ Workspace parsing runs in bounded background workers. A file that exceeds the an
 SQL Crack supports the latest stable release on VS Code `1.85` or newer. When a Marketplace pre-release is available, it is intended for testing an upcoming version. SQL parsing and optimization guidance are static, best-effort analysis; vendor-specific syntax may use compatibility rewrites or partial fallback results, which are identified in the UI.
 
 For ordinary bugs and feature requests, use [GitHub Issues](https://github.com/buva7687/sql-crack/issues) and include the extension version, VS Code version, selected dialect, reproduction steps, and a minimal redacted SQL sample. Report security-sensitive problems privately as described in [SECURITY.md](SECURITY.md).
+
+See [SUPPORT.md](SUPPORT.md) for environment coverage, saved-data troubleshooting and recovery to a previous release.
 
 ---
 
@@ -438,7 +464,7 @@ src/
 
 ## Roadmap
 
-- ✅ **Phase 1** — Core visualization (execution flow, CTE expansion, fullscreen)
+- ✅ **Phase 1** — Core visualization (logical query flow, CTE expansion, fullscreen)
 - ✅ **Phase 2** — Developer productivity (quality warnings, column lineage, cloud panels)
 - ✅ **Phase 3** — Performance analysis (filter pushdown, join order, anti-pattern detection)
 - ✅ **Phase 4** — Workspace analysis (cross-file lineage, dependency graph, 3 view modes)

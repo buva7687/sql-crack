@@ -455,6 +455,7 @@
     "test:ci": "node scripts/runJest.js --ci --coverage --reporters=default --reporters=jest-junit --testPathIgnorePatterns=/tests/benchmark/ --testPathIgnorePatterns=/tests/webview/perfBaseline.test.ts",
     "test:perf": "node scripts/runJest.js --sql-crack-expose-gc --runInBand --runTestsByPath tests/benchmark/ciParsePerformance.test.ts tests/benchmark/workspaceReferencePerformance.test.ts tests/webview/perfBaseline.test.ts",
     "audit:prod": "npm audit --omit=dev --audit-level=moderate",
+    "audit:all": "npm audit --audit-level=moderate",
     "precheck": "npm run typecheck && npm run lint && npm run test:ci",
     "prepare": "node scripts/install-hooks.js || true",
     "benchmark": "npx ts-node tests/benchmark/parseBenchmark.ts",

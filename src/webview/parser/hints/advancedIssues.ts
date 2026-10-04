@@ -675,6 +675,17 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
 
     tableUsage.forEach((usages, tableName) => {
         if (usages.length > 1) {
+            const bindings = new Set(usages.map(node => node.alias || node.label));
+            if (bindings.size === usages.length) {
+                context.hints.push({
+                    type: 'info',
+                    message: `Table "${tableName}" is accessed ${usages.length} times with distinct aliases`,
+                    suggestion: 'Distinct aliases can represent intentional self-joins. Check the database execution plan before changing these references.',
+                    category: 'performance',
+                    severity: 'low'
+                });
+                return;
+            }
             usages.forEach(node => {
                 if (!node.warnings) {node.warnings = [];}
                 node.warnings.push({

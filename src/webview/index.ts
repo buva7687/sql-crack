@@ -1660,6 +1660,7 @@ function createToolbarCallbacks(): ToolbarCallbacks {
 async function visualize(sql: string): Promise<void> {
     const requestId = ++parseRequestId;
     const documentKeyForParse = window.documentKey ?? window.fileName ?? null;
+    const preserveInteractionState = batchResult !== null && renderedDocumentKey === documentKeyForParse;
     // Error and empty results below have a single entry, so they fall back to Q1.
     let retainedQueryIndex = 0;
     cancelQueryLoading();
@@ -1838,7 +1839,7 @@ async function visualize(sql: string): Promise<void> {
 
     currentQueryIndex = clampQueryIndex(retainedQueryIndex, batchResult?.queries.length ?? 0);
     updateBatchTabsUI();
-    renderCurrentQuery();
+    renderCurrentQuery(preserveInteractionState);
     await applyInitialUiStateIfAvailable();
     schedulePersistUiState();
 }
@@ -1850,7 +1851,7 @@ function clampQueryIndex(index: number, queryCount: number): number {
     return Math.min(index, queryCount - 1);
 }
 
-function renderCurrentQuery(): void {
+function renderCurrentQuery(preserveInteractionState = false): void {
     if (!batchResult || batchResult.queries.length === 0) { return; }
 
     const query = batchResult.queries[currentQueryIndex];
@@ -1869,7 +1870,7 @@ function renderCurrentQuery(): void {
         }
     }
 
-    render(query);
+    render(query, { preserveInteractionState: preserveInteractionState && renderedQueryIndex === currentQueryIndex });
     renderedQueryIndex = currentQueryIndex;
     schedulePersistUiState();
 }

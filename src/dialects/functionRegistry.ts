@@ -4,8 +4,8 @@ import functionsData from './functions.json';
  * Function registry for SQL dialect-specific aggregate and window functions.
  * Combines built-in dialect functions with user-defined custom functions.
  *
- * Note: Custom functions from VS Code settings are only available in the extension
- * context, not in webviews. Use setCustomFunctions() to inject them from the extension.
+ * Each extension host, webview and parser worker has its own registry instance.
+ * Initialize it with setCustomFunctions() before parsing in that context.
  */
 
 interface DialectFunctions {
@@ -156,4 +156,3 @@ export function getTableValuedFunctions(dialect: string = 'mysql'): string[] {
 export function getSupportedDialects(): string[] {
     return Object.keys(builtInFunctions.dialects);
 }
-

@@ -1,8 +1,22 @@
 const vscode = require('vscode');
 const assert = require('assert');
 exports.run = async () => {
+  console.log('SQL Crack smoke environment:', {
+    trusted: vscode.workspace.isTrusted,
+    packaged: Boolean(process.env.VSCODE_TEST_VSIX),
+    restrictedCheck: process.env.VSCODE_TEST_RESTRICTED === '1'
+  });
+  if (process.env.VSCODE_TEST_RESTRICTED === '1') {
+    assert.strictEqual(vscode.workspace.isTrusted, false, 'The test workspace is actually in Restricted Mode');
+  }
   const extension = vscode.extensions.getExtension('buvan.sql-crack');
-  assert(extension, 'Development extension is installed');
+  assert(extension, 'SQL Crack is installed');
+  if (process.env.VSCODE_TEST_VSIX) {
+    assert(extension.extensionPath.includes('extensions'), 'SQL Crack loads from the installed VSIX');
+    for (const step of extension.packageJSON.contributes.walkthroughs[0].steps) {
+      assert(require('fs').existsSync(require('path').join(extension.extensionPath, step.media.image)), `Packaged walkthrough asset exists: ${step.id}`);
+    }
+  }
   const root = vscode.workspace.workspaceFolders[0].uri;
   const hql = await vscode.workspace.openTextDocument(vscode.Uri.joinPath(root, 'query.hql'));
   await vscode.window.showTextDocument(hql);
@@ -10,6 +24,10 @@ exports.run = async () => {
   while (!extension.isActive && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 100));
   assert(extension.isActive, 'Custom-extension activation works before opening a .sql file');
   await vscode.commands.executeCommand('sql-crack.visualize');
+  const hasFlowTab = () => vscode.window.tabGroups.all.some(group => group.tabs.some(tab => tab.label === 'SQL Flow' && tab.input instanceof vscode.TabInputWebview));
+  const tabDeadline = Date.now() + 5000;
+  while (!hasFlowTab() && Date.now() < tabDeadline) await new Promise(resolve => setTimeout(resolve, 50));
+  assert(hasFlowTab(), 'Visualization opens for the configured extension');
   const sql = await vscode.workspace.openTextDocument(vscode.Uri.joinPath(root, 'query.sql'));
   await vscode.languages.setTextDocumentLanguage(sql, 'plaintext');
   await vscode.window.showTextDocument(sql);

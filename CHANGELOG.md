@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Activate configured SQL file extensions without first opening a `.sql` file; recognize `.sql` files with other language IDs.
 - Package walkthrough illustrations and show a useful partial card for unsupported CREATE TABLE syntax.
 - Open export dialogs beside the SQL source or workspace and bound persisted panel state.
+- Preserve the lineage panel and selected output when refreshing the same query.
+- Treat distinct-alias table references as informational hints rather than recommending removal of intentional self-joins.
 
 ### Changed
 - Default to the VS Code theme and use **Cmd/Ctrl+K, then Q** for Visualize SQL Query. Existing custom keybindings and explicit theme settings remain available.
@@ -23,11 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improve keyboard and screen-reader controls for collapsible panels and hide development metrics unless instrumentation is enabled.
 
 ### Security and release tooling
-- Update dependency tooling, pin VS Code types to the minimum supported API, and isolate release credentials from install/test/build steps.
+- Update dependency tooling, enforce full dependency audits, pin VS Code types to the minimum supported API, and isolate release credentials from install/test/build steps.
 - Declare Restricted Mode support, document static-analysis limits and private vulnerability reporting, and include third-party license notices.
-- Add extension-host smoke tests for VS Code 1.85 and stable on Linux, macOS, and Windows.
-
-## [Unreleased]
+- Test installed VSIX activation, packaged assets and worker responsiveness on VS Code 1.85 and stable on Linux, macOS and Windows, with Restricted Mode checks on stable.
 
 ## [0.9.4] - 2026-10-01
 

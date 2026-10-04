@@ -15,6 +15,14 @@ describe('remaining audit state and lifecycle regressions', () => {
         'utf8'
     );
 
+    it('preserves interaction state only when reparsing the same document and query', () => {
+        const visualize = indexSource.slice(indexSource.indexOf('async function visualize('), indexSource.indexOf('function clampQueryIndex('));
+        expect(visualize).toContain('batchResult !== null && renderedDocumentKey === documentKeyForParse');
+        expect(visualize).toContain('renderCurrentQuery(preserveInteractionState)');
+        const renderCurrent = indexSource.slice(indexSource.indexOf('function renderCurrentQuery('), indexSource.indexOf('async function switchToQueryIndex('));
+        expect(renderCurrent).toContain('preserveInteractionState && renderedQueryIndex === currentQueryIndex');
+    });
+
     it('does not mutate per-query view state while merely capturing persistence', () => {
         const capture = indexSource.match(/function capturePersistedState\(\)[\s\S]*?^}/m)?.[0] || '';
         expect(capture).not.toContain('queryViewStates.set(');

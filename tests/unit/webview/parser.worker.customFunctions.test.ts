@@ -1,4 +1,33 @@
 describe('worker custom function configuration', () => {
+    it('transports custom windows and resets the worker registry on the next request', () => {
+        let listener: (event: {data: unknown}) => void = () => undefined;
+        const messages: any[] = [];
+        const previousPost = (global as any).postMessage;
+        const previousListener = (global as any).addEventListener;
+        (global as any).postMessage = (message: unknown) => messages.push(message);
+        (global as any).addEventListener = (_event: string, callback: typeof listener) => {listener = callback;};
+        try {
+            jest.isolateModules(() => {
+                require('../../../src/webview/parser.worker');
+                const {getWindowFunctions} = require('../../../src/dialects');
+                listener({data: {type: 'parse', requestId: 1, payload: {
+                    sql: 'SELECT MY_RANK(amount) OVER (PARTITION BY customer_id ORDER BY amount) AS position FROM orders',
+                    dialect: 'MySQL', customWindowFunctions: ['MY_RANK']
+                }}});
+                const result = messages.find(message => message.requestId === 1 && message.type === 'parse').result;
+                expect(result.nodes.some((node: any) => node.type === 'window')).toBe(true);
+                expect(result.stats.windowFunctions).toBe(1);
+                expect(result.stats.functionsUsed).toEqual(expect.arrayContaining([expect.objectContaining({name: 'MY_RANK', category: 'window'})]));
+                expect(getWindowFunctions('MySQL')).toContain('MY_RANK');
+                listener({data: {type: 'parse', requestId: 2, payload: {sql: 'SELECT id FROM orders', dialect: 'PostgreSQL'}}});
+                expect(getWindowFunctions('MySQL')).not.toContain('MY_RANK');
+            });
+        } finally {
+            (global as any).postMessage = previousPost;
+            (global as any).addEventListener = previousListener;
+        }
+    });
+
     it('applies and clears custom aggregates in the worker parsing context', () => {
         let listener: (event: {data: unknown}) => void = () => undefined;
         const messages: any[] = [];
