@@ -104,6 +104,8 @@ export class WorkspacePanel {
     private _indexManager: IndexManager;
     private _initializePromise: Promise<void> | null = null;
     private _indexBuildPromise: Promise<void> | null = null;
+    /** Counts requested index builds, so a pending prompt can tell the panel already started one. */
+    private _indexBuildsRequested = 0;
     private _dialect: SqlDialect;
     private _currentGraph: WorkspaceDependencyGraph | null = null;
     private _currentView: ViewMode | 'graph' | 'issues' = 'graph';
@@ -437,7 +439,16 @@ export class WorkspacePanel {
         // available. A valid cached index (hasValidIndex) must render immediately
         // without re-prompting, even though it was not auto-built this session.
         if (!autoIndexed && !hasValidIndex && fileCount >= autoIndexThreshold) {
-            // Large workspace - ask user to confirm indexing
+            // Large workspace - ask user to confirm indexing. Show the same
+            // choice in the panel first: the notification can be hidden (Do Not
+            // Disturb, the notification centre), and a spinner would then read
+            // as a scan that never finishes.
+            this.setWebviewHtml(createManualIndexHtml({
+                fileCount,
+                isDarkTheme: this._isDarkTheme,
+                nonce: generateNonce(),
+            }));
+            const buildsRequested = this._indexBuildsRequested;
             const result = await vscode.window.showInformationMessage(
                 `Found ${fileCount} SQL files in workspace. Index them now?`,
                 'Index Now',
@@ -446,15 +457,14 @@ export class WorkspacePanel {
             if (this._isDisposed) {
                 return;
             }
+            // "Start Analysis" in the panel already built and rendered the index.
+            if (this._indexBuildsRequested !== buildsRequested) {
+                return;
+            }
 
             if (result === 'Index Now') {
                 await this.buildIndexWithProgress();
             } else {
-                this.setWebviewHtml(createManualIndexHtml({
-                    fileCount,
-                    isDarkTheme: this._isDarkTheme,
-                    nonce: generateNonce(),
-                }));
                 return;
             }
         }
@@ -473,6 +483,7 @@ export class WorkspacePanel {
      * Supports cancellation for large workspaces
      */
     private async buildIndexWithProgress(): Promise<void> {
+        this._indexBuildsRequested += 1;
         if (this._indexBuildPromise) {
             await this._indexBuildPromise;
             return;
