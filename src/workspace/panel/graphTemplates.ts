@@ -355,7 +355,7 @@ export function createStatsPanelHtml(options: StatsPanelHtmlOptions): string {
     return `
         <div class="sidebar-header">
             <span class="sidebar-title">Panel</span>
-            <button class="sidebar-close" id="btn-sidebar-close">
+            <button class="sidebar-close" id="btn-sidebar-close" aria-label="Close panel" title="Close panel">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M18 6L6 18M6 6l12 12"/>
                 </svg>

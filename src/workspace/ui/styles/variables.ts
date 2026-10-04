@@ -212,6 +212,9 @@ function getHighContrastOverrides(dark: boolean): string {
         :root {
             --border-color: ${dark ? 'rgba(255, 255, 255, 0.4)' : 'rgba(0, 0, 0, 0.4)'};
             --border-subtle: ${dark ? 'rgba(255, 255, 255, 0.25)' : 'rgba(0, 0, 0, 0.25)'};
+            /* The regular muted tones sit near 3.9:1; high contrast needs at least 7:1. */
+            --text-muted: ${dark ? '#a1a1aa' : '#475569'};
+            --text-dim: ${dark ? '#94a3b8' : '#475569'};
         }
         * { border-width: 2px; }
         .node { stroke-width: 2px; }

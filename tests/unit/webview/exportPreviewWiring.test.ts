@@ -32,6 +32,14 @@ describe('export preview wiring', () => {
         expect(exportDropdownSource).toContain("callbacks.onOpenExportPreview('pdf')");
     });
 
+    it('returns focus to the opener, or the Export button, when the preview closes', () => {
+        expect(exportPreviewSource).toContain('exportPreviewReturnFocus = returnFocus instanceof HTMLElement ? returnFocus : null;');
+        expect(exportPreviewSource).toContain("document.querySelector('[aria-label=\"Export visualization\"]')");
+        // A theme change rebuilds the dialog and must not move focus out of it.
+        expect(exportPreviewSource).toContain('disposeExportPreview(false);');
+        expect(exportDropdownSource).toContain("btn.setAttribute('aria-label', 'Export visualization');");
+    });
+
     it('defines a dedicated export preview modal with live preview callbacks', () => {
         expect(exportPreviewSource).toContain("export function showExportPreview");
         expect(exportPreviewSource).toContain('buildPngPreview');

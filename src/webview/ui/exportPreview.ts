@@ -29,9 +29,17 @@ export interface ExportPreviewOptions {
 
 let exportPreviewAbortController: AbortController | null = null;
 let exportPreviewOverlay: HTMLDivElement | null = null;
+let exportPreviewReturnFocus: HTMLElement | null = null;
+
+function isFocusable(element: Element | null): element is HTMLElement {
+    return element instanceof HTMLElement && element !== document.body && element.isConnected && element.offsetParent !== null;
+}
 
 export function showExportPreview(options: ExportPreviewOptions): void {
-    disposeExportPreview();
+    // A theme change rebuilds the open dialog; keep the element that opened it.
+    const returnFocus = exportPreviewOverlay ? exportPreviewReturnFocus : document.activeElement;
+    disposeExportPreview(false);
+    exportPreviewReturnFocus = returnFocus instanceof HTMLElement ? returnFocus : null;
 
     exportPreviewAbortController = new AbortController();
     const signal = exportPreviewAbortController.signal;
@@ -422,11 +430,23 @@ export function showExportPreview(options: ExportPreviewOptions): void {
     void refreshPreview();
 }
 
-export function disposeExportPreview(): void {
+export function disposeExportPreview(restoreFocus = true): void {
+    const wasOpen = exportPreviewOverlay !== null;
     exportPreviewAbortController?.abort();
     exportPreviewAbortController = null;
     exportPreviewOverlay?.remove();
     exportPreviewOverlay = null;
+    if (!wasOpen || !restoreFocus) {
+        return;
+    }
+    // The menu item that opened the dialog is gone once its dropdown closes,
+    // so fall back to the toolbar button that owns that menu.
+    const opener = exportPreviewReturnFocus;
+    exportPreviewReturnFocus = null;
+    const target = isFocusable(opener) ? opener : document.querySelector('[aria-label="Export visualization"]');
+    if (isFocusable(target)) {
+        target.focus();
+    }
 }
 
 function renderSelectControl(

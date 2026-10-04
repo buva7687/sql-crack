@@ -403,7 +403,7 @@
           {
             "id": "openSqlFile",
             "title": "Open a SQL file",
-            "description": "Open any `.sql` file in your workspace to get started.\n\n[Open a SQL file](command:workbench.action.quickOpen)",
+            "description": "Open any ``.sql`` file in your workspace to get started.\n\n[Open a SQL file](command:workbench.action.quickOpen)",
             "media": {
               "image": "assets/walkthrough/openSqlFile.svg",
               "altText": "SQL Crack query visualization demo"
@@ -412,7 +412,7 @@
           {
             "id": "visualizeQuery",
             "title": "Visualize your query",
-            "description": "Press `Cmd+K, then Q` (Mac) or `Ctrl+K, then Q` (Windows/Linux) to open the interactive flow diagram.\n\n[Visualize SQL Query](command:sql-crack.visualize)",
+            "description": "Press ``Cmd+K``, then ``Q`` (Mac) or ``Ctrl+K``, then ``Q`` (Windows/Linux) to open the interactive flow diagram.\n\n[Visualize SQL Query](command:sql-crack.visualize)",
             "media": {
               "image": "assets/walkthrough/visualizeQuery.svg",
               "altText": "Interactive SQL flow diagram demo"
@@ -430,7 +430,7 @@
           {
             "id": "columnLineage",
             "title": "Try column lineage",
-            "description": "Press `C` while viewing a query visualization to toggle column-level lineage. Click a column to trace its data flow through the query.",
+            "description": "Press ``C`` while viewing a query visualization to toggle column-level lineage. Click a column to trace its data flow through the query.",
             "media": {
               "image": "assets/walkthrough/columnLineage.svg",
               "altText": "Column lineage visualization demo"
