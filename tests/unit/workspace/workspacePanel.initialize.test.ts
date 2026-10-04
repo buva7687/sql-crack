@@ -93,7 +93,7 @@ describe('WorkspacePanel initialization', () => {
         expect(context.rebuildAndRenderGraph).toHaveBeenCalledTimes(1);
     });
 
-    it('prompts for a large workspace when no valid index is available', async () => {
+    it('offers manual analysis without leaving a duplicate notification', async () => {
         const context = createContext({
             autoIndexed: false,
             fileCount: 100,
@@ -103,62 +103,22 @@ describe('WorkspacePanel initialization', () => {
 
         await (WorkspacePanel.prototype as any).initialize.call(context);
 
-        expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-            'Found 100 SQL files in workspace. Index them now?',
-            'Index Now',
-            'Cancel'
-        );
-        expect(context.buildIndexWithProgress).not.toHaveBeenCalled();
-        expect(context.rebuildAndRenderGraph).not.toHaveBeenCalled();
-    });
-
-    it('shows the in-panel choice while the large-workspace notification is pending', async () => {
-        const context = createContext({
-            autoIndexed: false,
-            fileCount: 100,
-            cacheState: 'missing',
-            hasValidIndex: false,
-        });
-        let answer!: (value: string | undefined) => void;
-        (vscode.window.showInformationMessage as jest.Mock).mockReturnValueOnce(
-            new Promise<string | undefined>(resolve => { answer = resolve; })
-        );
-
-        const initializing = (WorkspacePanel.prototype as any).initialize.call(context);
-        await new Promise(resolve => setImmediate(resolve));
-
-        // Not the "Scanning SQL files..." spinner: the notification may be hidden.
+        expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
         expect(context.setWebviewHtml).toHaveBeenLastCalledWith(expect.stringContaining('Start Analysis'));
-
-        answer('Index Now');
-        await initializing;
-        expect(context.buildIndexWithProgress).toHaveBeenCalledTimes(1);
-        expect(context.rebuildAndRenderGraph).toHaveBeenCalledTimes(1);
-    });
-
-    it('does not rebuild or re-render when the panel started the analysis before the notification was answered', async () => {
-        const context = createContext({
-            autoIndexed: false,
-            fileCount: 100,
-            cacheState: 'missing',
-            hasValidIndex: false,
-        });
-        let answer!: (value: string | undefined) => void;
-        (vscode.window.showInformationMessage as jest.Mock).mockReturnValueOnce(
-            new Promise<string | undefined>(resolve => { answer = resolve; })
-        );
-
-        const initializing = (WorkspacePanel.prototype as any).initialize.call(context);
-        await new Promise(resolve => setImmediate(resolve));
-        const pagesBefore = context.setWebviewHtml.mock.calls.length;
-        // The panel's "Start Analysis" button requests a build through the message handler.
-        context._indexBuildsRequested += 1;
-
-        answer(undefined);
-        await initializing;
         expect(context.buildIndexWithProgress).not.toHaveBeenCalled();
         expect(context.rebuildAndRenderGraph).not.toHaveBeenCalled();
-        expect(context.setWebviewHtml.mock.calls.length).toBe(pagesBefore);
+    });
+
+    it('finishes initialization even when information notifications would never resolve', async () => {
+        const context = createContext({
+            autoIndexed: false, fileCount: 100, cacheState: 'missing', hasValidIndex: false,
+        });
+        (vscode.window.showInformationMessage as jest.Mock).mockReturnValueOnce(new Promise(() => undefined));
+        await (WorkspacePanel.prototype as any).initialize.call(context);
+        expect(context.setWebviewHtml).toHaveBeenLastCalledWith(expect.stringContaining('Start Analysis'));
+        expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
+        expect(context.buildIndexWithProgress).not.toHaveBeenCalled();
+        expect(context.rebuildAndRenderGraph).not.toHaveBeenCalled();
     });
 
     it('shows the manual analysis page without re-prompting for an oversized cache marker', async () => {

@@ -12,7 +12,7 @@ CI defines installed-extension smoke tests for Linux, macOS and Windows on VS Co
 
 ## Saved data and index recovery
 
-Pinned SQL snapshots, panel preferences and the workspace index are stored in VS Code workspace state. Removing a pin with its `×` control deletes that snapshot; closing a visualization panel preserves it. Review snapshots before sharing a workspace's VS Code storage, because they contain SQL text.
+Pinned SQL snapshots, panel preferences and small workspace indexes are stored in VS Code workspace state. Larger indexes use compressed files in the extension's workspace storage, with a 64 MiB limit before compression. Removing a pin with its `×` control deletes that snapshot; closing a visualization panel preserves it. Review snapshots and cached analyses before sharing VS Code storage, because they can contain SQL text.
 
 Use **Refresh** in the Workspace Dependencies panel to rebuild its index. To bypass a saved index, set `sqlCrack.advanced.cacheTTLHours` to `0`, close the panel and run **SQL Crack: Analyze Workspace Dependencies** again. Restore your preferred TTL after rebuilding. For an expensive scan, cancel it and analyze a smaller folder; the auto-index threshold changes prompting rather than extraction speed.
 

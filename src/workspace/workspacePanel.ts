@@ -105,7 +105,6 @@ export class WorkspacePanel {
     private _initializePromise: Promise<void> | null = null;
     private _indexBuildPromise: Promise<void> | null = null;
     /** Counts requested index builds, so a pending prompt can tell the panel already started one. */
-    private _indexBuildsRequested = 0;
     private _dialect: SqlDialect;
     private _currentGraph: WorkspaceDependencyGraph | null = null;
     private _currentView: ViewMode | 'graph' | 'issues' = 'graph';
@@ -423,9 +422,8 @@ export class WorkspacePanel {
             return;
         }
 
-        // A previous build already established that this index cannot fit in
-        // workspaceState. Avoid repeating the modal prompt on every panel open;
-        // leave analysis as an explicit action on the existing manual page.
+        // A previous build could not be cached. Leave analysis as an explicit
+        // action rather than silently repeating an expensive scan.
         if (cacheState === 'oversized' && !hasValidIndex) {
             this.setWebviewHtml(createManualIndexHtml({
                 fileCount,
@@ -435,38 +433,15 @@ export class WorkspacePanel {
             return;
         }
 
-        // Only prompt to index a large workspace when there is no usable index
-        // available. A valid cached index (hasValidIndex) must render immediately
-        // without re-prompting, even though it was not auto-built this session.
+        // The panel owns the indexing choice. VS Code information notifications
+        // cannot be dismissed when the same action starts from the webview.
         if (!autoIndexed && !hasValidIndex && fileCount >= autoIndexThreshold) {
-            // Large workspace - ask user to confirm indexing. Show the same
-            // choice in the panel first: the notification can be hidden (Do Not
-            // Disturb, the notification centre), and a spinner would then read
-            // as a scan that never finishes.
             this.setWebviewHtml(createManualIndexHtml({
                 fileCount,
                 isDarkTheme: this._isDarkTheme,
                 nonce: generateNonce(),
             }));
-            const buildsRequested = this._indexBuildsRequested;
-            const result = await vscode.window.showInformationMessage(
-                `Found ${fileCount} SQL files in workspace. Index them now?`,
-                'Index Now',
-                'Cancel'
-            );
-            if (this._isDisposed) {
-                return;
-            }
-            // "Start Analysis" in the panel already built and rendered the index.
-            if (this._indexBuildsRequested !== buildsRequested) {
-                return;
-            }
-
-            if (result === 'Index Now') {
-                await this.buildIndexWithProgress();
-            } else {
-                return;
-            }
+            return;
         }
         if (this._isDisposed) {
             return;
@@ -483,7 +458,6 @@ export class WorkspacePanel {
      * Supports cancellation for large workspaces
      */
     private async buildIndexWithProgress(): Promise<void> {
-        this._indexBuildsRequested += 1;
         if (this._indexBuildPromise) {
             await this._indexBuildPromise;
             return;

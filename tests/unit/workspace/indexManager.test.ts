@@ -1047,6 +1047,74 @@ describe('IndexManager', () => {
     // =========================================================================
 
     describe('caching', () => {
+        it('restores an index larger than workspace state from extension storage without parsing again', async () => {
+            const disk = new Map<string, Uint8Array>();
+            const storagePrefix = mockContext.storageUri!.toString();
+            (vscode.workspace.fs.writeFile as jest.Mock).mockImplementation(async (uri: vscode.Uri, data: Uint8Array) => {
+                disk.set(uri.toString(), data);
+            });
+            (vscode.workspace.fs.rename as jest.Mock).mockImplementation(async (from: vscode.Uri, to: vscode.Uri) => {
+                disk.set(to.toString(), disk.get(from.toString())!);
+                disk.delete(from.toString());
+            });
+            (vscode.workspace.fs.readFile as jest.Mock).mockImplementation(async (uri: vscode.Uri) => {
+                return uri.toString().startsWith(storagePrefix) ? disk.get(uri.toString())! : new Uint8Array();
+            });
+            const analysis = createMockAnalysis('/large-cache.sql', [{ name: 'cached_table' }]);
+            analysis.parseError = 'x'.repeat(4 * 1024 * 1024);
+            mockScanner.getFileCount.mockResolvedValue(1);
+            mockScanner.analyzeWorkspace.mockResolvedValue([analysis]);
+            await indexManager.buildIndex();
+            expect(mockContext.workspaceState.get<{ disk?: boolean }>('sqlWorkspaceIndex')?.disk).toBe(true);
+            expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
+
+            const restored = new IndexManager(mockContext as vscode.ExtensionContext, 'MySQL');
+            mockScanner.analyzeWorkspace.mockClear();
+            try {
+                const result = await restored.initialize(0);
+                expect(result.cacheState).toBe('valid');
+                expect(restored.findDefinition('cached_table')).toBeDefined();
+                expect(mockScanner.analyzeWorkspace).not.toHaveBeenCalled();
+            } finally {
+                restored.dispose();
+            }
+        });
+
+        it('treats a corrupt disk cache as missing without installing a partial index', async () => {
+            await mockContext.workspaceState.update('sqlWorkspaceIndex', {
+                version: 8, identity: JSON.stringify({ schema: 8, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                disk: true, lastUpdated: Date.now(), fileCount: 1,
+                filesArray: [], fileHashesArray: [], definitionArray: [], referenceArray: [],
+            });
+            mockScanner.getFileCount.mockResolvedValue(1);
+            (vscode.workspace.fs.readFile as jest.Mock).mockResolvedValue(Buffer.from('broken gzip'));
+            const result = await indexManager.initialize(0);
+            expect(result.cacheState).toBe('missing');
+            expect(result.hasValidIndex).toBe(false);
+            expect(indexManager.getIndex()).toBeNull();
+        });
+
+        it('keeps a later cache clear authoritative when a queued disk write fails', async () => {
+            const analysis = createMockAnalysis('/large-cache.sql', [{ name: 'cached_table' }]);
+            analysis.parseError = 'x'.repeat(4 * 1024 * 1024);
+            mockScanner.analyzeWorkspace.mockResolvedValue([analysis]);
+            let failWrite!: (error: Error) => void;
+            let started!: () => void;
+            const writing = new Promise<void>(resolve => { started = resolve; });
+            (vscode.workspace.fs.writeFile as jest.Mock).mockImplementationOnce(() => {
+                started();
+                return new Promise<void>((_resolve, reject) => { failWrite = reject; });
+            });
+            const build = indexManager.buildIndex();
+            await writing;
+            const clear = indexManager.clearCache();
+            failWrite(new Error('Disk full'));
+            await Promise.all([build, clear]);
+            expect(mockContext.workspaceState.get('sqlWorkspaceIndex')).toBeUndefined();
+            expect(indexManager.getIndex()).toBeNull();
+            expect(vscode.window.showWarningMessage).toHaveBeenCalled();
+        });
+
         it('rejects a cached index when dialect changes during filesystem validation', async () => {
             await mockContext.workspaceState.update('sqlWorkspaceIndex', {
                 version: 8,
