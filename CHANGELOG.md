@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Preserve correct lineage across self-joins, repeated output names, per-file/per-statement CTE scopes, and mixed supported/unsupported statements.
+- Decline nested CTE rewrites that could change bindings and clearly mark the result as partial.
+- Apply custom aggregate/window functions in the webview parser worker and during configuration updates.
+- Activate configured SQL file extensions without first opening a `.sql` file; recognize `.sql` files with other language IDs.
+- Package walkthrough illustrations and show a useful partial card for unsupported CREATE TABLE syntax.
+- Open export dialogs beside the SQL source or workspace and bound persisted panel state.
+- Preserve the lineage panel and selected output when refreshing the same query.
+- Treat a table joined to itself under distinct aliases as an informational hint rather than recommending removal of an intentional self-join. Separate UNION branches, CTEs and subqueries that read the same table still report a repeated scan.
+- Keep the large-workspace **Start Analysis** choice in the panel, avoiding a notification that remains after analysis starts.
+- Restore large workspace indexes from compressed extension storage instead of rebuilding them on each open.
+- Stack statistics and hints in narrow SQL Flow panels and restore their saved widths when the view widens.
+- Return keyboard focus to the Export button when the export preview closes, name the Workspace panel's close button for screen readers, and raise muted text to at least 7:1 in the Workspace panel under high-contrast themes.
+- Keep Tab and Shift+Tab inside Export Preview while controls change, and raise SQL Flow muted-label contrast in high-contrast themes, including live theme changes.
+- Match hint severity labels, function badges, loading cards and clause-popup text to light and dark themes, including live high-contrast changes.
+- In the SQL clause popup shown for a clicked edge, pick white or near-black badge text by contrast, name the close button for screen readers, and keep the popup above the legend bar.
+- Use the current theme background on the Workspace loading, empty and manual-analysis pages, and render keys in the walkthrough as code instead of literal backticks.
+
+### Changed
+- Default to the VS Code theme and use **Cmd/Ctrl+K, then Q** for Visualize SQL Query. Existing custom keybindings and explicit theme settings remain available.
+- Parse workspace files and optional Problems diagnostics in background workers with cancellation, deadlines and memory limits; ignore diagnostics from superseded document versions.
+- Reduce the webview bundle by excluding unused jsPDF HTML-rendering dependencies; preserve PDF graph export.
+- Refresh repeated visualizations without rebuilding the same document's webview, and embed bootstrap SQL once.
+- Improve keyboard and screen-reader controls for collapsible panels and hide development metrics unless instrumentation is enabled.
+
+### Security and release tooling
+- Update dependency tooling, enforce full dependency audits in the release build and report them as a separate CI job, pin VS Code types to the minimum supported API, and isolate release credentials from install/test/build steps.
+- Declare Restricted Mode support, document static-analysis limits and private vulnerability reporting, and include third-party license notices.
+- Test installed VSIX activation, packaged assets and worker responsiveness on VS Code 1.85 and stable on Linux, macOS and Windows, with Restricted Mode checks on stable.
+
 ## [0.9.4] - 2026-10-01
 
 ### Added

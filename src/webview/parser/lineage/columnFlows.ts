@@ -80,7 +80,7 @@ export function generateColumnFlows(
     for (const selectNode of selectNodes) {
         if (!selectNode.columns || selectNode.columns.length === 0) {continue;}
 
-        for (const outputCol of selectNode.columns) {
+        for (const [outputIndex, outputCol] of selectNode.columns.entries()) {
             // Build full lineage path for this output column
             const lineagePath = buildColumnLineagePath(
                 outputCol,
@@ -90,7 +90,7 @@ export function generateColumnFlows(
             );
 
             if (lineagePath.length > 0) {
-                const flowId = `lineage_${selectNode.id}_${outputCol.name}`;
+                const flowId = `lineage_${selectNode.id}_${outputIndex}_${outputCol.name}`;
                 columnFlows.push({
                     id: flowId,
                     outputColumn: outputCol.name,

@@ -1,6 +1,37 @@
 import { parseSql } from '../../../src/webview/sqlParser';
 
 describe('performance hint deduplication', () => {
+    it('does not recommend collapsing an intentional employee-manager self-join', () => {
+        const result = parseSql('SELECT a.id AS employee_id, b.id AS manager_id FROM employees a JOIN employees b ON a.manager_id = b.id', 'PostgreSQL');
+        const repeated = result.hints.filter(hint => /table ["']employees["'].*2 times/i.test(hint.message));
+        expect(repeated).toHaveLength(1);
+        expect(repeated[0].type).toBe('info');
+        expect(repeated[0].suggestion).not.toMatch(/scan.*once|single CTE/i);
+        expect(result.nodes.flatMap(node => node.warnings || []).filter(warning => warning.type === 'repeated-scan')).toEqual([]);
+    });
+
+    it('keeps a self-join spread across a longer join chain informational', () => {
+        const result = parseSql(
+            'SELECT a.id, c.id AS grand_manager FROM employees a JOIN employees b ON a.manager_id = b.id '
+            + 'JOIN departments d ON d.id = a.dept_id JOIN employees c ON b.manager_id = c.id',
+            'PostgreSQL'
+        );
+        const repeated = result.hints.filter(hint => /table ["']employees["'].*3 times/i.test(hint.message));
+        expect(repeated).toHaveLength(1);
+        expect(repeated[0].type).toBe('info');
+    });
+
+    it('still warns when distinct aliases read the same table in separate UNION branches', () => {
+        const result = parseSql(
+            "SELECT o1.id FROM orders o1 WHERE o1.status = 'a' UNION ALL SELECT o2.id FROM orders o2 WHERE o2.status = 'b'",
+            'PostgreSQL'
+        );
+        const repeated = result.hints.filter(hint => /table ["']orders["'].*2 times/i.test(hint.message));
+        expect(repeated).toHaveLength(1);
+        expect(repeated[0].type).toBe('warning');
+        expect(repeated[0].message).not.toContain('distinct aliases');
+    });
+
     it('emits a single repeated-table hint for the same table usage pattern', () => {
         const sql = `
             SELECT oi1.order_id
@@ -14,8 +45,8 @@ describe('performance hint deduplication', () => {
         );
 
         expect(repeatedTableHints).toHaveLength(1);
-        expect(repeatedTableHints[0].message.toLowerCase()).toContain('scanned');
-        expect(result.hints.some(h => /table 'order_items' is accessed 2 times/i.test(h.message))).toBe(false);
+        expect(repeatedTableHints[0].type).toBe('info');
+        expect(repeatedTableHints[0].message).toContain('distinct aliases');
     });
 
     it('does not emit overlapping scanned/accessed hints for Query 4 style repeated tables', () => {

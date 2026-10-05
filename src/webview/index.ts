@@ -2,10 +2,11 @@
 import process from 'process/browser';
 (window as unknown as { process: typeof process }).process = process;
 
-import { configureParseTimeout, isCancelledBatchParseResult, parseAsync, parseBatchAsync } from './parserClient';
+import { configureCustomFunctions, configureParseTimeout, isCancelledBatchParseResult, parseAsync, parseBatchAsync } from './parserClient';
 import { setMinimapMode, MinimapMode } from './minimapVisibility';
 import { detectDialect } from './sqlParser';
-import { getComponentUiColors } from './constants';
+import { getComponentUiColors, setHighContrastMode } from './constants';
+import { installCompactPanelLayout } from './ui/compactPanelLayout';
 import { BatchParseResult, LayoutType, ParseError, ParseResult, QueryLineRange, SqlDialect } from './types';
 import {
     initRenderer,
@@ -106,6 +107,8 @@ import { applyLineOffsetToResult } from './state/lineOffsets';
 type HostPostMessagePayload = { command: string; [key: string]: unknown };
 
 interface SqlCrackWebviewBootstrapConfig {
+    customAggregateFunctions?: string[];
+    customWindowFunctions?: string[];
     initialSqlCode: string;
     vscodeTheme: string;
     isHighContrast: boolean;
@@ -325,6 +328,8 @@ function normalizeRuntimeConfigUpdate(raw: unknown): SqlCrackRuntimeConfigUpdate
         deferredQueryThreshold: normalizeAdvancedLimit(payload.deferredQueryThreshold, window.deferredQueryThreshold || DEFERRED_QUERY_THRESHOLD, 1, 500),
         parseTimeoutSeconds: normalizeAdvancedLimit(payload.parseTimeoutSeconds, window.parseTimeoutSeconds || 5, 1, 60),
         debugLogging: normalizeBool(payload.debugLogging, window.debugLogging === true),
+        customAggregateFunctions: Array.isArray(payload.customAggregateFunctions) ? payload.customAggregateFunctions.filter((value): value is string => typeof value === 'string') : (window.sqlCrackConfig?.customAggregateFunctions || []),
+        customWindowFunctions: Array.isArray(payload.customWindowFunctions) ? payload.customWindowFunctions.filter((value): value is string => typeof value === 'string') : (window.sqlCrackConfig?.customWindowFunctions || []),
     };
 }
 
@@ -335,6 +340,8 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
     }
 
     const previous = {
+        customAggregateFunctions: JSON.stringify(window.sqlCrackConfig?.customAggregateFunctions || []),
+        customWindowFunctions: JSON.stringify(window.sqlCrackConfig?.customWindowFunctions || []),
         vscodeTheme: window.vscodeTheme || 'dark',
         isHighContrast: window.isHighContrast === true,
         autoDetectDialect: (window.autoDetectDialect ?? true) !== false,
@@ -354,6 +361,7 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
     };
     window.vscodeTheme = config.vscodeTheme;
     window.isHighContrast = config.isHighContrast;
+    setHighContrastMode(config.isHighContrast);
     window.defaultDialect = config.defaultDialect;
     window.autoDetectDialect = config.autoDetectDialect;
     window.viewLocation = config.viewLocation;
@@ -372,6 +380,7 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
 
     setMinimapMode(config.showMinimap as MinimapMode);
     configureParseTimeout(config.parseTimeoutSeconds * 1000);
+    configureCustomFunctions(config.customAggregateFunctions || [], config.customWindowFunctions || []);
     setRendererColorblindMode(config.colorblindMode);
 
     const requestedDefaultDialect = normalizeSqlDialect(config.defaultDialect);
@@ -398,7 +407,7 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
     }
 
     const isDark = config.vscodeTheme !== 'light';
-    if (previous.vscodeTheme !== config.vscodeTheme) {
+    if (previous.vscodeTheme !== config.vscodeTheme || previous.isHighContrast !== config.isHighContrast) {
         toggleTheme(isDark);
     } else if (previous.gridStyle !== config.gridStyle || previous.nodeAccentPosition !== config.nodeAccentPosition) {
         // Re-apply existing theme to refresh style-dependent visuals without changing theme mode.
@@ -408,6 +417,8 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
     const requiresRevisualize =
         autoDetectChanged ||
         defaultDialectChanged ||
+        previous.customAggregateFunctions !== JSON.stringify(config.customAggregateFunctions || []) ||
+        previous.customWindowFunctions !== JSON.stringify(config.customWindowFunctions || []) ||
         previous.showDeadColumnHints !== config.showDeadColumnHints ||
         previous.combineDdlStatements !== config.combineDdlStatements ||
         previous.maxFileSizeKB !== config.maxFileSizeKB ||
@@ -1256,6 +1267,7 @@ function init(): void {
     const container = document.getElementById('root');
     if (!container) { return; }
     const runtimeConfig = normalizeRuntimeConfig();
+    setHighContrastMode(window.isHighContrast === true);
 
     // Setup container styles
     container.style.cssText = `
@@ -1268,6 +1280,7 @@ function init(): void {
 
     // Initialize SVG renderer
     initRenderer(container);
+    const cleanupCompactPanelLayout = installCompactPanelLayout(container);
     setRendererColorblindMode((window.colorblindMode as ColorblindMode) || 'off');
 
     // R key / command bar trigger a full re-visualize (same as toolbar refresh).
@@ -1290,6 +1303,7 @@ function init(): void {
 
     // Apply configurable parse timeout
     configureParseTimeout(runtimeConfig.parseTimeoutSeconds * 1000);
+    configureCustomFunctions(window.sqlCrackConfig?.customAggregateFunctions || [], window.sqlCrackConfig?.customWindowFunctions || []);
 
     // Create toolbar with callbacks
     const toolbarResult = createToolbar(container, createToolbarCallbacks(), {
@@ -1376,6 +1390,7 @@ function init(): void {
     });
 
     window.addEventListener('beforeunload', () => {
+        cleanupCompactPanelLayout();
         if (persistStateIntervalId !== null) {
             window.clearInterval(persistStateIntervalId);
             persistStateIntervalId = null;
@@ -1650,6 +1665,7 @@ function createToolbarCallbacks(): ToolbarCallbacks {
 async function visualize(sql: string): Promise<void> {
     const requestId = ++parseRequestId;
     const documentKeyForParse = window.documentKey ?? window.fileName ?? null;
+    const preserveInteractionState = batchResult !== null && renderedDocumentKey === documentKeyForParse;
     // Error and empty results below have a single entry, so they fall back to Q1.
     let retainedQueryIndex = 0;
     cancelQueryLoading();
@@ -1828,7 +1844,7 @@ async function visualize(sql: string): Promise<void> {
 
     currentQueryIndex = clampQueryIndex(retainedQueryIndex, batchResult?.queries.length ?? 0);
     updateBatchTabsUI();
-    renderCurrentQuery();
+    renderCurrentQuery(preserveInteractionState);
     await applyInitialUiStateIfAvailable();
     schedulePersistUiState();
 }
@@ -1840,7 +1856,7 @@ function clampQueryIndex(index: number, queryCount: number): number {
     return Math.min(index, queryCount - 1);
 }
 
-function renderCurrentQuery(): void {
+function renderCurrentQuery(preserveInteractionState = false): void {
     if (!batchResult || batchResult.queries.length === 0) { return; }
 
     const query = batchResult.queries[currentQueryIndex];
@@ -1859,7 +1875,7 @@ function renderCurrentQuery(): void {
         }
     }
 
-    render(query);
+    render(query, { preserveInteractionState: preserveInteractionState && renderedQueryIndex === currentQueryIndex });
     renderedQueryIndex = currentQueryIndex;
     schedulePersistUiState();
 }

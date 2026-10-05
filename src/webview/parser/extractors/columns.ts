@@ -1,3 +1,4 @@
+import { isAggregateFunction } from '../../../dialects';
 // Column extraction utilities
 
 import type { ColumnInfo } from '../../types';
@@ -9,6 +10,7 @@ export type TrackFunctionUsageFn = (
 
 export interface ExpressionFormatOptions {
     trackFunctionUsage?: TrackFunctionUsageFn;
+    dialect?: string;
 }
 
 export interface ExtractColumnsOptions {
@@ -88,7 +90,7 @@ export function formatExpressionFromAst(expr: any, options: ExpressionFormatOpti
 
     if (expr.type === 'function') {
         const funcName = getAstString(expr.name) || 'FUNC';
-        options.trackFunctionUsage?.(funcName, expr.over ? 'window' : 'scalar');
+        options.trackFunctionUsage?.(funcName, expr.over ? 'window' : isAggregateFunction(funcName, options.dialect) ? 'aggregate' : 'scalar');
         const args = expr.args?.value || expr.args || [];
         const argsStr = Array.isArray(args)
             ? args.map((arg: any) => formatExpressionFromAst(arg, options)).join(', ')

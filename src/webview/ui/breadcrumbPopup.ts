@@ -1,5 +1,5 @@
 import type { FlowNode, ViewState } from '../types';
-import { UI_COLORS } from '../constants';
+import { UI_COLORS, getHighContrastTextColor } from '../constants';
 
 export interface BreadcrumbFeatureOptions {
     breadcrumbPanel: HTMLDivElement | null;
@@ -84,9 +84,9 @@ export function renderBreadcrumbFeature(options: BreadcrumbFeatureOptions): void
     breadcrumbPanel.style.color = state.isDarkTheme ? UI_COLORS.textSubtle : '#475569';
 
     const crumbText = state.isDarkTheme ? '#f1f5f9' : '#0f172a';
-    const crumbMuted = state.isDarkTheme ? '#94a3b8' : '#475569';
+    const crumbMuted = getHighContrastTextColor(state.isDarkTheme ? '#94a3b8' : '#475569', state.isDarkTheme);
     const crumbHover = state.isDarkTheme ? 'rgba(148, 163, 184, 0.2)' : 'rgba(15, 23, 42, 0.08)';
-    const separatorColor = state.isDarkTheme ? '#64748b' : '#94a3b8';
+    const separatorColor = getHighContrastTextColor(state.isDarkTheme ? '#64748b' : '#94a3b8', state.isDarkTheme);
 
     state.breadcrumbPath.forEach((node, index) => {
         const item = document.createElement('span');

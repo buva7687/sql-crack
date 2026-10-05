@@ -3,7 +3,6 @@ import * as path from 'path';
 import { VisualizationPanel } from './visualizationPanel';
 import { setCustomFunctions } from './dialects';
 import { logger } from './logger';
-import { parseSqlBatch, DEFAULT_VALIDATION_LIMITS } from './webview/sqlParser';
 import {
     createDiagnosticsFromBatch,
     SqlCrackCodeActionProvider,
@@ -13,6 +12,10 @@ import { normalizeDialect } from './shared/dialect';
 import { normalizeFileExtensions } from './shared/fileExtensions';
 import { normalizeAdvancedLimit } from './shared/limits';
 import { preprocessJinjaTemplates } from './webview/parser/dialects/jinjaPreprocessor';
+import { DiagnosticsClient } from './diagnosticsClient';
+import type { SqlDialect } from './webview/types';
+
+let diagnosticsClient: DiagnosticsClient | undefined;
 
 // Track the last active SQL document for refresh functionality
 let lastActiveSqlDocument: vscode.TextDocument | null = null;
@@ -56,7 +59,7 @@ function loadAdditionalExtensions(): void {
  */
 function isSqlLikeDocument(document: vscode.TextDocument): boolean {
     // Check if it's a SQL language file
-    if (document.languageId === 'sql') {
+    if (document.languageId === 'sql' || path.extname(document.fileName).toLowerCase() === '.sql') {
         return true;
     }
 
@@ -77,6 +80,7 @@ function isSqlLikeDocument(document: vscode.TextDocument): boolean {
  */
 function getSqlCodeActionDocumentSelector(): vscode.DocumentSelector {
     const selectors: vscode.DocumentFilter[] = [
+        { scheme: 'file', pattern: '**/*.sql' },
         { language: 'sql', scheme: 'file' },
         { language: 'sql', scheme: 'untitled' },
     ];
@@ -151,12 +155,24 @@ export function activate(context: vscode.ExtensionContext) {
 
     const diagnosticsCollection = vscode.languages.createDiagnosticCollection('sql-crack');
     context.subscriptions.push(diagnosticsCollection);
+    const parser = new DiagnosticsClient();
+    diagnosticsClient = parser;
+    context.subscriptions.push(parser);
 
     const shouldShowDiagnosticsInProblems = (): boolean => {
         return getConfig().get<boolean>('advanced.showDiagnosticsInProblems', false);
     };
 
-    const updateDiagnosticsForDocument = (document: vscode.TextDocument): void => {
+    const diagnosticRequests = new Map<string, number>();
+    let nextDiagnosticRequest = 0;
+    const updateDiagnosticsForDocument = async (document: vscode.TextDocument): Promise<void> => {
+        const key = document.uri.toString();
+        const request = ++nextDiagnosticRequest;
+        diagnosticRequests.set(key, request);
+        parser.cancel(key);
+        const version = document.version;
+        const isCurrent = () => diagnosticRequests.get(key) === request && document.version === version
+            && shouldShowDiagnosticsInProblems() && !document.isClosed;
         if (!isSqlLikeDocument(document)) {
             diagnosticsCollection.delete(document.uri);
             return;
@@ -184,20 +200,26 @@ export function activate(context: vscode.ExtensionContext) {
             const maxFileSizeKB = normalizeAdvancedLimit(config.get<number>('advanced.maxFileSizeKB', 100), 100, 10, 10000);
             const maxStatements = normalizeAdvancedLimit(config.get<number>('advanced.maxStatements', 50), 50, 1, 500);
             const combineDdlStatements = config.get<boolean>('advanced.combineDdlStatements', false);
-            const batch = parseSqlBatch(
+            const parseTimeoutSeconds = normalizeAdvancedLimit(config.get<number>('advanced.parseTimeoutSeconds', 5), 5, 1, 60);
+            const batch = await parser.analyze(key, {
                 sql,
-                defaultDialect as any,
-                {
+                dialect: defaultDialect as SqlDialect,
+                limits: {
                     maxSqlSizeBytes: maxFileSizeKB * 1024,
-                    maxQueryCount: maxStatements || DEFAULT_VALIDATION_LIMITS.maxQueryCount,
+                    maxQueryCount: maxStatements,
                 },
-                {
+                options: {
                     combineDdlStatements,
                     allowDialectFallback: autoDetectDialect,
-                }
-            );
+                },
+                parseTimeoutMs: parseTimeoutSeconds * 1000,
+                customAggregateFunctions: config.get<string[]>('customAggregateFunctions', []),
+                customWindowFunctions: config.get<string[]>('customWindowFunctions', []),
+            });
+            if (!isCurrent()) { return; }
             diagnosticsCollection.set(document.uri, createDiagnosticsFromBatch(document, batch));
         } catch (e) {
+            if (!isCurrent()) { return; }
             logger.debug('[extension] Diagnostics parse failed, clearing: ' + String(e));
             diagnosticsCollection.delete(document.uri);
         }
@@ -462,6 +484,8 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     const documentCloseListener = vscode.workspace.onDidCloseTextDocument((document) => {
+        diagnosticRequests.delete(document.uri.toString());
+        parser.cancel(document.uri.toString());
         diagnosticsCollection.delete(document.uri);
         // Cancel any pending diagnostics refresh for the closed document.
         const docKey = document.uri.toString();
@@ -477,6 +501,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Listen for document changes with debounced auto-refresh
     const docChangeListener = vscode.workspace.onDidChangeTextDocument((e) => {
+        parser.cancel(e.document.uri.toString());
         const config = getConfig();
         const diagnosticsAutoRefresh = config.get<boolean>('autoRefresh', true);
         const autoRefreshDelay = config.get<number>('autoRefreshDelay', 500);
@@ -566,14 +591,15 @@ export function activate(context: vscode.ExtensionContext) {
         }
         if (e.affectsConfiguration('sqlCrack.advanced.showDiagnosticsInProblems')) {
             if (!shouldShowDiagnosticsInProblems()) {
+                diagnosticRequests.clear();
+                parser.cancelAll();
                 diagnosticsCollection.clear();
-            } else {
-                vscode.workspace.textDocuments.forEach((document) => {
-                    updateDiagnosticsForDocument(document);
-                });
             }
         }
-        if (e.affectsConfiguration('sqlCrack.autoDetectDialect')) {
+        const diagnosticSettings = ['advanced.showDiagnosticsInProblems', 'autoDetectDialect', 'defaultDialect',
+            'customAggregateFunctions', 'customWindowFunctions', 'additionalFileExtensions',
+            'advanced.maxFileSizeKB', 'advanced.maxStatements', 'advanced.combineDdlStatements', 'advanced.parseTimeoutSeconds'];
+        if (shouldShowDiagnosticsInProblems() && diagnosticSettings.some(setting => e.affectsConfiguration(`sqlCrack.${setting}`))) {
             vscode.workspace.textDocuments.forEach((document) => {
                 updateDiagnosticsForDocument(document);
             });
@@ -597,6 +623,8 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
+    diagnosticsClient?.dispose();
+    diagnosticsClient = undefined;
     // Clean up auto-refresh timer
     if (autoRefreshTimer) {
         clearTimeout(autoRefreshTimer);

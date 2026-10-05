@@ -65,8 +65,8 @@ describe('webview renderer filter breadcrumb state reset', () => {
 
     it('uses theme-aware breadcrumb colors instead of hardcoded dark-only values', () => {
         expect(breadcrumbSource).toContain('const crumbText = state.isDarkTheme');
-        expect(breadcrumbSource).toContain('const crumbMuted = state.isDarkTheme');
-        expect(breadcrumbSource).toContain('const separatorColor = state.isDarkTheme');
+        expect(breadcrumbSource).toContain('const crumbMuted = getHighContrastTextColor(state.isDarkTheme');
+        expect(breadcrumbSource).toContain('const separatorColor = getHighContrastTextColor(state.isDarkTheme');
         expect(breadcrumbSource).toContain('breadcrumbPanel.style.background = state.isDarkTheme');
     });
 

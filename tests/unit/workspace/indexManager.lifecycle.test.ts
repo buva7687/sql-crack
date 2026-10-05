@@ -1,3 +1,4 @@
+jest.mock('../../../src/workspace/analysisClient', () => require('../../__mocks__/workspaceAnalysisClient'));
 /**
  * IndexManager lifecycle regressions from the 0.9.4 audit: watcher ignore
  * paths (M3), disposal during initialize (M9), and dialect changes without an
@@ -32,6 +33,7 @@ describe('IndexManager lifecycle', () => {
             getFileCount: jest.fn().mockResolvedValue(0),
             analyzeWorkspace: jest.fn().mockResolvedValue([]),
             analyzeFile: jest.fn(),
+            dispose: jest.fn(),
             setDialect: jest.fn(),
             getDialect: jest.fn().mockReturnValue('MySQL'),
             findSqlFiles: jest.fn().mockResolvedValue([]),

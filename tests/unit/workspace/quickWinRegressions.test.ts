@@ -1,3 +1,4 @@
+jest.mock('../../../src/workspace/analysisClient', () => require('../../__mocks__/workspaceAnalysisClient'));
 /**
  * Regression tests for quick-win code review fixes.
  *
@@ -65,6 +66,7 @@ describe('IndexManager.flushPersist()', () => {
             getFileCount: jest.fn().mockResolvedValue(0),
             analyzeWorkspace: jest.fn().mockResolvedValue([]),
             analyzeFile: jest.fn().mockResolvedValue(createMockAnalysis('/test.sql')),
+            dispose: jest.fn(),
             setDialect: jest.fn(),
             getDialect: jest.fn().mockReturnValue('MySQL'),
             findSqlFiles: jest.fn().mockResolvedValue([]),

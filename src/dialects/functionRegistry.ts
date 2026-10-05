@@ -4,8 +4,8 @@ import functionsData from './functions.json';
  * Function registry for SQL dialect-specific aggregate and window functions.
  * Combines built-in dialect functions with user-defined custom functions.
  *
- * Note: Custom functions from VS Code settings are only available in the extension
- * context, not in webviews. Use setCustomFunctions() to inject them from the extension.
+ * Each extension host, webview and parser worker has its own registry instance.
+ * Initialize it with setCustomFunctions() before parsing in that context.
  */
 
 interface DialectFunctions {
@@ -32,8 +32,8 @@ let customTableValuedFunctions: string[] = [];
  * Call this from the extension when initializing or when settings change.
  */
 export function setCustomFunctions(aggregates: string[], window: string[], tableValued: string[] = []): void {
-    customAggregateFunctions = aggregates.map(f => f.toUpperCase());
-    customWindowFunctions = window.map(f => f.toUpperCase());
+    customAggregateFunctions = aggregates.filter(f => typeof f === 'string' && f.trim()).map(f => f.trim().toUpperCase());
+    customWindowFunctions = window.filter(f => typeof f === 'string' && f.trim()).map(f => f.trim().toUpperCase());
     customTableValuedFunctions = tableValued.map(f => f.toUpperCase());
 }
 
@@ -83,13 +83,13 @@ export function getFunctionsForDialect(dialect: string): { aggregates: Set<strin
     // Merge all sources
     const aggregates = new Set<string>([
         ...commonAggregates.map(f => f.toUpperCase()),
-        ...dialectFuncs.aggregates.map(f => f.toUpperCase()),
+        ...dialectFuncs.aggregates.filter(f => typeof f === 'string' && f.trim()).map(f => f.trim().toUpperCase()),
         ...customFunctions.aggregates
     ]);
 
     const window = new Set<string>([
         ...commonWindow.map(f => f.toUpperCase()),
-        ...dialectFuncs.window.map(f => f.toUpperCase()),
+        ...dialectFuncs.window.filter(f => typeof f === 'string' && f.trim()).map(f => f.trim().toUpperCase()),
         ...customFunctions.window
     ]);
 
@@ -156,4 +156,3 @@ export function getTableValuedFunctions(dialect: string = 'mysql'): string[] {
 export function getSupportedDialects(): string[] {
     return Object.keys(builtInFunctions.dialects);
 }
-

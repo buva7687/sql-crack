@@ -501,6 +501,7 @@ function processSelect(
 
     // Check for aggregate functions in columns - with detailed breakdown
     const aggregateFuncDetails = extractAggregateFunctionDetails(stmt.columns, ctx.dialect);
+    if (aggregateFuncDetails.length && !hasGroupBy) {ctx.stats.aggregations++;}
     // Always show aggregate node when aggregate functions are present (similar to window functions)
     if (aggregateFuncDetails.length > 0) {
         const aggregateId = genId(runtime, 'aggregate');
@@ -601,6 +602,7 @@ function processSelect(
     // Extract column info for dead column detection
     const columnInfos: ColumnInfo[] = extractColumnInfos(stmt.columns, {
         expressionMode: 'formatted',
+        dialect: runtime.context.dialect,
         trackFunctionUsage: (functionName, category) => trackFunctionUsage(runtime, functionName, category)
     });
     nodes.push({
@@ -1003,6 +1005,7 @@ function parseCteOrSubqueryInternals(
     if (stmt.columns && Array.isArray(stmt.columns)) {
         extractColumnInfos(stmt.columns, {
             expressionMode: 'formatted',
+            dialect: runtime.context.dialect,
             trackFunctionUsage: (functionName, category) => trackFunctionUsage(runtime, functionName, category)
         });
     }
@@ -1198,6 +1201,7 @@ function parseCteOrSubqueryInternals(
 
     // Add aggregate function details
     const aggregateFuncDetails = extractAggregateFunctionDetails(stmt.columns, ctx.dialect);
+    if (aggregateFuncDetails.length && !hasGroupBy) {ctx.stats.aggregations++;}
     if (aggregateFuncDetails.length > 0) {
         const aggregateId = genId(runtime, 'child_aggregate');
         const baseHeight = 50;
@@ -1284,6 +1288,7 @@ function parseCteOrSubqueryInternals(
         const projectedColumnCount = stmt.columns.length;
         const columnInfos: ColumnInfo[] = extractColumnInfos(stmt.columns, {
             expressionMode: 'formatted',
+            dialect: runtime.context.dialect,
             trackFunctionUsage: (functionName, category) => trackFunctionUsage(runtime, functionName, category)
         });
         nodes.push({
@@ -1510,6 +1515,7 @@ function collectFunctionsFromSelectTree(
     if (Array.isArray(stmt.columns)) {
         extractColumnInfos(stmt.columns, {
             expressionMode: 'formatted',
+            dialect: runtime.context.dialect,
             trackFunctionUsage: (functionName, category) => trackFunctionUsage(runtime, functionName, category)
         });
     }

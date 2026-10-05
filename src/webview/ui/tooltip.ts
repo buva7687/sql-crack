@@ -1,3 +1,4 @@
+import { getHighContrastTextColor } from '../constants';
 import type { FlowNode } from '../types';
 
 export interface ShowTooltipOptions {
@@ -54,7 +55,7 @@ export function showTooltip(options: ShowTooltipOptions, event: MouseEvent): voi
     `;
 
     if (node.description) {
-        content += `<div style="color: ${isDarkTheme ? '#94a3b8' : '#64748b'}; font-size: 11px; margin-bottom: 4px;">${escapeHtml(node.description)}</div>`;
+        content += `<div style="color: ${getHighContrastTextColor(isDarkTheme ? '#94a3b8' : '#64748b', isDarkTheme)}; font-size: 11px; margin-bottom: 4px;">${escapeHtml(node.description)}</div>`;
     }
 
     if (currentSql) {
@@ -77,7 +78,7 @@ export function showTooltip(options: ShowTooltipOptions, event: MouseEvent): voi
                 ">${escapeHtml(sqlSnippet.snippet)}</div>
             `;
 
-            content += `<div style="font-size: 9px; color: ${isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 4px;">
+            content += `<div style="font-size: 9px; color: ${getHighContrastTextColor(isDarkTheme ? '#64748b' : '#94a3b8', isDarkTheme)}; margin-top: 4px;">
                 <span style="display: inline-flex; width: 10px; height: 10px; vertical-align: text-bottom;">${pinIcon}</span>
                 ${sqlSnippet.lineLabel}
             </div>`;
@@ -91,13 +92,13 @@ export function showTooltip(options: ShowTooltipOptions, event: MouseEvent): voi
     }
 
     if (node.type === 'join' && node.details && node.details.length > 0) {
-        content += `<div style="font-size: 10px; color: ${isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 6px; font-family: ${monoFontStack};">
+        content += `<div style="font-size: 10px; color: ${getHighContrastTextColor(isDarkTheme ? '#64748b' : '#94a3b8', isDarkTheme)}; margin-top: 6px; font-family: ${monoFontStack};">
             <strong style="color: ${isDarkTheme ? '#cbd5e1' : '#475569'};">Condition:</strong> ${escapeHtml(node.details[0])}
         </div>`;
     }
 
     if (node.type === 'filter' && node.details && node.details.length > 0) {
-        content += `<div style="font-size: 10px; color: ${isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 6px; font-family: ${monoFontStack};">
+        content += `<div style="font-size: 10px; color: ${getHighContrastTextColor(isDarkTheme ? '#64748b' : '#94a3b8', isDarkTheme)}; margin-top: 6px; font-family: ${monoFontStack};">
             <strong style="color: ${isDarkTheme ? '#cbd5e1' : '#475569'};">Condition:</strong> ${escapeHtml(node.details[0])}
         </div>`;
     }
@@ -107,7 +108,7 @@ export function showTooltip(options: ShowTooltipOptions, event: MouseEvent): voi
             ${node.aggregateDetails.functions.length} aggregate function(s)
         </div>`;
         if (node.aggregateDetails.groupBy && node.aggregateDetails.groupBy.length > 0) {
-            content += `<div style="font-size: 10px; color: ${isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 2px;">
+            content += `<div style="font-size: 10px; color: ${getHighContrastTextColor(isDarkTheme ? '#64748b' : '#94a3b8', isDarkTheme)}; margin-top: 2px;">
                 Group by: ${escapeHtml(node.aggregateDetails.groupBy.join(', '))}
             </div>`;
         }
@@ -119,7 +120,7 @@ export function showTooltip(options: ShowTooltipOptions, event: MouseEvent): voi
         </div>`;
         node.windowDetails.functions.forEach((fn, idx) => {
             if (idx < 3) {
-                content += `<div style="font-size: 9px; color: ${isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 2px;">
+                content += `<div style="font-size: 9px; color: ${getHighContrastTextColor(isDarkTheme ? '#64748b' : '#94a3b8', isDarkTheme)}; margin-top: 2px;">
                     ${escapeHtml(fn.name)}${fn.partitionBy ? ` (PARTITION BY ${escapeHtml(fn.partitionBy.join(', '))})` : ''}
                 </div>`;
             }
@@ -127,13 +128,13 @@ export function showTooltip(options: ShowTooltipOptions, event: MouseEvent): voi
     }
 
     if (node.type === 'select' && node.columns && node.columns.length > 0) {
-        content += `<div style="font-size: 10px; margin-top: 6px; color: ${isDarkTheme ? '#64748b' : '#94a3b8'};">
+        content += `<div style="font-size: 10px; margin-top: 6px; color: ${getHighContrastTextColor(isDarkTheme ? '#64748b' : '#94a3b8', isDarkTheme)};">
             <strong style="color: ${isDarkTheme ? '#cbd5e1' : '#475569'};">Columns:</strong> ${node.columns.length}
         </div>`;
     }
 
     if (node.children && node.children.length > 0) {
-        content += `<div style="font-size: 10px; margin-top: 6px; color: ${isDarkTheme ? '#64748b' : '#94a3b8'};">
+        content += `<div style="font-size: 10px; margin-top: 6px; color: ${getHighContrastTextColor(isDarkTheme ? '#64748b' : '#94a3b8', isDarkTheme)};">
             Contains ${node.children.length} operation(s)
         </div>`;
     }
@@ -150,14 +151,14 @@ export function showTooltip(options: ShowTooltipOptions, event: MouseEvent): voi
             }
         });
         if (node.warnings.length > 3) {
-            content += `<div style="font-size: 9px; color: ${isDarkTheme ? '#64748b' : '#94a3b8'}; margin-top: 4px;">
+            content += `<div style="font-size: 9px; color: ${getHighContrastTextColor(isDarkTheme ? '#64748b' : '#94a3b8', isDarkTheme)}; margin-top: 4px;">
                 +${node.warnings.length - 3} more warning(s)
             </div>`;
         }
         content += '</div>';
     }
 
-    content += `<div style="font-size: 9px; color: ${isDarkTheme ? '#475569' : '#94a3b8'}; margin-top: 8px; border-top: 1px solid ${isDarkTheme ? 'rgba(148, 163, 184, 0.1)' : 'rgba(148, 163, 184, 0.2)'}; padding-top: 6px;">
+    content += `<div style="font-size: 9px; color: ${getHighContrastTextColor(isDarkTheme ? '#475569' : '#94a3b8', isDarkTheme)}; margin-top: 8px; border-top: 1px solid ${isDarkTheme ? 'rgba(148, 163, 184, 0.1)' : 'rgba(148, 163, 184, 0.2)'}; padding-top: 6px;">
         Click to select • Double-click to zoom • Right-click for actions
     </div>`;
 

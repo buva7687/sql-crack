@@ -210,6 +210,7 @@ export type TransformationType =
  */
 export interface CTEDefinition {
     name: string;
+    nameQuoted?: boolean;
     columns?: string[];          // Explicit column list if specified
     query: QueryAnalysis;        // The CTE's SELECT statement
     isRecursive: boolean;

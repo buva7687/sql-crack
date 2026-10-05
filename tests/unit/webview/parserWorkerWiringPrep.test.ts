@@ -39,7 +39,7 @@ describe('parser worker wiring prep', () => {
 
     it('injects parser worker URI via asWebviewUri (window.parserWorkerUri)', () => {
         expect(panelSource).toContain("vscode.Uri.joinPath(this._extensionUri, 'dist', 'parser.worker.js')");
-        expect(panelSource).toContain('window.parserWorkerUri =');
+        expect(panelSource).toContain('Object.assign(window, window.sqlCrackConfig)');
         expect(panelSource).toContain('parserWorkerUri: ${this._escapeForInlineScript');
     });
 

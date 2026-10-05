@@ -18,6 +18,7 @@ import {
 // Import color utilities
 import {
     getNodeColor,
+    getHighContrastTextColor,
     getTransformationColor,
     NODE_COLORS,
     UI_COLORS,
@@ -70,7 +71,7 @@ import {
     applyPanelBottomOffsets,
     parsePixelValue as parsePanelPixelValue,
 } from './ui/panelLayout';
-import { createRendererBootstrap } from './ui/rendererBootstrap';
+import { createRendererBootstrap, updateLoadingOverlayTheme } from './ui/rendererBootstrap';
 import { initCanvas, updateCanvasTheme } from './rendering/canvasSetup';
 import {
     calculateEdgePath as calculateEdgePathFeature,
@@ -1049,6 +1050,7 @@ export function initRenderer(container: HTMLElement): void {
 
     const bootstrap = createRendererBootstrap({
         container,
+        isDarkTheme: state.isDarkTheme,
         existingSpinnerStyleElement: spinnerStyleElement,
         onToggleColumnFlows: toggleColumnFlows,
         onSetupMinimapDrag: setupMinimapDrag,
@@ -2230,6 +2232,7 @@ function showSqlClausePanel(edge: FlowEdge): void {
         escapeHtml,
         getClauseTypeColor,
         monoFontStack: MONO_FONT_STACK,
+        bottomPx: PANEL_LAYOUT_CONFIG.baseBottom + (isLegendBarVisible() ? getLegendBarHeight() : 0),
     });
 }
 
@@ -3061,7 +3064,7 @@ function syncHintsPanelViewportBounds(bottomPx: number): void {
  */
 function adjustPanelBottoms(legendHeight: number): void {
     applyPanelBottomOffsets(
-        { statsPanel, hintsPanel },
+        { statsPanel, hintsPanel, clausePanel: document.getElementById('sql-clause-panel') },
         legendHeight,
         window.innerHeight,
         PANEL_LAYOUT_CONFIG
@@ -3566,6 +3569,18 @@ function applyTheme(dark: boolean): void {
         }
     });
     updateColumnLineageBannerStyle();
+    if (loadingOverlay) {
+        updateLoadingOverlayTheme(loadingOverlay, dark);
+    }
+    const clausePanel = document.getElementById('sql-clause-panel');
+    const clauseEdge = currentEdges.find(edge => edge.id === activeEdgeSelectionId);
+    if (clausePanel?.style.display === 'block' && clauseEdge) {
+        const restoreCloseFocus = clausePanel.contains(document.activeElement);
+        showSqlClausePanel(clauseEdge);
+        if (restoreCloseFocus) {
+            clausePanel.querySelector<HTMLButtonElement>('.clause-panel-close-btn')?.focus();
+        }
+    }
     ensureHintsPanelScrollbarStyles();
     ensureStatsPanelScrollbarStyles();
     if (columnLineageRuntime.columnLineagePanel) {
@@ -3615,7 +3630,7 @@ function applyTheme(dark: boolean): void {
 
 function showTooltip(node: FlowNode, e: MouseEvent): void {
     showTooltipUi({
-        badgeFunctionNameColor: BADGE_COLORS.functionName,
+        badgeFunctionNameColor: getHighContrastTextColor(state.isDarkTheme ? BADGE_COLORS.functionName : '#92400e', state.isDarkTheme),
         currentSql,
         escapeHtml,
         extractSqlSnippet: (sql: string, startLine?: number, endLine?: number) => extractSqlSnippet(sql, startLine, endLine, 3, 180),

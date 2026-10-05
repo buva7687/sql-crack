@@ -296,7 +296,7 @@ function buildTableGraph(
                 : [];
 
             let scopedReferences = refsByStatement;
-            if (scopedReferences.length === 0) {
+            if (typeof def.statementIndex !== 'number') {
                 const nextDef = dependentDefinitions[definitionIndex + 1];
                 scopedReferences = analysis.references.filter(ref => {
                     if (!Number.isFinite(def.lineNumber) || def.lineNumber <= 0) {

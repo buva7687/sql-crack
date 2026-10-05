@@ -16,11 +16,12 @@ import {
     WorkspaceCacheState,
 } from './types';
 import { WorkspaceScanner } from './scanner';
+import { DiskIndexCache } from './diskIndexCache';
 import { normalizeFileExtensions } from '../shared/fileExtensions';
 import { getQualifiedKey, IdentifierQualification, normalizeIdentifier } from './identifiers';
 import { logger } from '../logger';
 
-const INDEX_VERSION = 7; // Bumped for nested CTE query analysis and scoped source tables
+const INDEX_VERSION = 8; // Invalidate analyses produced before per-statement fallback and scoped CTE fixes
 const DEFAULT_AUTO_INDEX_THRESHOLD = 50;
 const DEFAULT_CACHE_TTL_HOURS = 24;
 const DEFAULT_MAX_CACHE_BYTES = 4 * 1024 * 1024; // 4MB safety limit for workspaceState
@@ -63,6 +64,7 @@ function getReferenceNameKey(reference: TableReference | undefined): string | un
 export class IndexManager {
     private context: vscode.ExtensionContext;
     private scanner: WorkspaceScanner;
+    private diskCache: DiskIndexCache;
     private dialect: SqlDialect;
     private scopeUri: vscode.Uri | undefined;
     private index: WorkspaceIndex | null = null;
@@ -95,6 +97,7 @@ export class IndexManager {
 
     constructor(context: vscode.ExtensionContext, dialect: SqlDialect = 'MySQL', scopeUri?: vscode.Uri) {
         this.context = context;
+        this.diskCache = new DiskIndexCache(context.storageUri);
         this.dialect = dialect;
         this.scopeUri = scopeUri;
         this.scanner = new WorkspaceScanner(dialect, undefined, scopeUri);
@@ -726,6 +729,7 @@ export class IndexManager {
      */
     dispose(): void {
         this._disposed = true;
+        this.scanner.dispose();
         this.disposeFileWatcherResources();
         if (this._configDisposable) {
             this._configDisposable.dispose();
@@ -1112,7 +1116,7 @@ export class IndexManager {
             return null;
         }
 
-        const cached = this.context.workspaceState.get<SerializedWorkspaceIndex>('sqlWorkspaceIndex');
+        let cached = this.context.workspaceState.get<SerializedWorkspaceIndex>('sqlWorkspaceIndex');
 
         if (!cached) {
             this._lastCacheState = 'missing';
@@ -1153,6 +1157,22 @@ export class IndexManager {
             return null;
         }
 
+        if (cached.disk) {
+            try {
+                const payload = await this.diskCache.read();
+                if (payload.identity !== cached.identity || payload.version !== cached.version
+                    || payload.lastUpdated !== cached.lastUpdated || payload.fileCount !== cached.fileCount) {
+                    this._lastCacheState = 'stale';
+                    return null;
+                }
+                cached = payload;
+            } catch (error) {
+                logger.debug(`[IndexManager] Disk cache unavailable: ${String(error)}`);
+                this._lastCacheState = 'missing';
+                return null;
+            }
+        }
+
         if (!(await this.isCachedIndexCurrent(cached, currentFileCount))) {
             logger.debug('[IndexManager] Cached index filesystem snapshot changed - rebuilding index');
             this._lastCacheState = 'stale';
@@ -1175,8 +1195,7 @@ export class IndexManager {
         });
 
         logger.debug(`[IndexManager] Using cached index (age: ${Math.round(cacheAge / 3600000)}h)`);
-        this._lastCacheState = 'valid';
-        return {
+        const restored: WorkspaceIndex = {
             version: cached.version,
             lastUpdated: cached.lastUpdated,
             fileCount: cached.fileCount,
@@ -1185,6 +1204,22 @@ export class IndexManager {
             definitionMap: new Map(definitionArray),
             referenceMap: new Map(cached.referenceArray || [])
         };
+        if (cached.disk) {
+            // Disk payloads store definitions/references once, inside each file.
+            // Rebuild lookup maps without duplicating objects during JSON parsing.
+            try {
+                restored.definitionMap.clear();
+                restored.referenceMap.clear();
+                for (const analysis of restored.files.values()) {
+                    this.addFileToIndex(analysis, restored);
+                }
+            } catch {
+                this._lastCacheState = 'missing';
+                return null;
+            }
+        }
+        this._lastCacheState = 'valid';
+        return restored;
     }
 
     private async isCachedIndexCurrent(cached: SerializedWorkspaceIndex, currentFileCount: number): Promise<boolean> {
@@ -1311,21 +1346,25 @@ export class IndexManager {
         for (const [filePath, analysis] of serializable.filesArray) {
             total += Buffer.byteLength(filePath, 'utf8');
             total += this.estimateValueSizeBytes(analysis);
+            if (total > DEFAULT_MAX_CACHE_BYTES) { return total; }
         }
         for (const [filePath, hash] of serializable.fileHashesArray) {
             total += Buffer.byteLength(filePath, 'utf8');
             total += Buffer.byteLength(hash, 'utf8');
+            if (total > DEFAULT_MAX_CACHE_BYTES) { return total; }
         }
         for (const [key, defs] of serializable.definitionArray) {
             total += Buffer.byteLength(key, 'utf8');
             total += this.estimateValueSizeBytes(defs);
+            if (total > DEFAULT_MAX_CACHE_BYTES) { return total; }
         }
         for (const [key, refs] of serializable.referenceArray) {
             total += Buffer.byteLength(key, 'utf8');
             total += this.estimateValueSizeBytes(refs);
+            if (total > DEFAULT_MAX_CACHE_BYTES) { return total; }
         }
 
-        return total;
+        return this.estimateValueSizeBytes(serializable);
     }
 
     private async persistIndex(allowDisposed = false): Promise<void> {
@@ -1346,17 +1385,11 @@ export class IndexManager {
         // Guard against oversized cache entries that can exceed VS Code storage limits
         const sizeBytes = this.estimateSerializedIndexSizeBytes(serializable);
         if (sizeBytes > DEFAULT_MAX_CACHE_BYTES) {
-            logger.warn(`[IndexManager] Skipping cache persist (${Math.round(sizeBytes / 1024)}KB > ${Math.round(DEFAULT_MAX_CACHE_BYTES / 1024)}KB).`);
-            vscode.window.showWarningMessage(
-                `SQL Crack: Workspace index (${Math.round(sizeBytes / 1024)}KB) exceeds the ${Math.round(DEFAULT_MAX_CACHE_BYTES / 1024 / 1024)}MB cache limit. ` +
-                'The index will not persist across restarts. Consider excluding generated SQL folders or reducing workspace file scope.'
-            );
-            // Persist a lightweight marker (no payload arrays) so the next session
-            // can tell this apart from a missing cache and skip re-prompting.
+            // Keep only metadata in workspace state and store the payload on disk.
             const marker: SerializedWorkspaceIndex = {
                 version: serializable.version,
                 identity: serializable.identity,
-                oversized: true,
+                disk: true,
                 lastUpdated: serializable.lastUpdated,
                 fileCount: serializable.fileCount,
                 filesArray: [],
@@ -1365,9 +1398,9 @@ export class IndexManager {
                 referenceArray: []
             };
             try {
-                await this.enqueuePersist(marker);
+                await this.enqueuePersist(marker, { ...serializable, disk: true, definitionArray: [], referenceArray: [] });
             } catch (error) {
-                logger.warn(`[IndexManager] Failed to persist oversized marker: ${error instanceof Error ? error.message : String(error)}`);
+                logger.warn(`[IndexManager] Failed to persist disk cache: ${String(error)}`);
             }
             return;
         }
@@ -1379,9 +1412,22 @@ export class IndexManager {
         }
     }
 
-    private enqueuePersist(value: SerializedWorkspaceIndex | undefined): Promise<void> {
+    private enqueuePersist(value: SerializedWorkspaceIndex | undefined, diskPayload?: SerializedWorkspaceIndex): Promise<void> {
         const write = async (): Promise<void> => {
-            await this.context.workspaceState.update('sqlWorkspaceIndex', value);
+            let storedValue = value;
+            if (diskPayload) {
+                try {
+                    await this.diskCache.write(diskPayload);
+                } catch (error) {
+                    logger.warn(`[IndexManager] Failed to persist disk cache: ${String(error)}`);
+                    storedValue = { ...value!, disk: false, oversized: true };
+                    vscode.window.showWarningMessage('SQL Crack: This workspace index could not be cached. It will be rebuilt next time. Consider excluding generated SQL folders.');
+                }
+            }
+            await this.context.workspaceState.update('sqlWorkspaceIndex', storedValue);
+            if (!storedValue?.disk) {
+                await this.diskCache.remove();
+            }
         };
         workspaceIndexPersistQueue = workspaceIndexPersistQueue.then(write, write);
         return workspaceIndexPersistQueue;

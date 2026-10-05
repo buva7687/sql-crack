@@ -331,6 +331,7 @@ export function createViewLocationButton(
     viewLocBtn.id = 'view-location-btn';
     viewLocBtn.dataset.overflowKeepVisible = 'true';
     viewLocBtn.innerHTML = '⊞';
+    viewLocBtn.setAttribute('aria-label', 'Change view location');
     viewLocBtn.title = 'Change view location';
     viewLocBtn.style.cssText = context.getBtnStyle(dark) + `border-left: 1px solid ${borderColor};`;
 

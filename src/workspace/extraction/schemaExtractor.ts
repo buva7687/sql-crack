@@ -138,22 +138,24 @@ export class SchemaExtractor {
             ? sourceViews
             : this.createSqlSearchViews(normalizedSql);
 
-        try {
-            const dbDialect = this.mapDialect(dialect);
-            const statementStarts = [0];
-            for (let index = 0; index < normalizedViews.structuralSql.length; index++) {
-                if (normalizedViews.structuralSql[index] === ';') {
-                    statementStarts.push(index + 1);
-                }
+        const dbDialect = this.mapDialect(dialect);
+        let fallbackDefinitions: SchemaDefinition[] | undefined;
+        const statementStarts = [0];
+        for (let index = 0; index < normalizedViews.structuralSql.length; index++) {
+            if (normalizedViews.structuralSql[index] === ';') {
+                statementStarts.push(index + 1);
             }
+        }
 
-            for (let statementIndex = 0; statementIndex < statementStarts.length; statementIndex++) {
-                const start = statementStarts[statementIndex];
-                const end = statementStarts[statementIndex + 1] ?? normalizedSql.length;
-                const structuralStatement = normalizedViews.structuralSql.slice(start, end).replace(/;\s*$/, '');
-                if (!structuralStatement.trim()) {continue;}
+        for (let statementIndex = 0; statementIndex < statementStarts.length; statementIndex++) {
+            const start = statementStarts[statementIndex];
+            const end = statementStarts[statementIndex + 1] ?? normalizedSql.length;
+            const structuralStatement = normalizedViews.structuralSql.slice(start, end).replace(/;\s*$/, '');
+            if (!structuralStatement.trim()) {continue;}
 
-                const ast = this.parser.astify(normalizedSql.slice(start, end), { database: dbDialect });
+            const definitionStart = definitions.length;
+            try {
+                const ast = this.parser.astify(normalizedSql.slice(start, end).replace(/;\s*$/, ''), { database: dbDialect });
                 const statements = Array.isArray(ast) ? ast : [ast];
                 for (const stmt of statements) {
                     if (!stmt) {continue;}
@@ -178,12 +180,12 @@ export class SchemaExtractor {
                         if (def) {definitions.push(def);}
                     }
                 }
+            } catch (error) {
+                warnings.push(this.formatParserWarning(`Schema statement ${statementIndex + 1}`, error));
+                definitions.length = definitionStart;
+                fallbackDefinitions ??= this.extractWithRegex(normalizedSql, filePath, normalizedViews);
+                definitions.push(...fallbackDefinitions.filter(definition => definition.statementIndex === statementIndex));
             }
-        } catch (error) {
-            // Fallback to regex-based extraction for unsupported dialects or parse errors
-            warnings.push(this.formatParserWarning('Schema', error));
-            definitions.length = 0;
-            definitions.push(...this.extractWithRegex(normalizedSql, filePath, normalizedViews));
         }
 
         // SELECT ... INTO is a table-producing statement in SQL Server,
@@ -1353,11 +1355,11 @@ export class SchemaExtractor {
 
     /**
      * Get line number at character index.
-     * 
+     *
      * IMPORTANT: The charIndex must be from the SAME sql string passed to this method.
      * Do NOT use charIndex from a comment-stripped or modified version of the SQL
      * with the original SQL string, as this will cause incorrect line numbers.
-     * 
+     *
      * @param sql The SQL string to search in
      * @param charIndex Character index (0-based) in the sql string
      * @returns Line number (1-based) where the character index falls

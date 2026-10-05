@@ -58,7 +58,7 @@ export function applyHintsPanelViewportBounds(
 }
 
 export function applyPanelBottomOffsets(
-    panels: { statsPanel?: HTMLDivElement | null; hintsPanel?: HTMLDivElement | null },
+    panels: { statsPanel?: HTMLDivElement | null; hintsPanel?: HTMLDivElement | null; clausePanel?: HTMLElement | null },
     legendHeight: number,
     viewportHeight: number,
     config: PanelLayoutConfig = PANEL_LAYOUT_DEFAULTS,
@@ -73,6 +73,9 @@ export function applyPanelBottomOffsets(
     if (panels.hintsPanel) {
         panels.hintsPanel.style.bottom = bottom;
         applyHintsPanelViewportBounds(panels.hintsPanel, bottomPx, viewportHeight, config);
+    }
+    if (panels.clausePanel) {
+        panels.clausePanel.style.bottom = bottom;
     }
 
     return bottomPx;

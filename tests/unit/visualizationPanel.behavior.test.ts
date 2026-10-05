@@ -224,3 +224,36 @@ describe('VisualizationPanel behavior', () => {
         expect(panel._postMessage).not.toHaveBeenCalled();
     });
 });
+
+describe('release persistence and panel reuse', () => {
+    it('prunes old document UI state while retaining recently written state', () => {
+        const panel = VisualizationPanel as any;
+        const previous = panel._context;
+        let stored: Record<string, unknown> = {};
+        panel._context = {workspaceState: {get: () => stored, update: (_key: string, value: Record<string, unknown>) => {stored = value; return Promise.resolve();}}};
+        try {
+            for (let index = 0; index < 101; index++) {panel._persistUiState(`document-${index}`, {index});}
+            expect(Object.keys(stored)).toHaveLength(100);
+            expect(stored['document-0']).toBeUndefined();
+            expect(stored['document-100']).toEqual({index: 100});
+            panel._persistUiState('document-1', {index: 1});
+            panel._persistUiState('document-101', {index: 101});
+            expect(stored['document-1']).toEqual({index: 1});
+            expect(stored['document-2']).toBeUndefined();
+            panel._persistUiState('oversized', {text: 'x'.repeat(4 * 1024 * 1024)});
+            expect(Buffer.byteLength(JSON.stringify(stored))).toBeLessThanOrEqual(4 * 1024 * 1024);
+            expect(stored['document-101']).toEqual({index: 101});
+        } finally {panel._context = previous;}
+    });
+    it('refreshes the existing webview when visualizing the same document again', () => {
+        const previous = VisualizationPanel.currentPanel;
+        const panel = { _panel: {reveal: jest.fn()}, _update: jest.fn(), _postMessage: jest.fn(),
+            _rememberUiStateKey: jest.fn(), _currentOptions: {fileName: 'q.sql'} };
+        VisualizationPanel.currentPanel = panel as any;
+        try {
+            VisualizationPanel.createOrShow(vscode.Uri.file('/extension'), 'SELECT 2', {fileName: 'q.sql', dialect: 'MySQL'});
+            expect(panel._update).not.toHaveBeenCalled();
+            expect(panel._postMessage).toHaveBeenCalledWith(expect.objectContaining({command: 'refresh', sql: 'SELECT 2'}));
+        } finally {VisualizationPanel.currentPanel = previous;}
+    });
+});

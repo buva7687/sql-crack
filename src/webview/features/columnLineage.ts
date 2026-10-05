@@ -7,6 +7,7 @@ import type {
     ViewState,
 } from '../types';
 import { Z_INDEX } from '../../shared';
+import { getComponentUiColors, getHighContrastTextColor } from '../constants';
 import { restoreNodeBorderDasharray, restoreNodeBorderState } from '../nodeBorderState';
 
 export interface ColumnLineageRuntimeState {
@@ -80,6 +81,8 @@ function createColumnItemFeature(
     const { runtime, isDarkTheme, escapeHtml, onFlowSelected } = options;
     const item = document.createElement('div');
     item.setAttribute('data-flow-id', flow.id);
+    item.setAttribute('role', 'button');
+    item.tabIndex = 0;
     item.style.cssText = `
         padding: 8px 10px;
         background: ${isDarkTheme ? 'rgba(255, 255, 255, 0.04)' : 'rgba(0, 0, 0, 0.03)'};
@@ -90,6 +93,7 @@ function createColumnItemFeature(
     `;
 
     const firstStep = flow.lineagePath[0];
+    item.setAttribute('aria-label', `Trace ${flow.outputColumn} from ${firstStep ? firstStep.nodeName + '.' + firstStep.columnName : 'unknown source'}`);
     const hasAggregation = flow.lineagePath.some((step) => step.transformation === 'aggregated');
     const hasCalculation = flow.lineagePath.some((step) => step.transformation === 'calculated');
     const hasRename = flow.lineagePath.some((step) => step.transformation === 'renamed');
@@ -121,7 +125,7 @@ function createColumnItemFeature(
                 border-radius: 3px;
             ">${badge}</span>` : ''}
         </div>
-        <div style="font-size: 9px; color: ${isDarkTheme ? '#94a3b8' : '#64748b'};">
+        <div style="font-size: 9px; color: ${getHighContrastTextColor(isDarkTheme ? '#94a3b8' : '#64748b', isDarkTheme)};">
             ${firstStep ? `${escapeHtml(firstStep.nodeName)}.${escapeHtml(firstStep.columnName)}` : 'Unknown source'}
         </div>
     `;
@@ -137,6 +141,9 @@ function createColumnItemFeature(
         }
     });
 
+    item.addEventListener('keydown', event => {
+        if (event.key === 'Enter' || event.key === ' ') {event.preventDefault(); item.click();}
+    });
     item.addEventListener('click', () => {
         runtime.selectedColumnLineage = flow;
         const allItems = runtime.columnLineagePanel?.querySelectorAll('div[style*="cursor: pointer"]');
@@ -198,11 +205,11 @@ export function showColumnLineagePanelFeature(options: ShowColumnLineagePanelOpt
     header.innerHTML = `
         <span>Column Lineage</span>
         <span style="display: inline-flex; align-items: center; gap: 8px;">
-            <span style="font-size: 9px; color: ${isDarkTheme ? '#64748b' : '#94a3b8'};">Click to trace</span>
+            <span style="font-size: 9px; color: ${getHighContrastTextColor(isDarkTheme ? '#64748b' : '#94a3b8', isDarkTheme)};">Click to trace</span>
             <button id="column-lineage-panel-close" type="button" style="
                 border: none;
                 background: transparent;
-                color: ${isDarkTheme ? '#94a3b8' : '#64748b'};
+                color: ${getHighContrastTextColor(isDarkTheme ? '#94a3b8' : '#64748b', isDarkTheme)};
                 cursor: pointer;
                 font-size: 14px;
                 line-height: 1;
@@ -266,17 +273,27 @@ export function showColumnLineagePanelFeature(options: ShowColumnLineagePanelOpt
     }
     runtime.columnLineagePanel.appendChild(columnList);
 
+    const emptySearch = document.createElement('div');
+    emptySearch.textContent = 'No matching columns';
+    emptySearch.setAttribute('role', 'status');
+    emptySearch.style.cssText = `display: none; padding: 8px; color: ${getComponentUiColors(isDarkTheme).textMuted};`;
+    runtime.columnLineagePanel.appendChild(emptySearch);
+    const flowsById = new Map(currentColumnFlows.map(flow => [flow.id, flow]));
+
     searchInput.addEventListener('input', (e) => {
         const query = (e.target as HTMLInputElement).value.toLowerCase();
-        const items = columnList.querySelectorAll('[data-column-name]');
+        const items = columnList.querySelectorAll('[data-flow-id]');
+        let matchingCount = 0;
         items.forEach((item) => {
             const columnName = item.getAttribute('data-column-name') || '';
-            const flow = currentColumnFlows.find((candidate) => candidate.outputColumn.toLowerCase() === columnName);
+            const flow = flowsById.get(item.getAttribute('data-flow-id') || '');
             const matchesQuery = columnName.includes(query)
                 || Boolean(flow && flow.lineagePath.some((step) =>
                     step.columnName.toLowerCase().includes(query) || step.nodeName.toLowerCase().includes(query)));
             (item as HTMLElement).style.display = matchesQuery ? 'block' : 'none';
+            if (matchesQuery) {matchingCount++;}
         });
+        emptySearch.style.display = matchingCount ? 'none' : 'block';
     });
 
     document.body.appendChild(runtime.columnLineagePanel);
@@ -347,7 +364,7 @@ export function showLineagePathFeature(options: ShowLineagePathOptions): void {
                             color: white;
                         ">${transformationLabels[step.transformation] || step.transformation}</span>
                     </div>
-                    <div style="font-size: 10px; color: ${isDarkTheme ? '#94a3b8' : '#64748b'};">
+                    <div style="font-size: 10px; color: ${getHighContrastTextColor(isDarkTheme ? '#94a3b8' : '#64748b', isDarkTheme)};">
                         ${escapeHtml(step.nodeName)}
                         ${step.expression ? `<br><code style="font-size: 9px; color: ${isDarkTheme ? '#a5b4fc' : '#6366f1'}; background: ${isDarkTheme ? 'rgba(99, 102, 241, 0.15)' : 'rgba(99, 102, 241, 0.08)'}; padding: 1px 4px; border-radius: 3px;">${escapeHtml(step.expression)}</code>` : ''}
                     </div>
@@ -366,12 +383,12 @@ export function showLineagePathFeature(options: ShowLineagePathOptions): void {
             padding: 6px 8px;
             margin-bottom: 10px;
         ">
-            <div style="font-size: 9px; color: ${isDarkTheme ? '#94a3b8' : '#64748b'}; margin-bottom: 2px;">Output Column</div>
+            <div style="font-size: 9px; color: ${getHighContrastTextColor(isDarkTheme ? '#94a3b8' : '#64748b', isDarkTheme)}; margin-bottom: 2px;">Output Column</div>
             <div style="font-weight: 600; font-size: 12px; color: ${isDarkTheme ? '#a5b4fc' : '#6366f1'};">
                 ${escapeHtml(flow.outputColumn)}
             </div>
         </div>
-        <div style="font-size: 10px; color: ${isDarkTheme ? '#94a3b8' : '#64748b'}; margin-bottom: 6px;">
+        <div style="font-size: 10px; color: ${getHighContrastTextColor(isDarkTheme ? '#94a3b8' : '#64748b', isDarkTheme)}; margin-bottom: 6px;">
             Transformation Path (${flow.lineagePath.length} steps)
         </div>
         <div style="padding-left: 2px;">

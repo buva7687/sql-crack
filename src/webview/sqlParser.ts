@@ -10,6 +10,7 @@ import {
     collapseSnowflakePaths,
     hasOracleHints,
     hoistNestedCtes,
+    getUnsafeNestedCteReason,
     preprocessHashTempTableIdentifiers,
     preprocessForParsing,
     preprocessOracleSyntax,
@@ -1334,6 +1335,15 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
         return oracleInsertCompatibilityResult;
     }
 
+    const unsafeCteReason = getUnsafeNestedCteReason(sql);
+    if (unsafeCteReason) {
+        const fallback = regexFallbackParse(sql, dialect);
+        fallback.sql = originalSql;
+        fallback.hints.unshift({type: 'warning', message: unsafeCteReason, suggestion: 'Showing partial analysis. Flatten nested WITH clauses or give scoped CTEs distinct names, then verify the result.', category: 'best-practice', severity: 'high'});
+        layoutGraph(fallback.nodes, fallback.edges);
+        assignLineNumbers(fallback.nodes, originalSql, fallback.edges);
+        return fallback;
+    }
     sql = applyParserCompatibilityPreprocessing(sql, dialect, context);
 
     const parser = new Parser();
@@ -1447,7 +1457,7 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
         detectDialectSpecificSyntax(context, originalSql, effectiveDialect);
 
         // Detect advanced issues (unused CTEs, dead columns, etc.)
-        detectAdvancedIssues(context, nodes, originalSql);
+        detectAdvancedIssues(context, nodes, originalSql, edges);
 
         // Calculate enhanced complexity metrics
         calculateEnhancedMetrics(context, nodes, edges);

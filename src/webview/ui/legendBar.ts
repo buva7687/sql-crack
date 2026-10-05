@@ -2,7 +2,7 @@
 // Replaces the old top-left legend panel
 
 import { NODE_ACCENT_COLORS } from '../../shared/themeTokens';
-import { BADGE_COLORS } from '../constants/colors';
+import { BADGE_COLORS, getHighContrastTextColor } from '../constants';
 import type { NodeAccentType } from '../../shared/themeTokens';
 import { prefersReducedMotion } from './motion';
 
@@ -101,7 +101,7 @@ function applyLegendStyles(el: HTMLDivElement, isDark: boolean): void {
         border-top: 1px solid ${isDark ? 'rgba(255, 255, 255, 0.06)' : 'rgba(0, 0, 0, 0.06)'};
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 11px;
-        color: ${isDark ? '#94A3B8' : '#64748B'};
+        color: ${getHighContrastTextColor(isDark ? '#94A3B8' : '#64748B', isDark)};
         transition: ${reducedMotion ? 'none' : 'transform 0.2s ease, opacity 0.2s ease'};
     `;
 }
@@ -147,7 +147,7 @@ function renderLegendContent(el: HTMLDivElement, isDark: boolean): void {
         transform: translateY(-50%);
         background: transparent;
         border: none;
-        color: ${isDark ? '#64748B' : '#94A3B8'};
+        color: ${getHighContrastTextColor(isDark ? '#64748B' : '#94A3B8', isDark)};
         cursor: pointer;
         font-size: 14px;
         padding: 4px 8px;

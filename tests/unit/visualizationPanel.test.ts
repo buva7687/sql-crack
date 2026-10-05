@@ -285,7 +285,7 @@ describe('visualizationPanel.ts', () => {
 
     describe('configuration reading', () => {
         it('reads theme preference setting', () => {
-            expect(source).toContain("get<string>('advanced.defaultTheme', 'light')");
+            expect(source).toContain("get<string>('advanced.defaultTheme', 'auto')");
         });
 
         it('reads view location setting', () => {
