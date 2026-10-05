@@ -18,6 +18,30 @@ export function getHighContrastTextColor(regularColor: string, isDarkTheme: bool
     return highContrastMode ? (isDarkTheme ? '#CBD5E1' : '#334155') : regularColor;
 }
 
+function relativeLuminance(hex: string): number {
+    const [r, g, b] = [1, 3, 5]
+        .map(offset => parseInt(hex.slice(offset, offset + 2), 16) / 255)
+        .map(value => (value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4)));
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/**
+ * Text colour for a label drawn on a solid #rrggbb fill: white or near-black,
+ * whichever contrasts more. White alone is below 4.5:1 on mid-tone fills such
+ * as the blue, cyan and amber clause badges.
+ */
+export function getReadableTextColor(backgroundHex: string): string {
+    const light = '#ffffff';
+    const dark = '#020617';
+    if (!/^#[0-9a-f]{6}$/i.test(backgroundHex)) {
+        return light;
+    }
+    const background = relativeLuminance(backgroundHex);
+    const contrastWithLight = 1.05 / (background + 0.05);
+    const contrastWithDark = (background + 0.05) / (relativeLuminance(dark) + 0.05);
+    return contrastWithLight >= contrastWithDark ? light : dark;
+}
+
 // ============================================================
 // UI Colors - General interface elements
 // ============================================================

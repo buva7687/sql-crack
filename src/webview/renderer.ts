@@ -2232,6 +2232,7 @@ function showSqlClausePanel(edge: FlowEdge): void {
         escapeHtml,
         getClauseTypeColor,
         monoFontStack: MONO_FONT_STACK,
+        bottomPx: PANEL_LAYOUT_CONFIG.baseBottom + (isLegendBarVisible() ? getLegendBarHeight() : 0),
     });
 }
 
@@ -3063,7 +3064,7 @@ function syncHintsPanelViewportBounds(bottomPx: number): void {
  */
 function adjustPanelBottoms(legendHeight: number): void {
     applyPanelBottomOffsets(
-        { statsPanel, hintsPanel },
+        { statsPanel, hintsPanel, clausePanel: document.getElementById('sql-clause-panel') },
         legendHeight,
         window.innerHeight,
         PANEL_LAYOUT_CONFIG

@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Return keyboard focus to the Export button when the export preview closes, name the Workspace panel's close button for screen readers, and raise muted text to at least 7:1 in the Workspace panel under high-contrast themes.
 - Keep Tab and Shift+Tab inside Export Preview while controls change, and raise SQL Flow muted-label contrast in high-contrast themes, including live theme changes.
 - Match hint severity labels, function badges, loading cards and clause-popup text to light and dark themes, including live high-contrast changes.
+- In the SQL clause popup shown for a clicked edge, pick white or near-black badge text by contrast, name the close button for screen readers, and keep the popup above the legend bar.
 - Use the current theme background on the Workspace loading, empty and manual-analysis pages, and render keys in the walkthrough as code instead of literal backticks.
 
 ### Changed
