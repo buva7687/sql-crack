@@ -43,7 +43,10 @@ const os = require('os');
       const result = await runVSCodeCommand([
         ...launchArgs, '--extensionDevelopmentPath', developmentPath,
         '--extensionTestsPath', path.resolve(__dirname, '../tests/extension-host/index.js'),
-        '--disable-updates', '--no-cached-data'
+        '--disable-updates', '--no-cached-data',
+        // Match test-electron's launch on downloaded Linux builds, where the
+        // runner cannot install the privileged Chromium sandbox helper.
+        ...(process.platform === 'linux' ? ['--no-sandbox'] : [])
       ], {version, reuseMachineInstall: true});
       process.stdout.write(result.stdout);
       process.stderr.write(result.stderr);
