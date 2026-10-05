@@ -50,7 +50,7 @@ describe('performance CI wiring', () => {
         );
 
         const auditIndex = releaseWorkflowSource.indexOf('npm run audit:prod');
-        const packageIndex = releaseWorkflowSource.indexOf('npm run package');
+        const packageIndex = releaseWorkflowSource.indexOf('@vscode/vsce@3.9.2 package');
         const publishIndex = releaseWorkflowSource.indexOf('@vscode/vsce@3.9.2 publish');
 
         expect(auditIndex).toBeGreaterThan(-1);

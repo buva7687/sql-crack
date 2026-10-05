@@ -185,12 +185,7 @@ jobs:
       - name: Run performance gate
         run: npm run test:perf
 
-      - name: Build extension
-        run: npm run package -- --json=webpack-stats.json
-
-      - name: Verify third-party notices
-        run: npm run notices && git diff --exit-code -- THIRD_PARTY_NOTICES.txt
-
+      # The prepublish hook performs the production build and records stats.
       - name: Package VSIX
         run: |
           set -euo pipefail
@@ -199,6 +194,9 @@ jobs:
             PRERELEASE_ARGS+=(--pre-release)
           fi
           npx --yes @vscode/vsce@3.9.2 package "${PRERELEASE_ARGS[@]}" --no-dependencies --out "sql-crack-${TAG_NAME}.vsix"
+
+      - name: Verify third-party notices
+        run: npm run notices && git diff --exit-code -- THIRD_PARTY_NOTICES.txt
 
       - uses: actions/upload-artifact@v4
         with:

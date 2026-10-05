@@ -9,7 +9,8 @@
 - [ ] Run `node scripts/validateReleaseChangelog.js <version>` after setting the date and before merging; a push to `main` starts publication.
 - [ ] Run `npm run audit:prod`, `npm run typecheck`, `npm run lint`, `npm run test`, `npm run test:perf`, and `npm run package`.
 - [ ] Package a local VSIX with `npx @vscode/vsce@3.9.2 package --no-dependencies` (add `--pre-release` for a candidate) and inspect its file list.
-- [ ] Wait for Node 20/22, performance, packaging, and Linux/macOS/Windows extension-host checks on the PR.
+- [ ] Wait for the PR's Node 20/22, dependency audit, performance, packaging and Linux/stable installed smoke checks.
+- [ ] Confirm the final candidate commit passes the full Linux/macOS/Windows matrix against VS Code 1.85 and stable. Marking a draft ready runs this matrix; after further commits, use **Actions → Tests → Run workflow** on the candidate branch with **full_matrix** checked (available once the workflow is on the default branch).
 - [ ] Run the extension-host smoke test against VS Code 1.85 and stable.
 - [ ] Manually verify keyboard-only navigation, high contrast, exports, and a clean install/update from the previous stable extension.
 - [ ] Confirm bundled walkthrough assets and THIRD_PARTY_NOTICES.txt are in the VSIX.

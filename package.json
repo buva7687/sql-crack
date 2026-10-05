@@ -441,7 +441,7 @@
     ]
   },
   "scripts": {
-    "vscode:prepublish": "npm run package",
+    "vscode:prepublish": "npm run package -- --json=webpack-stats.json",
     "compile": "webpack",
     "watch": "webpack --watch",
     "package": "webpack --mode production",
