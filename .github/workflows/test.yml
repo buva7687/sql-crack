@@ -67,6 +67,9 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: matrix.node-version == '22.x'
+        # Coverage is also kept in the test artifact; an external upload outage
+        # must not prevent the build and installed-extension checks.
+        continue-on-error: true
         uses: codecov/codecov-action@v4
         with:
           files: ./coverage/lcov.info
