@@ -4,11 +4,25 @@ export type MinimapMode = 'auto' | 'always' | 'never';
 
 let minimapMode: MinimapMode = 'auto';
 
+const minimapModeListeners = new Set<() => void>();
+
 /**
  * Set the minimap display mode.
  */
 export function setMinimapMode(mode: MinimapMode): void {
+    if (minimapMode === mode) { return; }
     minimapMode = mode;
+    minimapModeListeners.forEach(listener => listener());
+}
+
+/** Run `listener` whenever the mode changes; returns the unsubscribe function. */
+export function onMinimapModeChange(listener: () => void): () => void {
+    minimapModeListeners.add(listener);
+    return () => { minimapModeListeners.delete(listener); };
+}
+
+export function getMinimapMode(): MinimapMode {
+    return minimapMode;
 }
 
 /**

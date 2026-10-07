@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Keep the large-workspace **Start Analysis** choice in the panel, avoiding a notification that remains after analysis starts.
 - Restore large workspace indexes from compressed extension storage instead of rebuilding them on each open.
 - Stack statistics and hints in narrow SQL Flow panels and restore their saved widths when the view widens.
+- Keep the SQL Flow minimap off the Performance Hints panel: it moves up when the panel reaches it, a minimap set to `always` stays visible in narrow panels that have room for it, and changing `sqlCrack.showMinimap` applies without re-running the query. Fit-to-view uses the larger free area around stacked panels instead of always squeezing the graph beside them.
 - Return keyboard focus to the Export button when the export preview closes, name the Workspace panel's close button for screen readers, and raise muted text to at least 7:1 in the Workspace panel under high-contrast themes.
 - Keep Tab and Shift+Tab inside Export Preview while controls change, and raise SQL Flow muted-label contrast in high-contrast themes, including live theme changes.
 - Match hint severity labels, function badges, loading cards and clause-popup text to light and dark themes, including live high-contrast changes.

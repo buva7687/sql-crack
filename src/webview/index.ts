@@ -59,6 +59,7 @@ import {
     restoreLayoutHistoryState,
     LayoutHistoryStateSnapshot,
     setColorblindMode as setRendererColorblindMode,
+    updateMinimap,
 } from './renderer';
 import {
     emptyLayoutHistory,
@@ -350,6 +351,7 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
         combineDdlStatements: window.combineDdlStatements === true,
         gridStyle: window.gridStyle || 'lines',
         nodeAccentPosition: window.nodeAccentPosition || 'left',
+        showMinimap: window.showMinimap || 'auto',
         maxFileSizeKB: window.maxFileSizeKB || 100,
         maxStatements: window.maxStatements || 50,
         deferredQueryThreshold: window.deferredQueryThreshold || DEFERRED_QUERY_THRESHOLD,
@@ -379,6 +381,9 @@ function applyRuntimeConfigUpdate(rawConfig: unknown): void {
     window.debugLogging = config.debugLogging;
 
     setMinimapMode(config.showMinimap as MinimapMode);
+    if (previous.showMinimap !== config.showMinimap) {
+        updateMinimap();
+    }
     configureParseTimeout(config.parseTimeoutSeconds * 1000);
     configureCustomFunctions(config.customAggregateFunctions || [], config.customWindowFunctions || []);
     setRendererColorblindMode(config.colorblindMode);
