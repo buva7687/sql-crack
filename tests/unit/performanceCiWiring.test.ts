@@ -93,7 +93,7 @@ describe('performance CI wiring', () => {
         expect(releaseWorkflowSource).toContain("env.RELEASE_MODE == 'open-vsx'");
     });
 
-    it('publishes 0.9.4 as a stable release with reproducible channel handling', () => {
+    it('publishes stable releases with reproducible channel handling', () => {
         expect(releaseConfig).toEqual({ channel: 'stable' });
         expect(releaseWorkflowSource).toContain('release_channel: ${{ steps.check.outputs.release_channel }}');
         expect(releaseWorkflowSource).toContain('RELEASE_CHANNEL: ${{ needs.check.outputs.release_channel }}');

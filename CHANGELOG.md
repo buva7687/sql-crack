@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-15
+
 ### Fixed
 - Preserve correct lineage across self-joins, repeated output names, per-file/per-statement CTE scopes, and mixed supported/unsupported statements.
 - Decline nested CTE rewrites that could change bindings and clearly mark the result as partial.
@@ -1684,7 +1686,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/buva7687/sql-crack/compare/v0.9.3...HEAD
+[Unreleased]: https://github.com/buva7687/sql-crack/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/buva7687/sql-crack/compare/v0.9.4...v1.0.0
 [0.9.4]: https://github.com/buva7687/sql-crack/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/buva7687/sql-crack/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/buva7687/sql-crack/compare/v0.9.1...v0.9.2
