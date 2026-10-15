@@ -190,7 +190,7 @@ describe('ReferenceExtractor behavioral coverage', () => {
         ]));
     });
 
-    it('discards earlier AST output when a later statement requires whole-file fallback', () => {
+    it('preserves earlier AST output when a later statement requires fallback', () => {
         jest.spyOn((extractor as any).parser, 'astify')
             .mockReturnValueOnce({
                 type: 'select',
@@ -208,7 +208,7 @@ describe('ReferenceExtractor behavioral coverage', () => {
         );
 
         expect(result.references.map(ref => ref.tableName).sort()).toEqual(['orders', 'users']);
-        expect(result.queries).toEqual([]);
+        expect(result.queries).toEqual([expect.objectContaining({statementIndex: 0})]);
         expect(result.warnings).toHaveLength(1);
     });
 

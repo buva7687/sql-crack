@@ -22,42 +22,67 @@
             "warn",
             {
                 "selector": "default",
-                "format": ["camelCase"]
+                "format": [
+                    "camelCase"
+                ]
             },
             {
                 "selector": "variable",
-                "format": ["camelCase", "UPPER_CASE", "PascalCase"]
+                "format": [
+                    "camelCase",
+                    "UPPER_CASE",
+                    "PascalCase"
+                ]
             },
             {
                 "selector": "parameter",
-                "format": ["camelCase"],
+                "format": [
+                    "camelCase"
+                ],
                 "leadingUnderscore": "allow"
             },
             {
                 "selector": "classProperty",
-                "modifiers": ["private", "readonly"],
-                "format": ["camelCase", "UPPER_CASE"],
+                "modifiers": [
+                    "private",
+                    "readonly"
+                ],
+                "format": [
+                    "camelCase",
+                    "UPPER_CASE"
+                ],
                 "leadingUnderscore": "allow"
             },
             {
                 "selector": "classProperty",
-                "modifiers": ["readonly"],
-                "format": ["camelCase", "UPPER_CASE"],
+                "modifiers": [
+                    "readonly"
+                ],
+                "format": [
+                    "camelCase",
+                    "UPPER_CASE"
+                ],
                 "leadingUnderscore": "allow"
             },
             {
                 "selector": "classProperty",
-                "format": ["camelCase"],
+                "format": [
+                    "camelCase"
+                ],
                 "leadingUnderscore": "allow"
             },
             {
                 "selector": "classMethod",
-                "format": ["camelCase"],
+                "format": [
+                    "camelCase"
+                ],
                 "leadingUnderscore": "allow"
             },
             {
                 "selector": "typeLike",
-                "format": ["PascalCase"]
+                "format": [
+                    "PascalCase"
+                ]
             },
             {
                 "selector": "objectLiteralProperty",
@@ -69,13 +94,19 @@
             },
             {
                 "selector": "import",
-                "format": ["camelCase", "PascalCase"]
+                "format": [
+                    "camelCase",
+                    "PascalCase"
+                ]
             }
         ],
         "curly": "warn",
         "eqeqeq": "warn",
         "no-throw-literal": "warn",
-        "semi": ["warn", "always"],
+        "semi": [
+            "warn",
+            "always"
+        ],
         "@typescript-eslint/no-explicit-any": "off",
         "@typescript-eslint/no-unused-vars": "off",
         "@typescript-eslint/no-var-requires": "off",
@@ -84,7 +115,15 @@
         "no-useless-escape": "off",
         "no-misleading-character-class": "off",
         "no-irregular-whitespace": "off",
-        "no-constant-condition": "off"
+        "no-constant-condition": "off",
+        "@typescript-eslint/no-require-imports": "off",
+        "@typescript-eslint/no-unused-expressions": [
+            "error",
+            {
+                "allowShortCircuit": true,
+                "allowTernary": true
+            }
+        ]
     },
     "ignorePatterns": [
         "out",

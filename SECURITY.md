@@ -2,15 +2,7 @@
 
 ## Reporting a vulnerability
 
-If you believe you’ve found a security vulnerability, please report it responsibly:
-
-- **Do not** open a public GitHub issue for security-sensitive bugs.
-- **Email** the maintainers (e.g. via the repository owner’s GitHub profile or the contact listed in the VS Code extension publisher page) with:
-  - A short description of the issue.
-  - Steps to reproduce (if possible).
-  - Impact and suggested fix (if you have one).
-
-We’ll acknowledge receipt and work with you to understand and address the issue. We may coordinate disclosure after a fix is available.
+Report security issues privately through [GitHub private vulnerability reporting](https://github.com/buva7687/sql-crack/security/advisories/new). Include the affected version, reproduction steps, and likely impact. Avoid public issues for security-sensitive reports. Maintainers will coordinate disclosure after investigating and preparing a fix.
 
 ## Scope
 

@@ -24,10 +24,13 @@
  */
 
 /* eslint-disable @typescript-eslint/naming-convention */
+import * as nodePath from 'path';
 
 // ============================================================================
 // Uri - Represents file paths in VS Code
 // ============================================================================
+export enum ViewColumn {Active = -1, Beside = -2, One = 1, Two = 2, Three = 3}
+
 export class Uri {
     readonly scheme: string;
     readonly authority: string;
@@ -46,6 +49,10 @@ export class Uri {
         this.fsPath = path;
     }
 
+    static joinPath(base: Uri, ...segments: string[]): Uri {
+        return base.with({path: nodePath.posix.join(base.path, ...segments)});
+    }
+
     static file(path: string): Uri {
         return new Uri('file', '', path, '', '');
     }
@@ -57,6 +64,8 @@ export class Uri {
         }
         return new Uri('', '', value, '', '');
     }
+
+    toJSON(): unknown {return {scheme: this.scheme, authority: this.authority, path: this.path, query: this.query, fragment: this.fragment};}
 
     toString(): string {
         return `${this.scheme}://${this.path}`;

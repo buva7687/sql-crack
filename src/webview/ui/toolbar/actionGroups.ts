@@ -1,3 +1,4 @@
+import { getHighContrastTextColor } from '../../constants';
 import { createExportDropdown } from '../exportDropdown';
 import { Z_INDEX } from '../../../shared/zIndex';
 import { applyOverflowMenuTheme, getOverflowPalette } from './overflowMenu';
@@ -213,7 +214,7 @@ function createZoomGroup(
     const isDark = callbacks.isDarkTheme();
     const groupBackground = isDark ? 'rgba(17, 17, 17, 0.95)' : 'rgba(255, 255, 255, 0.95)';
     const borderColor = isDark ? 'rgba(148, 163, 184, 0.2)' : 'rgba(148, 163, 184, 0.3)';
-    const mutedText = isDark ? '#94a3b8' : '#64748b';
+    const mutedText = getHighContrastTextColor(isDark ? '#94a3b8' : '#64748b', isDark);
     const zoomGroup = document.createElement('div');
     zoomGroup.style.cssText = `
         display: flex;
@@ -279,7 +280,7 @@ function createZoomGroup(
     // The label color was fixed at creation; after a theme toggle it kept the
     // other theme's muted color (e.g. #94a3b8 on white, ~2.6:1).
     const zoomLevelThemeHandler = ((event: CustomEvent<{ dark: boolean }>) => {
-        zoomLevel.style.color = event.detail?.dark ? '#94a3b8' : '#64748b';
+        zoomLevel.style.color = getHighContrastTextColor(event.detail?.dark ? '#94a3b8' : '#64748b', event.detail?.dark === true);
     }) as EventListener;
     document.addEventListener('theme-change', zoomLevelThemeHandler, listenerOptions);
     documentListeners.push({ type: 'theme-change', handler: zoomLevelThemeHandler });

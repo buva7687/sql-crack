@@ -9,7 +9,7 @@ describe('package command palette entries', () => {
         const visualize = entries.find((entry: { command?: string }) => entry.command === 'sql-crack.visualize');
         expect(visualize).toEqual(expect.objectContaining({
             command: 'sql-crack.visualize',
-            when: 'editorLangId == sql || sqlCrack.isAdditionalSqlFile',
+            when: 'resourceExtname == .sql || editorLangId == sql || sqlCrack.isAdditionalSqlFile',
             group: 'navigation',
         }));
     });
@@ -31,7 +31,7 @@ describe('package command palette entries', () => {
             expect.arrayContaining([
                 expect.objectContaining({
                     command: 'sql-crack.showWorkspaceUxMetrics',
-                    when: 'workspaceFolderCount > 0',
+                    when: 'workspaceFolderCount > 0 && config.sqlCrack.advanced.workspaceUxInstrumentation',
                 }),
             ])
         );

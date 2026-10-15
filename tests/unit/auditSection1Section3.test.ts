@@ -35,7 +35,7 @@ describe('audit section 1 + section 3 fixes', () => {
         expect(webviewIndex).toContain('window.initialUiState');
         expect(panel).toContain("_uiStateStoreKey = 'sqlFlow.panelUiStateByKey'");
         expect(panel).toContain("case 'persistUiState':");
-        expect(panel).toContain('window.initialUiState =');
+        expect(panel).toContain('initialUiState: ${');
     });
 
     it('U6: parse errors can surface a one-click dialect switch prompt', () => {

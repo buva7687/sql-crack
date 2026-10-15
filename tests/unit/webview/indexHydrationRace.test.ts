@@ -123,7 +123,10 @@ describe('webview refresh query state (H11, M15)', () => {
             ...jest.requireActual('../../../src/webview/state/persistedViewState'),
             readPersistedUiState: jest.fn(() => null),
         }));
-        jest.doMock('../../../src/webview/minimapVisibility', () => proxyModule());
+        jest.doMock('../../../src/webview/minimapVisibility', () => proxyModule({
+            // The compact panel layout subscribes on init and unsubscribes on unload.
+            onMinimapModeChange: () => () => undefined,
+        }));
 
         let messageHandler: ((event: { data: unknown }) => void) | undefined;
         const windowListeners = new Map<string, () => void>();

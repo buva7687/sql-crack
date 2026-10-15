@@ -1,3 +1,4 @@
+import { setCustomFunctions } from '../dialects';
 import {
     parseSql,
     parseSqlBatch,
@@ -24,6 +25,8 @@ type ParserWorkerRequest =
             dialect?: SqlDialect;
             options?: ParseOptions;
             parseTimeoutMs?: number;
+            customAggregateFunctions?: string[];
+            customWindowFunctions?: string[];
         };
     }
     | {
@@ -35,6 +38,8 @@ type ParserWorkerRequest =
             limits?: ValidationLimits;
             options?: BatchParseOptions;
             parseTimeoutMs?: number;
+            customAggregateFunctions?: string[];
+            customWindowFunctions?: string[];
         };
     }
     | {
@@ -70,6 +75,9 @@ addEventListener('message', (event: MessageEvent<ParserWorkerRequest>) => {
     postWorkerMessage({ type: 'started', requestId: message.requestId });
 
     try {
+        if (message.type === 'parse' || message.type === 'parseBatch') {
+            setCustomFunctions(message.payload.customAggregateFunctions || [], message.payload.customWindowFunctions || []);
+        }
         // The worker has its own sqlParser module instance, so the main
         // thread's configured timeout must travel with each request.
         if ((message.type === 'parse' || message.type === 'parseBatch')

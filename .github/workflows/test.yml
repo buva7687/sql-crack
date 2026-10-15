@@ -5,10 +5,50 @@ on:
     branches: [main, dev]
   pull_request:
     branches: [main, dev]
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      full_matrix:
+        description: Test VS Code 1.85 and stable on Linux, macOS and Windows
+        type: boolean
+        default: true
+
+concurrency:
+  group: tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
+  # Kept separate from the test jobs so a newly published advisory is reported
+  # on its own instead of failing type checks and tests for unrelated changes.
+  # The release build enforces the same audit before anything is published.
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit all dependencies
+        run: npm run audit:all
+
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
 
     strategy:
       matrix:
@@ -17,6 +57,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
@@ -28,21 +70,30 @@ jobs:
         run: npm ci
 
       - name: Run type check
+        if: matrix.node-version == '22.x'
         run: npm run typecheck
 
       - name: Run linter
+        if: matrix.node-version == '22.x'
         run: npm run lint
 
-      - name: Run tests
+      - name: Run tests with coverage
+        if: matrix.node-version == '22.x'
         run: npm run test:ci
+
+      - name: Run tests without duplicate coverage
+        if: matrix.node-version == '20.x'
+        run: npm run test -- --ci --reporters=default --reporters=jest-junit
 
       - name: Upload coverage to Codecov
         if: matrix.node-version == '22.x'
+        # Coverage is also kept in the test artifact; an external upload outage
+        # must not prevent the build and installed-extension checks.
+        continue-on-error: true
         uses: codecov/codecov-action@v4
         with:
           files: ./coverage/lcov.info
           fail_ci_if_error: false
-          verbose: true
 
       - name: Upload test results
         if: always()
@@ -52,15 +103,18 @@ jobs:
           path: |
             coverage/
             junit.xml
-          retention-days: 7
+          retention-days: 3
 
   perf:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     needs: test
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -76,11 +130,14 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     needs: [test, perf]
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -91,12 +148,69 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build extension
-        run: npm run package
+      # VSCE invokes vscode:prepublish, which builds once and writes the stats
+      # used by the notices check. Every smoke test installs this same VSIX.
+      - name: Build and package extension
+        run: npx --yes @vscode/vsce@3.9.2 package --no-dependencies --out sql-crack-test.vsix
+
+      - name: Verify third-party notices
+        run: npm run notices && git diff --exit-code -- THIRD_PARTY_NOTICES.txt
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: extension-build
-          path: dist/
-          retention-days: 7
+          path: sql-crack-test.vsix
+          if-no-files-found: error
+          retention-days: 3
+
+  extension-host:
+    needs: [audit, build]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # Routine pushes use Linux/stable. Run the full release matrix when a
+        # draft becomes ready for review, or request it with Run workflow.
+        os: ${{ fromJSON((github.event.action == 'ready_for_review' || (github.event_name == 'workflow_dispatch' && inputs.full_matrix)) && '["ubuntu-latest","macos-latest","windows-latest"]' || '["ubuntu-latest"]') }}
+        vscode: ${{ fromJSON((github.event.action == 'ready_for_review' || (github.event_name == 'workflow_dispatch' && inputs.full_matrix)) && '["1.85.0","stable"]' || '["stable"]') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: npm
+      - run: npm ci
+      - name: Download validated VSIX
+        uses: actions/download-artifact@v4
+        with:
+          name: extension-build
+      - name: Test extension host (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:extension-host
+        env:
+          VSCODE_TEST_VERSION: ${{ matrix.vscode }}
+          VSCODE_TEST_VSIX: sql-crack-test.vsix
+      - name: Test extension host (macOS and Windows)
+        if: runner.os != 'Linux'
+        run: npm run test:extension-host
+        env:
+          VSCODE_TEST_VERSION: ${{ matrix.vscode }}
+          VSCODE_TEST_VSIX: sql-crack-test.vsix
+      - name: Test Restricted Mode (Linux)
+        if: runner.os == 'Linux' && matrix.vscode == 'stable'
+        run: xvfb-run -a npm run test:extension-host
+        env:
+          VSCODE_TEST_VERSION: ${{ matrix.vscode }}
+          VSCODE_TEST_VSIX: sql-crack-test.vsix
+          VSCODE_TEST_RESTRICTED: '1'
+      - name: Test Restricted Mode (macOS and Windows)
+        if: runner.os != 'Linux' && matrix.vscode == 'stable'
+        run: npm run test:extension-host
+        env:
+          VSCODE_TEST_VERSION: ${{ matrix.vscode }}
+          VSCODE_TEST_VSIX: sql-crack-test.vsix
+          VSCODE_TEST_RESTRICTED: '1'

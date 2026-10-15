@@ -1,3 +1,4 @@
+import { getHighContrastTextColor } from '../constants';
 // Batch tabs UI module - for navigating multiple queries in a SQL file
 
 import { BatchParseResult } from '../sqlParser';
@@ -172,13 +173,13 @@ export function updateBatchTabs(
     // Theme-aware colors
     const isDark = callbacks.isDarkTheme();
     const textColor = isDark ? '#f1f5f9' : '#1e293b';
-    const textColorMuted = isDark ? '#94a3b8' : '#64748b';
-    const textColorDim = isDark ? '#475569' : '#94a3b8';
+    const textColorMuted = getHighContrastTextColor(isDark ? '#94a3b8' : '#64748b', isDark);
+    const textColorDim = getHighContrastTextColor(isDark ? '#475569' : '#94a3b8', isDark);
     const activeColor = isDark ? '#a5b4fc' : '#4f46e5';
     const errorColor = isDark ? '#f87171' : '#dc2626';
     const successColor = isDark ? '#4ade80' : '#16a34a';
     const warningColor = isDark ? '#fbbf24' : '#d97706';
-    const counterColor = isDark ? '#64748b' : '#94a3b8';
+    const counterColor = getHighContrastTextColor(isDark ? '#64748b' : '#94a3b8', isDark);
     const errorBgTint = isDark ? 'rgba(248, 113, 113, 0.14)' : 'rgba(220, 38, 38, 0.10)';
     const errorBgTintHover = isDark ? 'rgba(248, 113, 113, 0.22)' : 'rgba(220, 38, 38, 0.16)';
     const warningBgTint = isDark ? 'rgba(251, 191, 36, 0.14)' : 'rgba(217, 119, 6, 0.10)';

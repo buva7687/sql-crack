@@ -63,7 +63,7 @@ describe('webview source coverage gaps', () => {
         expect(source).toContain("header.querySelector<HTMLButtonElement>('#column-lineage-panel-close')?.addEventListener('click'");
         expect(source).toContain("if (e.key !== 'Escape')");
         expect(source).toContain("item.setAttribute('data-column-name', flow.outputColumn.toLowerCase());");
-        expect(source).toContain("const items = columnList.querySelectorAll('[data-column-name]');");
+        expect(source).toContain("const items = columnList.querySelectorAll('[data-flow-id]');");
         expect(source).toContain('state.highlightedColumnSources = lineage.sources.map((source) => source.nodeId).filter(Boolean);');
         expect(source).toContain('highlightPathToSelect(mainGroup, currentNodes, currentEdges, state.highlightedColumnSources, edgeColors.columnLineage);');
         expect(source).toContain("querySelectorAll<SVGGElement>('.node')");

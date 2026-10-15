@@ -1,3 +1,4 @@
+import { getExportDefaultUri } from '../../exportPaths';
 import * as vscode from 'vscode';
 import { WorkspaceDependencyGraph } from '../types';
 import { WorkspaceExportContext, buildWorkspaceExportFilename } from '../exportMetadata';
@@ -27,7 +28,7 @@ async function saveTextContent(
     filters: Record<string, string[]>
 ): Promise<void> {
     const uri = await vscode.window.showSaveDialog({
-        defaultUri: vscode.Uri.file(defaultFilename),
+        defaultUri: getExportDefaultUri(defaultFilename),
         filters,
     });
 
@@ -126,7 +127,7 @@ export async function saveWorkspacePng(
     }
 
     const uri = await vscode.window.showSaveDialog({
-        defaultUri: vscode.Uri.file(
+        defaultUri: getExportDefaultUri(
             context
                 ? buildWorkspaceExportFilename('workspace-dependencies', 'png', context)
                 : (suggestedFilename || 'workspace-dependencies.png')

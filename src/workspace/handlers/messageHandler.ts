@@ -1,3 +1,4 @@
+import { getExportDefaultUri } from '../../exportPaths';
 // Message Handler - Handles all webview messages for workspace panel
 // Extracted from workspacePanel.ts for modularity
 
@@ -1294,7 +1295,7 @@ export class MessageHandler {
         };
 
         const uri = await vscode.window.showSaveDialog({
-            defaultUri: vscode.Uri.file(`lineage-${safeLabel}.json`),
+            defaultUri: getExportDefaultUri(`lineage-${safeLabel}.json`),
             filters: { 'JSON': ['json'] }
         });
 

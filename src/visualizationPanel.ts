@@ -1,3 +1,4 @@
+import { getExportDefaultUri } from './exportPaths';
 import * as vscode from 'vscode';
 import { logger } from './logger';
 import type { SqlFlowWebviewMessage, SqlFlowHostMessage } from './shared/messages';
@@ -148,8 +149,14 @@ export class VisualizationPanel {
     private static _persistUiState(key: string | null, state: unknown): void {
         if (!VisualizationPanel._context) { return; }
         if (!key) { return; }
+        if (Buffer.byteLength(JSON.stringify(state) || '', 'utf8') > 4 * 1024 * 1024) {return;}
         const store = VisualizationPanel._context.workspaceState.get<Record<string, unknown>>(VisualizationPanel._uiStateStoreKey) || {};
+        delete store[key];
         store[key] = state;
+        // Cap workspace persistence; object insertion order gives recent writes priority.
+        while (Object.keys(store).length > 100 || Buffer.byteLength(JSON.stringify(store), 'utf8') > 4 * 1024 * 1024) {
+            delete store[Object.keys(store)[0]];
+        }
         void VisualizationPanel._context.workspaceState.update(VisualizationPanel._uiStateStoreKey, store);
     }
 
@@ -191,7 +198,11 @@ export class VisualizationPanel {
         // If we already have a panel, update it
         if (VisualizationPanel.currentPanel) {
             VisualizationPanel.currentPanel._panel.reveal(viewColumn);
-            VisualizationPanel.currentPanel._update(sqlCode, options);
+            const current = VisualizationPanel.currentPanel;
+            const oldKey = current._currentOptions.documentUri?.toString() || current._currentOptions.fileName;
+            const newKey = options.documentUri?.toString() || options.fileName;
+            if (oldKey === newKey) {VisualizationPanel.refresh(sqlCode, options);}
+            else {current._update(sqlCode, options);}
             return;
         }
 
@@ -705,7 +716,7 @@ export class VisualizationPanel {
     private async _savePngFile(base64Data: string, suggestedFilename: string) {
         try {
             const uri = await vscode.window.showSaveDialog({
-                defaultUri: vscode.Uri.file(suggestedFilename),
+                defaultUri: getExportDefaultUri(suggestedFilename, this._sourceDocumentUri),
                 filters: {
                     'PNG Images': ['png']
                 },
@@ -726,7 +737,7 @@ export class VisualizationPanel {
     private async _saveSvgFile(svgData: string, suggestedFilename: string) {
         try {
             const uri = await vscode.window.showSaveDialog({
-                defaultUri: vscode.Uri.file(suggestedFilename),
+                defaultUri: getExportDefaultUri(suggestedFilename, this._sourceDocumentUri),
                 filters: {
                     'SVG Images': ['svg']
                 },
@@ -746,7 +757,7 @@ export class VisualizationPanel {
     private async _savePdfFile(base64Data: string, suggestedFilename: string) {
         try {
             const uri = await vscode.window.showSaveDialog({
-                defaultUri: vscode.Uri.file(suggestedFilename),
+                defaultUri: getExportDefaultUri(suggestedFilename, this._sourceDocumentUri),
                 filters: {
                     'PDF Documents': ['pdf']
                 },
@@ -817,7 +828,7 @@ export class VisualizationPanel {
         const themeKind = vscode.window.activeColorTheme.kind;
         const isHighContrast = themeKind === vscode.ColorThemeKind.HighContrast || themeKind === vscode.ColorThemeKind.HighContrastLight;
 
-        const themePreference = config.get<string>('advanced.defaultTheme', 'light');
+        const themePreference = config.get<string>('advanced.defaultTheme', 'auto');
         let vscodeTheme: 'light' | 'dark';
         if (themePreference === 'light') {
             vscodeTheme = 'light';
@@ -873,6 +884,8 @@ export class VisualizationPanel {
             deferredQueryThreshold,
             parseTimeoutSeconds,
             debugLogging,
+            customAggregateFunctions: config.get<string[]>('customAggregateFunctions') || [],
+            customWindowFunctions: config.get<string[]>('customWindowFunctions') || [],
         };
     }
 
@@ -949,6 +962,8 @@ export class VisualizationPanel {
 
         // Typed bootstrap contract (kept alongside legacy window.* fields for compatibility).
         window.sqlCrackConfig = {
+            customAggregateFunctions: ${this._escapeForInlineScript(runtimeConfig.customAggregateFunctions)},
+            customWindowFunctions: ${this._escapeForInlineScript(runtimeConfig.customWindowFunctions)},
             initialSqlCode: ${this._escapeForInlineScript(sqlCode)},
             vscodeTheme: ${this._escapeForInlineScript(runtimeConfig.vscodeTheme)},
             isHighContrast: ${this._escapeForInlineScript(runtimeConfig.isHighContrast)},
@@ -977,33 +992,9 @@ export class VisualizationPanel {
             debugLogging: ${this._escapeForInlineScript(runtimeConfig.debugLogging)}
         };
 
-        window.initialSqlCode = ${this._escapeForInlineScript(sqlCode)};
-        window.vscodeTheme = ${this._escapeForInlineScript(runtimeConfig.vscodeTheme)};
-        window.isHighContrast = ${this._escapeForInlineScript(runtimeConfig.isHighContrast)};
-        window.defaultDialect = ${this._escapeForInlineScript(options.dialect)};
-        window.autoDetectDialect = ${this._escapeForInlineScript(runtimeConfig.autoDetectDialect)};
-        window.fileName = ${this._escapeForInlineScript(options.fileName)};
+        // Legacy consumers receive the same config without duplicating SQL/pins.
+        Object.assign(window, window.sqlCrackConfig);
         window.documentKey = ${this._escapeForInlineScript(options.documentUri?.toString() ?? options.fileName ?? null)};
-        window.isPinnedView = ${this._escapeForInlineScript(this._isPinned)};
-        window.pinId = ${this._escapeForInlineScript(this._pinId || null)};
-        window.viewLocation = ${this._escapeForInlineScript(runtimeConfig.viewLocation)};
-        window.defaultLayout = ${this._escapeForInlineScript(runtimeConfig.defaultLayout)};
-        window.parserWorkerUri = ${this._escapeForInlineScript(parserWorkerUri.toString())};
-        window.flowDirection = ${this._escapeForInlineScript('top-down')};
-        window.persistedPinnedTabs = ${this._escapeForInlineScript(pinnedTabs)};
-        window.initialUiState = ${this._escapeForInlineScript(initialUiState)};
-        window.showDeadColumnHints = ${this._escapeForInlineScript(runtimeConfig.showDeadColumnHints)};
-        window.combineDdlStatements = ${this._escapeForInlineScript(runtimeConfig.combineDdlStatements)};
-        window.gridStyle = ${this._escapeForInlineScript(runtimeConfig.gridStyle)};
-        window.nodeAccentPosition = ${this._escapeForInlineScript(runtimeConfig.nodeAccentPosition)};
-        window.showMinimap = ${this._escapeForInlineScript(runtimeConfig.showMinimap)};
-        window.colorblindMode = ${this._escapeForInlineScript(runtimeConfig.colorblindMode)};
-        window.maxFileSizeKB = ${this._escapeForInlineScript(runtimeConfig.maxFileSizeKB)};
-        window.maxStatements = ${this._escapeForInlineScript(runtimeConfig.maxStatements)};
-        window.deferredQueryThreshold = ${this._escapeForInlineScript(runtimeConfig.deferredQueryThreshold)};
-        window.parseTimeoutSeconds = ${this._escapeForInlineScript(runtimeConfig.parseTimeoutSeconds)};
-        window.isFirstRun = ${this._escapeForInlineScript(isFirstRun)};
-        window.debugLogging = ${this._escapeForInlineScript(runtimeConfig.debugLogging)};
 
         // VS Code API for messaging
         const vscode = acquireVsCodeApi();

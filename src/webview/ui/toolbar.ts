@@ -6,7 +6,7 @@ import { ICONS } from '../../shared/icons';
 import { escapeHtml } from '../../shared/stringUtils';
 import { MONO_FONT_STACK } from '../../shared/themeTokens';
 import { Z_INDEX } from '../../shared/zIndex';
-import { getComponentUiColors } from '../constants';
+import { getComponentUiColors, getHighContrastTextColor } from '../constants';
 import { prefersReducedMotion } from './motion';
 import { showKeyboardShortcutsHelpModal } from './toolbar/shortcutsModal';
 import { applyOverflowMenuTheme, setupOverflowObserver } from './toolbar/overflowMenu';
@@ -270,8 +270,8 @@ export function createToolbar(
     const fileName = (window as any).fileName || '';
     title.innerHTML = `
         <span>SQL Flow</span>
-        ${fileName ? `<span style="
-            color: ${isDark ? '#94a3b8' : '#64748b'};
+        ${fileName ? `<span class="toolbar-file-name" style="
+            color: ${getHighContrastTextColor(isDark ? '#94a3b8' : '#64748b', isDark)};
             font-weight: 400;
             font-size: 12px;
             max-width: 200px;
@@ -441,6 +441,8 @@ export function updateToolbarTheme(
 
     const titleSpan = toolbar.querySelector('span');
     if (titleSpan) {titleSpan.style.color = textColor;}
+    const fileName = toolbar.querySelector<HTMLElement>('.toolbar-file-name');
+    if (fileName) { fileName.style.color = getHighContrastTextColor(dark ? '#94a3b8' : '#64748b', dark); }
 
     // Update dialect select colors
     const dialectSelect = document.getElementById('dialect-select') as HTMLSelectElement | null;

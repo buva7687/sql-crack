@@ -20,4 +20,6 @@ export interface SqlFlowRuntimeConfig {
     deferredQueryThreshold: number;
     parseTimeoutSeconds: number;
     debugLogging: boolean;
+    customAggregateFunctions?: string[];
+    customWindowFunctions?: string[];
 }

@@ -1,3 +1,4 @@
+import { setCustomFunctions } from '../dialects';
 /**
  * Parser Client for async SQL parsing
  *
@@ -21,6 +22,8 @@ type ParserWorkerRequest =
             dialect: SqlDialect;
             options: ParseOptions;
             parseTimeoutMs: number;
+            customAggregateFunctions: string[];
+            customWindowFunctions: string[];
         };
     }
     | {
@@ -32,6 +35,8 @@ type ParserWorkerRequest =
             limits: ValidationLimits;
             options: BatchParseOptions;
             parseTimeoutMs: number;
+            customAggregateFunctions: string[];
+            customWindowFunctions: string[];
         };
     };
 
@@ -61,6 +66,15 @@ const PARSER_WORKER_START_TIMEOUT_MS = 5000;
  * AST timeout, which lives in a separate module instance from the main thread.
  */
 let parseTimeoutMs = DEFAULT_PARSE_TIMEOUT_MS;
+let customAggregateFunctions: string[] = [];
+let customWindowFunctions: string[] = [];
+
+export function configureCustomFunctions(aggregates: string[] = [], windows: string[] = []): void {
+    customAggregateFunctions = [...aggregates];
+    customWindowFunctions = [...windows];
+    setCustomFunctions(customAggregateFunctions, customWindowFunctions);
+}
+
 
 /**
  * Apply the configured parse timeout to the main-thread parser, the worker
@@ -428,7 +442,7 @@ export async function parseAsync(
                 return await queueWorkerRequest<ParseResult>(requestId, 'parse', sql, {
                     type: 'parse',
                     requestId,
-                    payload: { sql, dialect, options, parseTimeoutMs },
+                    payload: { sql, dialect, options, parseTimeoutMs, customAggregateFunctions, customWindowFunctions },
                 });
             } catch (error) {
                 if (!(error instanceof ParserWorkerTimeoutError)
@@ -484,7 +498,7 @@ export async function parseBatchAsync(
                 return await queueWorkerRequest<BatchParseResult>(requestId, 'parseBatch', sql, {
                     type: 'parseBatch',
                     requestId,
-                    payload: { sql, dialect, limits: appliedLimits, options, parseTimeoutMs },
+                    payload: { sql, dialect, limits: appliedLimits, options, parseTimeoutMs, customAggregateFunctions, customWindowFunctions },
                 });
             } catch (error) {
                 if (!(error instanceof ParserWorkerTimeoutError)
