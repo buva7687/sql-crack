@@ -105,6 +105,30 @@ jobs:
             junit.xml
           retention-days: 3
 
+  # Unit tests on a Windows checkout catch path-separator and line-ending
+  # assumptions that the Linux jobs and the extension-host smoke test miss.
+  test-windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test -- --ci
+
   perf:
     runs-on: ubuntu-latest
     timeout-minutes: 10

@@ -1,16 +1,16 @@
-import { readFileSync } from 'fs';
+import { readTextFile } from '../../helpers/readTextFile';
 import { join } from 'path';
 
 describe('remaining audit state and lifecycle regressions', () => {
-    const indexSource = readFileSync(join(__dirname, '../../../src/webview/index.ts'), 'utf8');
-    const rendererSource = readFileSync(join(__dirname, '../../../src/webview/renderer.ts'), 'utf8');
-    const panelSource = readFileSync(join(__dirname, '../../../src/workspace/workspacePanel.ts'), 'utf8');
-    const managerSource = readFileSync(join(__dirname, '../../../src/workspace/indexManager.ts'), 'utf8');
-    const referenceExtractorSource = readFileSync(
+    const indexSource = readTextFile(join(__dirname, '../../../src/webview/index.ts'), 'utf8');
+    const rendererSource = readTextFile(join(__dirname, '../../../src/webview/renderer.ts'), 'utf8');
+    const panelSource = readTextFile(join(__dirname, '../../../src/workspace/workspacePanel.ts'), 'utf8');
+    const managerSource = readTextFile(join(__dirname, '../../../src/workspace/indexManager.ts'), 'utf8');
+    const referenceExtractorSource = readTextFile(
         join(__dirname, '../../../src/workspace/extraction/referenceExtractor.ts'),
         'utf8'
     );
-    const workspaceCommandBarSource = readFileSync(
+    const workspaceCommandBarSource = readTextFile(
         join(__dirname, '../../../src/workspace/ui/scripts/workspaceCommandBar.ts'),
         'utf8'
     );
