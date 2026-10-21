@@ -569,6 +569,9 @@ export class VisualizationPanel {
                     case 'savePdf':
                         this._savePdfFile(message.data, message.filename);
                         return;
+                    case 'saveMermaid':
+                        this._saveMermaidFile(message.data, message.filename);
+                        return;
                 }
             },
             null,
@@ -751,6 +754,26 @@ export class VisualizationPanel {
         } catch (error) {
             logger.error('Failed to save SVG', error);
             vscode.window.showErrorMessage('Failed to save SVG file');
+        }
+    }
+
+    private async _saveMermaidFile(markdown: string, suggestedFilename: string) {
+        try {
+            const uri = await vscode.window.showSaveDialog({
+                defaultUri: getExportDefaultUri(suggestedFilename, this._sourceDocumentUri),
+                filters: {
+                    'Markdown': ['md']
+                },
+                saveLabel: 'Save Mermaid'
+            });
+
+            if (uri) {
+                await vscode.workspace.fs.writeFile(uri, Buffer.from(markdown, 'utf8'));
+                vscode.window.showInformationMessage(`Saved: ${uri.fsPath}`);
+            }
+        } catch (error) {
+            logger.error('Failed to save Mermaid diagram', error);
+            vscode.window.showErrorMessage('Failed to save Mermaid file');
         }
     }
 

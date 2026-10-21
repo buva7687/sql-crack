@@ -133,6 +133,14 @@ describe('visualizationPanel.ts', () => {
             expect(source).toContain("case 'savePdf':");
             expect(source).toContain('_savePdfFile(message.data, message.filename)');
         });
+
+        it('handles saveMermaid request through the export save dialog', () => {
+            expect(source).toContain("case 'saveMermaid':");
+            expect(source).toContain('_saveMermaidFile(message.data, message.filename)');
+            const handler = source.slice(source.indexOf('private async _saveMermaidFile'), source.indexOf('private async _savePdfFile'));
+            expect(handler).toContain('getExportDefaultUri(suggestedFilename, this._sourceDocumentUri)');
+            expect(handler).toContain("'Markdown': ['md']");
+        });
     });
 
     describe('_goToLine navigation', () => {
