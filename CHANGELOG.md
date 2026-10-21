@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - In the SQL clause popup shown for a clicked edge, pick white or near-black badge text by contrast, name the close button for screen readers, and keep the popup above the legend bar.
 - Use the current theme background on the Workspace loading, empty and manual-analysis pages, and render keys in the walkthrough as code instead of literal backticks.
 - Save SQL Flow Mermaid exports through the VS Code save dialog beside the SQL file, like PNG, SVG and PDF, instead of a browser download into Downloads.
-- Show **Visualize SQL Query** in the Explorer context menu for the clicked file's type rather than the active editor's, so a configured extension such as `.hql` gets the item and unrelated files do not. Extensions match in any letter case, such as `.Sql` or `.Hql`.
+- Show **Visualize SQL Query** in the Explorer context menu for the clicked file's type rather than the active editor's, so a configured extension such as `.hql` gets the item and unrelated files do not. `.sql` and configured extensions of up to six letters match in any letter case, such as `.Sql` or `.Hql`; longer configured extensions match in lower case, upper case or with a capital first letter.
 - Open files from the Workspace graph when the workspace is a drive or filesystem root such as `D:\` or `/`.
 - Give the query-tab navigation buttons, query tabs (with their Q number and parse status), the Copy table names button and the SQL clause popup accessible names, so screen readers no longer announce glyphs such as ⏮ ◀ ▶ ⏭.
 
