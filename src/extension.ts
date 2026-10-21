@@ -59,20 +59,41 @@ function loadAdditionalExtensions(): void {
         });
 }
 
+/** Letters up to which every upper/lower-case spelling is listed (2^6 = 64 per extension). */
+const MAX_CASE_PERMUTATION_LETTERS = 6;
+
 /**
  * Values for `resourceExtname in sqlCrack.additionalExtensions`. That key is the
- * clicked file's last extension with its original case, so list lower- and
- * upper-case forms. A compound extension such as `.sql.j2` can only be matched
- * by its last part; the command re-checks the full name before visualizing.
+ * clicked file's last extension with its original case and the `in` test is
+ * exact, so list every case spelling (`.hql`, `.Hql`, `.HQL`, ...). Longer
+ * extensions get lower, upper and capitalized forms only. A compound extension
+ * such as `.sql.j2` can only be matched by its last part; the command
+ * re-checks the full name before visualizing.
  */
 export function getExplorerMenuExtensions(extensions: readonly string[]): string[] {
     const names = new Set<string>();
     for (const ext of extensions) {
-        const last = ext.slice(ext.lastIndexOf('.'));
-        names.add(last.toLowerCase());
-        names.add(last.toUpperCase());
+        const last = ext.slice(ext.lastIndexOf('.') + 1).toLowerCase();
+        for (const spelling of caseSpellings(last)) {
+            names.add('.' + spelling);
+        }
     }
     return [...names];
+}
+
+function caseSpellings(value: string): string[] {
+    const letters = value.replace(/[^a-z]/g, '').length;
+    if (letters > MAX_CASE_PERMUTATION_LETTERS) {
+        return [value, value.toUpperCase(), value.charAt(0).toUpperCase() + value.slice(1)];
+    }
+    let spellings = [''];
+    for (const char of value) {
+        const upper = char.toUpperCase();
+        spellings = upper === char
+            ? spellings.map(prefix => prefix + char)
+            : spellings.flatMap(prefix => [prefix + char, prefix + upper]);
+    }
+    return spellings;
 }
 
 /** True for `.sql` or a configured additional extension, compared case-insensitively. */

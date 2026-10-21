@@ -63,15 +63,27 @@ describe('Explorer visualize menu', () => {
         const pkg = JSON.parse(readFileSync(join(__dirname, '../../package.json'), 'utf8'));
         const entry = pkg.contributes.menus['explorer/context']
             .find((item: { command: string }) => item.command === 'sql-crack.visualize');
-        expect(entry.when).toBe('resourceExtname == .sql || resourceExtname == .SQL || resourceExtname in sqlCrack.additionalExtensions');
+        expect(entry.when).toBe('resourceExtname =~ /^\\.sql$/i || resourceExtname in sqlCrack.additionalExtensions');
+        // The regex half must accept every case spelling of .sql, and nothing else.
+        const sqlPattern = /^\.sql$/i;
+        expect(['.sql', '.SQL', '.Sql', '.sQl'].every(ext => sqlPattern.test(ext))).toBe(true);
+        expect(['.mysql', '.sql.j2', '.sqlx'].some(ext => sqlPattern.test(ext))).toBe(false);
         expect(entry.when).not.toContain('sqlCrack.isAdditionalSqlFile');
     });
 
     it('publishes the configured extensions, in both cases, for the Explorer menu', () => {
         const call = (vscode.commands.executeCommand as jest.Mock).mock.calls
             .find((entry: unknown[]) => entry[0] === 'setContext' && entry[1] === 'sqlCrack.additionalExtensions');
-        expect(call?.[2]).toEqual(expect.arrayContaining(['.hql', '.HQL', '.j2', '.J2']));
-        expect(getExplorerMenuExtensions(['.ddl', '.sql.j2'])).toEqual(['.ddl', '.DDL', '.j2', '.J2']);
+        expect(call?.[2]).toEqual(expect.arrayContaining(['.hql', '.Hql', '.hQl', '.HQL', '.j2', '.J2']));
+    });
+
+    it('lists every case spelling of short extensions and common forms of long ones', () => {
+        const short = getExplorerMenuExtensions(['.hql']);
+        expect(short).toHaveLength(8);
+        expect(short).toEqual(expect.arrayContaining(['.hql', '.Hql', '.hQl', '.hqL', '.HQl', '.HqL', '.hQL', '.HQL']));
+        // Digits have one spelling; only the last part of a compound extension is listed.
+        expect(getExplorerMenuExtensions(['.sql.j2']).sort()).toEqual(['.J2', '.j2']);
+        expect(getExplorerMenuExtensions(['.bigquery'])).toEqual(['.bigquery', '.BIGQUERY', '.Bigquery']);
     });
 
     it('visualizes a configured extension clicked in the Explorer', async () => {
