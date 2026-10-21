@@ -221,7 +221,11 @@ export class MessageHandler {
             return canonicalRoot || this.normalizePathForComparison(folder.uri.fsPath);
         }));
 
-        return rootCandidates.some((root) => candidate === root || candidate.startsWith(root + path.sep));
+        return rootCandidates.some((root) => {
+            // A drive or filesystem root (D:\ or /) already ends with a separator.
+            const prefix = root.endsWith(path.sep) ? root : root + path.sep;
+            return candidate === root || candidate.startsWith(prefix);
+        });
     }
 
     /**
