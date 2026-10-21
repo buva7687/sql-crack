@@ -52,26 +52,40 @@ function loadAdditionalExtensions(): void {
     // prefix a dot for the endsWith()-based file matching used below.
     additionalExtensions = normalizeFileExtensions(config.get<string[]>('additionalFileExtensions'))
         .map(ext => '.' + ext);
+    // The Explorer context menu tests the clicked file, not the active editor.
+    void vscode.commands.executeCommand('setContext', 'sqlCrack.additionalExtensions', getExplorerMenuExtensions(additionalExtensions))
+        .then(undefined, (error: unknown) => {
+            logger.warn(`Failed to set sqlCrack.additionalExtensions context: ${String(error)}`);
+        });
+}
+
+/**
+ * Values for `resourceExtname in sqlCrack.additionalExtensions`. That key is the
+ * clicked file's last extension with its original case, so list lower- and
+ * upper-case forms. A compound extension such as `.sql.j2` can only be matched
+ * by its last part; the command re-checks the full name before visualizing.
+ */
+export function getExplorerMenuExtensions(extensions: readonly string[]): string[] {
+    const names = new Set<string>();
+    for (const ext of extensions) {
+        const last = ext.slice(ext.lastIndexOf('.'));
+        names.add(last.toLowerCase());
+        names.add(last.toUpperCase());
+    }
+    return [...names];
+}
+
+/** True for `.sql` or a configured additional extension, compared case-insensitively. */
+function isSqlLikeFileName(fileName: string): boolean {
+    const lower = fileName.toLowerCase();
+    return lower.endsWith('.sql') || additionalExtensions.some(ext => lower.endsWith(ext));
 }
 
 /**
  * Check if a document is SQL-like (either .sql or in additional extensions)
  */
 function isSqlLikeDocument(document: vscode.TextDocument): boolean {
-    // Check if it's a SQL language file
-    if (document.languageId === 'sql' || path.extname(document.fileName).toLowerCase() === '.sql') {
-        return true;
-    }
-
-    // Check file extension against additional extensions
-    const fileName = document.fileName.toLowerCase();
-    for (const ext of additionalExtensions) {
-        if (fileName.endsWith(ext)) {
-            return true;
-        }
-    }
-
-    return false;
+    return document.languageId === 'sql' || isSqlLikeFileName(document.fileName);
 }
 
 /**
@@ -260,6 +274,14 @@ export function activate(context: vscode.ExtensionContext) {
                 document = await vscode.workspace.openTextDocument(uri);
             } catch (err) {
                 vscode.window.showErrorMessage(`Failed to open file: ${err instanceof Error ? err.message : String(err)}`);
+                return;
+            }
+            // The Explorer menu matches only the last extension (`.j2` for a
+            // configured `.sql.j2`), so confirm the file really is SQL here.
+            if (!isSqlLikeDocument(document)) {
+                vscode.window.showWarningMessage(
+                    `${path.basename(document.fileName)} is not a SQL file. Add its extension to the "Additional File Extensions" setting to visualize it.`
+                );
                 return;
             }
             sqlCode = document.getText();

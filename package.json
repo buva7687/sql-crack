@@ -79,7 +79,7 @@
       "explorer/context": [
         {
           "command": "sql-crack.visualize",
-          "when": "resourceExtname == .sql || sqlCrack.isAdditionalSqlFile",
+          "when": "resourceExtname == .sql || resourceExtname == .SQL || resourceExtname in sqlCrack.additionalExtensions",
           "group": "navigation"
         },
         {
