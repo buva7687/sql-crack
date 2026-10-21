@@ -214,6 +214,9 @@ export function updateBatchTabs(
     const firstBtn = document.createElement('button');
     firstBtn.innerHTML = '⏮';
     firstBtn.title = currentNavigationScope === 'all' ? 'First query' : `First ${currentNavigationScope} query`;
+    // The glyph is the button's text, so screen readers would announce it
+    // instead of the title.
+    firstBtn.setAttribute('aria-label', firstBtn.title);
     firstBtn.style.cssText = navBtnStyle(firstScopedIndex !== null && firstScopedIndex !== currentQueryIndex);
     firstBtn.disabled = firstScopedIndex === null || firstScopedIndex === currentQueryIndex;
     firstBtn.addEventListener('click', () => {
@@ -227,6 +230,7 @@ export function updateBatchTabs(
     const prevBtn = document.createElement('button');
     prevBtn.innerHTML = '◀';
     prevBtn.title = currentNavigationScope === 'all' ? 'Previous query' : `Previous ${currentNavigationScope} query`;
+    prevBtn.setAttribute('aria-label', prevBtn.title);
     prevBtn.style.cssText = navBtnStyle(prevScopedIndex !== null);
     prevBtn.disabled = prevScopedIndex === null;
     prevBtn.addEventListener('click', () => {
@@ -268,6 +272,14 @@ export function updateBatchTabs(
             : isPartial
                 ? `Q${i + 1}: Partial parse (regex fallback) — ${truncateSql(query.sql, 200)}`
                 : `Q${i + 1}: ${truncateSql(query.sql, 200)}`;
+        const status = hasError ? ', parse error' : isPartial ? ', partial parse' : '';
+        const queryLabel = extractQueryLabel(query.sql, i);
+        // An unrecognised statement falls back to "Qn"; don't announce it twice.
+        const tabName = queryLabel === `Q${i + 1}` ? queryLabel : `Q${i + 1}: ${queryLabel}`;
+        tab.setAttribute('aria-label', `${tabName}${status}`);
+        if (isActive) {
+            tab.setAttribute('aria-current', 'true');
+        }
         tab.style.cssText = `
             background: ${isActive ? 'rgba(99, 102, 241, 0.3)' : idleBg};
             border: 1px solid ${isActive ? '#6366f1' : hasError ? errorColor : isPartial ? warningColor : 'transparent'};
@@ -303,6 +315,7 @@ export function updateBatchTabs(
     const nextBtn = document.createElement('button');
     nextBtn.innerHTML = '▶';
     nextBtn.title = currentNavigationScope === 'all' ? 'Next query' : `Next ${currentNavigationScope} query`;
+    nextBtn.setAttribute('aria-label', nextBtn.title);
     nextBtn.style.cssText = navBtnStyle(nextScopedIndex !== null);
     nextBtn.disabled = nextScopedIndex === null;
     nextBtn.addEventListener('click', () => {
@@ -316,6 +329,7 @@ export function updateBatchTabs(
     const lastBtn = document.createElement('button');
     lastBtn.innerHTML = '⏭';
     lastBtn.title = currentNavigationScope === 'all' ? 'Last query' : `Last ${currentNavigationScope} query`;
+    lastBtn.setAttribute('aria-label', lastBtn.title);
     lastBtn.style.cssText = navBtnStyle(lastScopedIndex !== null && lastScopedIndex !== currentQueryIndex);
     lastBtn.disabled = lastScopedIndex === null || lastScopedIndex === currentQueryIndex;
     lastBtn.addEventListener('click', () => {

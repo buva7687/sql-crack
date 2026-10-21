@@ -144,6 +144,8 @@ export function showSqlClausePanelContent(options: SqlClausePanelOptions): void 
     if (!clausePanel) {
         clausePanel = document.createElement('div');
         clausePanel.id = 'sql-clause-panel';
+        clausePanel.setAttribute('role', 'region');
+        clausePanel.setAttribute('aria-label', 'SQL clause details');
         containerElement?.appendChild(clausePanel);
     }
 

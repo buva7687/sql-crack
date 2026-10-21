@@ -345,6 +345,7 @@ export function updateStatsPanelContent(options: StatsPanelOptions): void {
                                 transition: all 0.2s;
                             "
                             title="Copy all table names to clipboard"
+                            aria-label="Copy all table names to clipboard"
                             data-tables="${escapeHtml(allTableNames)}">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
                             <rect x="9" y="9" width="13" height="13" rx="2"/>

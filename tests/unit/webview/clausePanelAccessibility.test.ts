@@ -1,4 +1,5 @@
 import { showSqlClausePanelContent } from '../../../src/webview/panels/sqlPanels';
+import { updateStatsPanelContent } from '../../../src/webview/panels/infoPanel';
 import { CONDITION_COLORS, getReadableTextColor } from '../../../src/webview/constants';
 import { applyPanelBottomOffsets } from '../../../src/webview/ui/panelLayout';
 import { createFakeElement, installFakeDocument, uninstallFakeDocument } from '../../helpers/fakeDom';
@@ -48,6 +49,27 @@ describe('SQL clause popup accessibility', () => {
         expect(panel.innerHTML).toContain(`background: ${CONDITION_COLORS.on};`);
         expect(panel.innerHTML).toContain(`color: ${getReadableTextColor(CONDITION_COLORS.on)};`);
         expect(panel.innerHTML).not.toContain('color: white;');
+    });
+
+    it('exposes the popup as a named region', () => {
+        const panel = showPanel({ clauseType: 'join' });
+        expect(panel.getAttribute('role')).toBe('region');
+        expect(panel.getAttribute('aria-label')).toBe('SQL clause details');
+    });
+
+    it('names the Copy table names button by its action', () => {
+        const panel = createFakeElement('div');
+        updateStatsPanelContent({
+            statsPanel: panel as unknown as HTMLDivElement,
+            currentStats: {
+                tables: 2, joins: 1, conditions: 0, ctes: 0, subqueries: 0,
+                complexity: 'Simple', complexityScore: 1, aggregations: 0, windowFunctions: 0, unions: 0,
+            },
+            currentTableUsage: new Map([['customers', 1], ['orders', 1]]), isDarkTheme: true, statsMinimized: false,
+            setStatsMinimized: jest.fn(), escapeHtml: (text: string) => text,
+            onNavigateToTable: jest.fn(), onRequestRerender: jest.fn(),
+        } as any);
+        expect(panel.innerHTML).toMatch(/id="copy-tables-btn"[\s\S]*?aria-label="Copy all table names to clipboard"/);
     });
 
     it('names the close button for screen readers', () => {
