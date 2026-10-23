@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Update dependency tooling, enforce full dependency audits in the release build and report them as a separate CI job, pin VS Code types to the minimum supported API, and isolate release credentials from install/test/build steps.
 - Declare Restricted Mode support, document static-analysis limits and private vulnerability reporting, and include third-party license notices.
 - Test installed VSIX activation, packaged assets and worker responsiveness on VS Code 1.85 and stable on Linux, macOS and Windows, with Restricted Mode checks on stable.
+- Update DOMPurify to 3.4.17 for three advisories published before release. It is an optional jsPDF dependency that the extension does not bundle, but the production and full dependency audits gate the release.
 - Keep LF line endings in every checkout with `.gitattributes`, read sources line-ending-independently in source-reading tests, and run the unit tests on Windows in CI.
 
 ## [0.9.4] - 2026-10-01
