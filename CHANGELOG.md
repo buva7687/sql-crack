@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Match hint severity labels, function badges, loading cards and clause-popup text to light and dark themes, including live high-contrast changes.
 - In the SQL clause popup shown for a clicked edge, pick white or near-black badge text by contrast, name the close button for screen readers, and keep the popup above the legend bar.
 - Use the current theme background on the Workspace loading, empty and manual-analysis pages, and render keys in the walkthrough as code instead of literal backticks.
+- Stop repeating the joined table's name or alias as a third line on SQL Flow join nodes; the joined table already appears as its own node feeding the join.
 - Save SQL Flow Mermaid exports through the VS Code save dialog beside the SQL file, like PNG, SVG and PDF, instead of a browser download into Downloads.
 - Show **Visualize SQL Query** in the Explorer context menu for the clicked file's type rather than the active editor's, so a configured extension such as `.hql` gets the item and unrelated files do not. `.sql` and configured extensions of up to six letters match in any letter case, such as `.Sql` or `.Hql`; longer configured extensions match in lower case, upper case or with a capital first letter.
 - Open files from the Workspace graph when the workspace is a drive or filesystem root such as `D:\` or `/`.

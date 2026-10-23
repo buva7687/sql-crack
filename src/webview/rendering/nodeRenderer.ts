@@ -276,7 +276,6 @@ export function renderJoinNodeVisual(node: FlowNode, group: SVGGElement, deps: N
     const surface = isDark ? NODE_SURFACE.dark : NODE_SURFACE.light;
     const textColor = surface.text;
     const textColorMuted = surface.textMuted;
-    const textColorDim = isDark ? UI_COLORS.textDim : UI_COLORS.textLightDim;
 
     const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
     rect.setAttribute('x', String(node.x));
@@ -338,17 +337,6 @@ export function renderJoinNodeVisual(node: FlowNode, group: SVGGElement, deps: N
         condition.setAttribute('font-family', MONO_FONT_STACK);
         condition.textContent = deps.truncate(node.details[0], 18);
         group.appendChild(condition);
-
-        if (node.details.length > 1) {
-            const tableName = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            tableName.setAttribute('x', String(node.x + 8));
-            tableName.setAttribute('y', String(node.y + 52));
-            tableName.setAttribute('fill', textColorDim);
-            tableName.setAttribute('font-size', '9');
-            tableName.setAttribute('font-family', '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif');
-            tableName.textContent = deps.truncate(node.details[1], 18);
-            group.appendChild(tableName);
-        }
     }
 }
 
