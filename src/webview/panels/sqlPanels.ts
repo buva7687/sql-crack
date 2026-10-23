@@ -1,5 +1,5 @@
 import type { FlowEdge } from '../types';
-import { UI_COLORS } from '../constants';
+import { UI_COLORS, getReadableTextColor } from '../constants';
 
 export interface SqlPreviewPanelOptions {
     panel: HTMLDivElement | null;
@@ -118,6 +118,8 @@ export interface SqlClausePanelOptions {
     escapeHtml: (value: string) => string;
     getClauseTypeColor: (clauseType: string) => string;
     monoFontStack: string;
+    /** Distance from the viewport bottom; callers raise it to clear the legend bar. */
+    bottomPx?: number;
 }
 
 function getClausePanelColors(isDarkTheme: boolean, monoFontStack: string): SqlClausePanelColorOptions {
@@ -135,19 +137,21 @@ function getClausePanelColors(isDarkTheme: boolean, monoFontStack: string): SqlC
 }
 
 export function showSqlClausePanelContent(options: SqlClausePanelOptions): void {
-    const { edge, containerElement, isDarkTheme, zIndex, pinIcon, escapeHtml, getClauseTypeColor, monoFontStack } = options;
+    const { edge, containerElement, isDarkTheme, zIndex, pinIcon, escapeHtml, getClauseTypeColor, monoFontStack, bottomPx = 16 } = options;
     let clausePanel = document.getElementById('sql-clause-panel') as HTMLDivElement | null;
     const colors = getClausePanelColors(isDarkTheme, monoFontStack);
 
     if (!clausePanel) {
         clausePanel = document.createElement('div');
         clausePanel.id = 'sql-clause-panel';
+        clausePanel.setAttribute('role', 'region');
+        clausePanel.setAttribute('aria-label', 'SQL clause details');
         containerElement?.appendChild(clausePanel);
     }
 
     clausePanel.style.cssText = `
         position: fixed;
-        bottom: 16px;
+        bottom: ${bottomPx}px;
         left: 50%;
         transform: translateX(-50%);
         background: ${colors.panelBg};
@@ -175,11 +179,11 @@ export function showSqlClausePanelContent(options: SqlClausePanelOptions): void 
             font-size: 16px;
             cursor: pointer;
             padding: 4px 8px;
-        " class="clause-panel-close-btn">✕</button>
-        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+        " class="clause-panel-close-btn" type="button" aria-label="Close SQL clause details" title="Close">✕</button>
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px; padding-right: 28px;">
             <div style="
                 background: ${clauseColor};
-                color: white;
+                color: ${getReadableTextColor(clauseColor)};
                 padding: 4px 12px;
                 border-radius: 6px;
                 font-size: 11px;

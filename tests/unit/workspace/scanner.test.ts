@@ -1,3 +1,4 @@
+jest.mock('../../../src/workspace/analysisClient', () => require('../../__mocks__/workspaceAnalysisClient'));
 /**
  * WorkspaceScanner Unit Tests
  *
@@ -567,4 +568,19 @@ describe('WorkspaceScanner', () => {
             expect(result.references).toHaveLength(0);
         });
     });
+});
+
+it('retains file identity on worker failure so cached errors do not force repeated full reindexing', async () => {
+    const {WorkspaceAnalysisClient, WorkspaceAnalysisError} = require('../../../src/workspace/analysisClient');
+    const spy = jest.spyOn(WorkspaceAnalysisClient.prototype, 'analyze').mockRejectedValueOnce(new WorkspaceAnalysisError('Workspace analysis exceeded 10s; file skipped'));
+    const sql = 'SELECT id FROM users';
+    (vscode.workspace.fs.stat as jest.Mock).mockResolvedValue({size: sql.length, mtime: 123});
+    (vscode.workspace.fs.readFile as jest.Mock).mockResolvedValue(Buffer.from(sql));
+    try {
+        const analysis = await new WorkspaceScanner().analyzeFile(vscode.Uri.file('/timeout.sql'));
+        expect(analysis.contentHash).toHaveLength(64);
+        expect(analysis.lastModified).toBe(123);
+        expect(analysis.parseError).toContain('exceeded');
+        expect(analysis.readError).toBeUndefined();
+    } finally {spy.mockRestore();}
 });

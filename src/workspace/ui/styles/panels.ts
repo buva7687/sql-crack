@@ -985,7 +985,7 @@ export function getIssuesPanelStyles(): string {
  */
 export function getStateStyles(dark: boolean = true): string {
     const colors = dark ? {
-        bg: '#0f172a',
+        bg: '#111111',
         text: '#e2e8f0',
         textMuted: '#71717a',
         border: '#334155',
@@ -1001,7 +1001,7 @@ export function getStateStyles(dark: boolean = true): string {
         secondary: '#334155',
         secondaryHover: '#475569'
     } : {
-        bg: '#ffffff',
+        bg: '#fafafa',
         text: '#1e293b',
         textMuted: '#64748b',
         border: '#e2e8f0',

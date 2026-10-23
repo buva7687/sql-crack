@@ -1,4 +1,4 @@
-import { readFileSync } from 'fs';
+import { readTextFile } from '../../helpers/readTextFile';
 import { join } from 'path';
 import {
     emptyLayoutHistory,
@@ -13,7 +13,7 @@ import {
 } from '../../../src/webview/state/persistedViewState';
 
 const readSource = (relPath: string): string =>
-    readFileSync(join(__dirname, '../../../', relPath), 'utf8');
+    readTextFile(join(__dirname, '../../../', relPath), 'utf8');
 
 /**
  * Persisted UI state is read back from workspaceState on disk. These guards are

@@ -1,3 +1,4 @@
+import { getHighContrastTextColor } from '../constants';
 import { ParseResult } from '../types';
 import { FlowNode } from '../types/nodes';
 import { Z_INDEX } from '../../shared/zIndex';
@@ -256,7 +257,7 @@ function createNodeGroup(
     const type = document.createElementNS(ns, 'text');
     type.setAttribute('x', String(x + 10));
     type.setAttribute('y', String(y + 39));
-    type.setAttribute('fill', dark ? '#94a3b8' : '#64748b');
+    type.setAttribute('fill', getHighContrastTextColor(dark ? '#94a3b8' : '#64748b', dark));
     type.setAttribute('font-size', '10');
     type.textContent = node.type;
     group.appendChild(type);
@@ -551,7 +552,7 @@ export function showCompareView(options: CompareViewOptions): void {
         <div style="font-size: 12px; font-weight: 700; color: ${options.isDarkTheme ? '#e2e8f0' : '#0f172a'};">
             Compare Mode
         </div>
-        <div id="sql-crack-compare-stats-diff" style="font-size: 11px; color: ${options.isDarkTheme ? '#94a3b8' : '#475569'};">
+        <div id="sql-crack-compare-stats-diff" style="font-size: 11px; color: ${getHighContrastTextColor(options.isDarkTheme ? '#94a3b8' : '#475569', options.isDarkTheme)};">
             ${buildDeltaSummary(diff.statsDelta)}
         </div>
     `;

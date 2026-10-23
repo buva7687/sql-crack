@@ -13,6 +13,7 @@ import {
     getWorkerStatus,
     isCancelledBatchParseResult,
     configureParseTimeout,
+    configureCustomFunctions,
 } from '../../../src/webview/parserClient';
 import { SqlDialect } from '../../../src/webview/types';
 
@@ -31,6 +32,7 @@ describe('parserClient', () => {
     `;
 
     afterEach(() => {
+        configureCustomFunctions();
         configureParseTimeout();
         terminateWorker();
         delete (global as Record<string, unknown>).window;
@@ -40,6 +42,28 @@ describe('parserClient', () => {
     });
 
     describe('parseAsync', () => {
+        it('applies and resets custom functions when workers are disabled', async () => {
+            configureCustomFunctions(['MY_SUM'], ['MY_RANK']);
+            const aggregateSql = 'SELECT MY_SUM(amount) AS total FROM orders';
+            const first = await parseWithFallback(aggregateSql, 'PostgreSQL', false);
+            expect(first.nodes.some(node => node.type === 'aggregate')).toBe(true);
+            expect(first.stats.aggregations).toBe(1);
+            expect(first.stats.functionsUsed).toEqual(expect.arrayContaining([expect.objectContaining({name: 'MY_SUM', category: 'aggregate'})]));
+            const windowSql = 'SELECT MY_RANK(amount) OVER (PARTITION BY customer_id ORDER BY amount) AS position FROM orders';
+            const window = await parseWithFallback(windowSql, 'MySQL', false);
+            expect(window.nodes.some(node => node.type === 'window')).toBe(true);
+            expect(window.stats.windowFunctions).toBe(1);
+            expect(window.stats.functionsUsed).toEqual(expect.arrayContaining([expect.objectContaining({name: 'MY_RANK', category: 'window'})]));
+            // PostgreSQL's parser grammar rejects generic functions with OVER.
+            // Configuration must not turn that into a successful-looking result.
+            const unsupported = await parseWithFallback(windowSql, 'PostgreSQL', false, {allowDialectFallback: false});
+            expect(unsupported.partial).toBe(true);
+            expect(unsupported.hints.length).toBeGreaterThan(0);
+            configureCustomFunctions();
+            const reset = await parseWithFallback(aggregateSql, 'PostgreSQL', false);
+            expect(reset.nodes.some(node => node.type === 'aggregate')).toBe(false);
+        });
+
         it('defers parsing to a macrotask so UI can paint loading states', async () => {
             jest.useFakeTimers();
             try {

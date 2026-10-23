@@ -113,4 +113,35 @@ describe('MessageHandler file path safety', () => {
         expect(vscode.workspace.openTextDocument).not.toHaveBeenCalled();
         expect(vscode.window.showWarningMessage).toHaveBeenCalledWith('Blocked opening file outside workspace.');
     });
+
+    it('allows files when the workspace is opened at a filesystem root', async () => {
+        // A drive or filesystem root (D:\\ or /) already ends with a separator;
+        // appending another one used to reject every file under it.
+        (vscode.workspace as any).workspaceFolders = [
+            { uri: vscode.Uri.file('/'), name: 'root', index: 0 }
+        ];
+        const { context } = createContext();
+        const handler = new MessageHandler(context);
+
+        await handler.handleMessage({
+            command: 'openFile',
+            filePath: '/models/orders.sql'
+        } as any);
+
+        expect(vscode.workspace.openTextDocument).toHaveBeenCalledWith(vscode.Uri.file('/models/orders.sql'));
+        expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
+    });
+
+    it('still blocks a sibling folder that shares the workspace name as a prefix', async () => {
+        const { context } = createContext();
+        const handler = new MessageHandler(context);
+
+        await handler.handleMessage({
+            command: 'openFile',
+            filePath: '/repo-other/queries/orders.sql'
+        } as any);
+
+        expect(vscode.workspace.openTextDocument).not.toHaveBeenCalled();
+        expect(vscode.window.showWarningMessage).toHaveBeenCalledWith('Blocked opening file outside workspace.');
+    });
 });

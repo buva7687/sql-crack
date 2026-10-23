@@ -3,7 +3,6 @@ import * as path from 'path';
 import { VisualizationPanel } from './visualizationPanel';
 import { setCustomFunctions } from './dialects';
 import { logger } from './logger';
-import { parseSqlBatch, DEFAULT_VALIDATION_LIMITS } from './webview/sqlParser';
 import {
     createDiagnosticsFromBatch,
     SqlCrackCodeActionProvider,
@@ -13,6 +12,10 @@ import { normalizeDialect } from './shared/dialect';
 import { normalizeFileExtensions } from './shared/fileExtensions';
 import { normalizeAdvancedLimit } from './shared/limits';
 import { preprocessJinjaTemplates } from './webview/parser/dialects/jinjaPreprocessor';
+import { DiagnosticsClient } from './diagnosticsClient';
+import type { SqlDialect } from './webview/types';
+
+let diagnosticsClient: DiagnosticsClient | undefined;
 
 // Track the last active SQL document for refresh functionality
 let lastActiveSqlDocument: vscode.TextDocument | null = null;
@@ -49,26 +52,61 @@ function loadAdditionalExtensions(): void {
     // prefix a dot for the endsWith()-based file matching used below.
     additionalExtensions = normalizeFileExtensions(config.get<string[]>('additionalFileExtensions'))
         .map(ext => '.' + ext);
+    // The Explorer context menu tests the clicked file, not the active editor.
+    void vscode.commands.executeCommand('setContext', 'sqlCrack.additionalExtensions', getExplorerMenuExtensions(additionalExtensions))
+        .then(undefined, (error: unknown) => {
+            logger.warn(`Failed to set sqlCrack.additionalExtensions context: ${String(error)}`);
+        });
+}
+
+/** Letters up to which every upper/lower-case spelling is listed (2^6 = 64 per extension). */
+const MAX_CASE_PERMUTATION_LETTERS = 6;
+
+/**
+ * Values for `resourceExtname in sqlCrack.additionalExtensions`. That key is the
+ * clicked file's last extension with its original case and the `in` test is
+ * exact, so list every case spelling (`.hql`, `.Hql`, `.HQL`, ...). Longer
+ * extensions get lower, upper and capitalized forms only. A compound extension
+ * such as `.sql.j2` can only be matched by its last part; the command
+ * re-checks the full name before visualizing.
+ */
+export function getExplorerMenuExtensions(extensions: readonly string[]): string[] {
+    const names = new Set<string>();
+    for (const ext of extensions) {
+        const last = ext.slice(ext.lastIndexOf('.') + 1).toLowerCase();
+        for (const spelling of caseSpellings(last)) {
+            names.add('.' + spelling);
+        }
+    }
+    return [...names];
+}
+
+function caseSpellings(value: string): string[] {
+    const letters = value.replace(/[^a-z]/g, '').length;
+    if (letters > MAX_CASE_PERMUTATION_LETTERS) {
+        return [value, value.toUpperCase(), value.charAt(0).toUpperCase() + value.slice(1)];
+    }
+    let spellings = [''];
+    for (const char of value) {
+        const upper = char.toUpperCase();
+        spellings = upper === char
+            ? spellings.map(prefix => prefix + char)
+            : spellings.flatMap(prefix => [prefix + char, prefix + upper]);
+    }
+    return spellings;
+}
+
+/** True for `.sql` or a configured additional extension, compared case-insensitively. */
+function isSqlLikeFileName(fileName: string): boolean {
+    const lower = fileName.toLowerCase();
+    return lower.endsWith('.sql') || additionalExtensions.some(ext => lower.endsWith(ext));
 }
 
 /**
  * Check if a document is SQL-like (either .sql or in additional extensions)
  */
 function isSqlLikeDocument(document: vscode.TextDocument): boolean {
-    // Check if it's a SQL language file
-    if (document.languageId === 'sql') {
-        return true;
-    }
-
-    // Check file extension against additional extensions
-    const fileName = document.fileName.toLowerCase();
-    for (const ext of additionalExtensions) {
-        if (fileName.endsWith(ext)) {
-            return true;
-        }
-    }
-
-    return false;
+    return document.languageId === 'sql' || isSqlLikeFileName(document.fileName);
 }
 
 /**
@@ -77,6 +115,7 @@ function isSqlLikeDocument(document: vscode.TextDocument): boolean {
  */
 function getSqlCodeActionDocumentSelector(): vscode.DocumentSelector {
     const selectors: vscode.DocumentFilter[] = [
+        { scheme: 'file', pattern: '**/*.sql' },
         { language: 'sql', scheme: 'file' },
         { language: 'sql', scheme: 'untitled' },
     ];
@@ -151,12 +190,24 @@ export function activate(context: vscode.ExtensionContext) {
 
     const diagnosticsCollection = vscode.languages.createDiagnosticCollection('sql-crack');
     context.subscriptions.push(diagnosticsCollection);
+    const parser = new DiagnosticsClient();
+    diagnosticsClient = parser;
+    context.subscriptions.push(parser);
 
     const shouldShowDiagnosticsInProblems = (): boolean => {
         return getConfig().get<boolean>('advanced.showDiagnosticsInProblems', false);
     };
 
-    const updateDiagnosticsForDocument = (document: vscode.TextDocument): void => {
+    const diagnosticRequests = new Map<string, number>();
+    let nextDiagnosticRequest = 0;
+    const updateDiagnosticsForDocument = async (document: vscode.TextDocument): Promise<void> => {
+        const key = document.uri.toString();
+        const request = ++nextDiagnosticRequest;
+        diagnosticRequests.set(key, request);
+        parser.cancel(key);
+        const version = document.version;
+        const isCurrent = () => diagnosticRequests.get(key) === request && document.version === version
+            && shouldShowDiagnosticsInProblems() && !document.isClosed;
         if (!isSqlLikeDocument(document)) {
             diagnosticsCollection.delete(document.uri);
             return;
@@ -184,20 +235,26 @@ export function activate(context: vscode.ExtensionContext) {
             const maxFileSizeKB = normalizeAdvancedLimit(config.get<number>('advanced.maxFileSizeKB', 100), 100, 10, 10000);
             const maxStatements = normalizeAdvancedLimit(config.get<number>('advanced.maxStatements', 50), 50, 1, 500);
             const combineDdlStatements = config.get<boolean>('advanced.combineDdlStatements', false);
-            const batch = parseSqlBatch(
+            const parseTimeoutSeconds = normalizeAdvancedLimit(config.get<number>('advanced.parseTimeoutSeconds', 5), 5, 1, 60);
+            const batch = await parser.analyze(key, {
                 sql,
-                defaultDialect as any,
-                {
+                dialect: defaultDialect as SqlDialect,
+                limits: {
                     maxSqlSizeBytes: maxFileSizeKB * 1024,
-                    maxQueryCount: maxStatements || DEFAULT_VALIDATION_LIMITS.maxQueryCount,
+                    maxQueryCount: maxStatements,
                 },
-                {
+                options: {
                     combineDdlStatements,
                     allowDialectFallback: autoDetectDialect,
-                }
-            );
+                },
+                parseTimeoutMs: parseTimeoutSeconds * 1000,
+                customAggregateFunctions: config.get<string[]>('customAggregateFunctions', []),
+                customWindowFunctions: config.get<string[]>('customWindowFunctions', []),
+            });
+            if (!isCurrent()) { return; }
             diagnosticsCollection.set(document.uri, createDiagnosticsFromBatch(document, batch));
         } catch (e) {
+            if (!isCurrent()) { return; }
             logger.debug('[extension] Diagnostics parse failed, clearing: ' + String(e));
             diagnosticsCollection.delete(document.uri);
         }
@@ -238,6 +295,14 @@ export function activate(context: vscode.ExtensionContext) {
                 document = await vscode.workspace.openTextDocument(uri);
             } catch (err) {
                 vscode.window.showErrorMessage(`Failed to open file: ${err instanceof Error ? err.message : String(err)}`);
+                return;
+            }
+            // The Explorer menu matches only the last extension (`.j2` for a
+            // configured `.sql.j2`), so confirm the file really is SQL here.
+            if (!isSqlLikeDocument(document)) {
+                vscode.window.showWarningMessage(
+                    `${path.basename(document.fileName)} is not a SQL file. Add its extension to the "Additional File Extensions" setting to visualize it.`
+                );
                 return;
             }
             sqlCode = document.getText();
@@ -462,6 +527,8 @@ export function activate(context: vscode.ExtensionContext) {
     });
 
     const documentCloseListener = vscode.workspace.onDidCloseTextDocument((document) => {
+        diagnosticRequests.delete(document.uri.toString());
+        parser.cancel(document.uri.toString());
         diagnosticsCollection.delete(document.uri);
         // Cancel any pending diagnostics refresh for the closed document.
         const docKey = document.uri.toString();
@@ -477,6 +544,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // Listen for document changes with debounced auto-refresh
     const docChangeListener = vscode.workspace.onDidChangeTextDocument((e) => {
+        parser.cancel(e.document.uri.toString());
         const config = getConfig();
         const diagnosticsAutoRefresh = config.get<boolean>('autoRefresh', true);
         const autoRefreshDelay = config.get<number>('autoRefreshDelay', 500);
@@ -566,14 +634,15 @@ export function activate(context: vscode.ExtensionContext) {
         }
         if (e.affectsConfiguration('sqlCrack.advanced.showDiagnosticsInProblems')) {
             if (!shouldShowDiagnosticsInProblems()) {
+                diagnosticRequests.clear();
+                parser.cancelAll();
                 diagnosticsCollection.clear();
-            } else {
-                vscode.workspace.textDocuments.forEach((document) => {
-                    updateDiagnosticsForDocument(document);
-                });
             }
         }
-        if (e.affectsConfiguration('sqlCrack.autoDetectDialect')) {
+        const diagnosticSettings = ['advanced.showDiagnosticsInProblems', 'autoDetectDialect', 'defaultDialect',
+            'customAggregateFunctions', 'customWindowFunctions', 'additionalFileExtensions',
+            'advanced.maxFileSizeKB', 'advanced.maxStatements', 'advanced.combineDdlStatements', 'advanced.parseTimeoutSeconds'];
+        if (shouldShowDiagnosticsInProblems() && diagnosticSettings.some(setting => e.affectsConfiguration(`sqlCrack.${setting}`))) {
             vscode.workspace.textDocuments.forEach((document) => {
                 updateDiagnosticsForDocument(document);
             });
@@ -597,6 +666,8 @@ export function activate(context: vscode.ExtensionContext) {
 }
 
 export function deactivate() {
+    diagnosticsClient?.dispose();
+    diagnosticsClient = undefined;
     // Clean up auto-refresh timer
     if (autoRefreshTimer) {
         clearTimeout(autoRefreshTimer);

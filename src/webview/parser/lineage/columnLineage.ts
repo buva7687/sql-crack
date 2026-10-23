@@ -104,17 +104,16 @@ export function extractSourcesFromExpr(
             tableName = tableAliasMap.get(tableAlias.toLowerCase()) || tableAlias;
         }
 
-        // Find matching table node
-        const tableNode = tableNodes.find(n =>
-            n.label.toLowerCase() === (tableName || '').toLowerCase() ||
-            n.label.toLowerCase() === (tableAlias || '').toLowerCase()
-        );
+        // Aliases identify table instances; labels do not distinguish self-joins.
+        const aliasNode = tableAlias ? tableNodes.find(n => n.alias?.toLowerCase() === tableAlias.toLowerCase()) : undefined;
+        const labelNodes = tableNodes.filter(n => n.label.toLowerCase() === tableName.toLowerCase());
+        const tableNode = aliasNode || (labelNodes.length === 1 ? labelNodes[0] : undefined);
 
         if (tableName || tableNodes.length === 1) {
             sources.push({
                 table: tableName || (tableNodes[0]?.label || 'unknown'),
                 column: column,
-                nodeId: tableNode?.id || tableNodes[0]?.id || ''
+                nodeId: tableNode?.id || (!tableAlias && tableNodes.length === 1 ? tableNodes[0].id : '')
             });
         }
         return;

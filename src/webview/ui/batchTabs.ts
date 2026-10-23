@@ -1,3 +1,4 @@
+import { getHighContrastTextColor } from '../constants';
 // Batch tabs UI module - for navigating multiple queries in a SQL file
 
 import { BatchParseResult } from '../sqlParser';
@@ -172,13 +173,13 @@ export function updateBatchTabs(
     // Theme-aware colors
     const isDark = callbacks.isDarkTheme();
     const textColor = isDark ? '#f1f5f9' : '#1e293b';
-    const textColorMuted = isDark ? '#94a3b8' : '#64748b';
-    const textColorDim = isDark ? '#475569' : '#94a3b8';
+    const textColorMuted = getHighContrastTextColor(isDark ? '#94a3b8' : '#64748b', isDark);
+    const textColorDim = getHighContrastTextColor(isDark ? '#475569' : '#94a3b8', isDark);
     const activeColor = isDark ? '#a5b4fc' : '#4f46e5';
     const errorColor = isDark ? '#f87171' : '#dc2626';
     const successColor = isDark ? '#4ade80' : '#16a34a';
     const warningColor = isDark ? '#fbbf24' : '#d97706';
-    const counterColor = isDark ? '#64748b' : '#94a3b8';
+    const counterColor = getHighContrastTextColor(isDark ? '#64748b' : '#94a3b8', isDark);
     const errorBgTint = isDark ? 'rgba(248, 113, 113, 0.14)' : 'rgba(220, 38, 38, 0.10)';
     const errorBgTintHover = isDark ? 'rgba(248, 113, 113, 0.22)' : 'rgba(220, 38, 38, 0.16)';
     const warningBgTint = isDark ? 'rgba(251, 191, 36, 0.14)' : 'rgba(217, 119, 6, 0.10)';
@@ -213,6 +214,9 @@ export function updateBatchTabs(
     const firstBtn = document.createElement('button');
     firstBtn.innerHTML = '⏮';
     firstBtn.title = currentNavigationScope === 'all' ? 'First query' : `First ${currentNavigationScope} query`;
+    // The glyph is the button's text, so screen readers would announce it
+    // instead of the title.
+    firstBtn.setAttribute('aria-label', firstBtn.title);
     firstBtn.style.cssText = navBtnStyle(firstScopedIndex !== null && firstScopedIndex !== currentQueryIndex);
     firstBtn.disabled = firstScopedIndex === null || firstScopedIndex === currentQueryIndex;
     firstBtn.addEventListener('click', () => {
@@ -226,6 +230,7 @@ export function updateBatchTabs(
     const prevBtn = document.createElement('button');
     prevBtn.innerHTML = '◀';
     prevBtn.title = currentNavigationScope === 'all' ? 'Previous query' : `Previous ${currentNavigationScope} query`;
+    prevBtn.setAttribute('aria-label', prevBtn.title);
     prevBtn.style.cssText = navBtnStyle(prevScopedIndex !== null);
     prevBtn.disabled = prevScopedIndex === null;
     prevBtn.addEventListener('click', () => {
@@ -267,6 +272,14 @@ export function updateBatchTabs(
             : isPartial
                 ? `Q${i + 1}: Partial parse (regex fallback) — ${truncateSql(query.sql, 200)}`
                 : `Q${i + 1}: ${truncateSql(query.sql, 200)}`;
+        const status = hasError ? ', parse error' : isPartial ? ', partial parse' : '';
+        const queryLabel = extractQueryLabel(query.sql, i);
+        // An unrecognised statement falls back to "Qn"; don't announce it twice.
+        const tabName = queryLabel === `Q${i + 1}` ? queryLabel : `Q${i + 1}: ${queryLabel}`;
+        tab.setAttribute('aria-label', `${tabName}${status}`);
+        if (isActive) {
+            tab.setAttribute('aria-current', 'true');
+        }
         tab.style.cssText = `
             background: ${isActive ? 'rgba(99, 102, 241, 0.3)' : idleBg};
             border: 1px solid ${isActive ? '#6366f1' : hasError ? errorColor : isPartial ? warningColor : 'transparent'};
@@ -302,6 +315,7 @@ export function updateBatchTabs(
     const nextBtn = document.createElement('button');
     nextBtn.innerHTML = '▶';
     nextBtn.title = currentNavigationScope === 'all' ? 'Next query' : `Next ${currentNavigationScope} query`;
+    nextBtn.setAttribute('aria-label', nextBtn.title);
     nextBtn.style.cssText = navBtnStyle(nextScopedIndex !== null);
     nextBtn.disabled = nextScopedIndex === null;
     nextBtn.addEventListener('click', () => {
@@ -315,6 +329,7 @@ export function updateBatchTabs(
     const lastBtn = document.createElement('button');
     lastBtn.innerHTML = '⏭';
     lastBtn.title = currentNavigationScope === 'all' ? 'Last query' : `Last ${currentNavigationScope} query`;
+    lastBtn.setAttribute('aria-label', lastBtn.title);
     lastBtn.style.cssText = navBtnStyle(lastScopedIndex !== null && lastScopedIndex !== currentQueryIndex);
     lastBtn.disabled = lastScopedIndex === null || lastScopedIndex === currentQueryIndex;
     lastBtn.addEventListener('click', () => {

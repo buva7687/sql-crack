@@ -30,7 +30,8 @@ export type SqlFlowWebviewMessage =
     | { command: 'unpinTab'; pinId: string }
     | { command: 'savePng'; data: string; filename: string }
     | { command: 'saveSvg'; data: string; filename: string }
-    | { command: 'savePdf'; data: string; filename: string };
+    | { command: 'savePdf'; data: string; filename: string }
+    | { command: 'saveMermaid'; data: string; filename: string };
 
 // ─── Host → Webview messages ───
 

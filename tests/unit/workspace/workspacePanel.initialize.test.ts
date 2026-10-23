@@ -12,6 +12,7 @@ describe('WorkspacePanel initialization', () => {
         _isDisposed: false,
         _isDarkTheme: true,
         _currentGraphMode: 'tables',
+        _indexBuildsRequested: 0,
         _indexManager: {
             initialize: jest.fn().mockResolvedValue(initializeResult),
         },
@@ -92,7 +93,7 @@ describe('WorkspacePanel initialization', () => {
         expect(context.rebuildAndRenderGraph).toHaveBeenCalledTimes(1);
     });
 
-    it('prompts for a large workspace when no valid index is available', async () => {
+    it('offers manual analysis without leaving a duplicate notification', async () => {
         const context = createContext({
             autoIndexed: false,
             fileCount: 100,
@@ -102,11 +103,20 @@ describe('WorkspacePanel initialization', () => {
 
         await (WorkspacePanel.prototype as any).initialize.call(context);
 
-        expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-            'Found 100 SQL files in workspace. Index them now?',
-            'Index Now',
-            'Cancel'
-        );
+        expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
+        expect(context.setWebviewHtml).toHaveBeenLastCalledWith(expect.stringContaining('Start Analysis'));
+        expect(context.buildIndexWithProgress).not.toHaveBeenCalled();
+        expect(context.rebuildAndRenderGraph).not.toHaveBeenCalled();
+    });
+
+    it('finishes initialization even when information notifications would never resolve', async () => {
+        const context = createContext({
+            autoIndexed: false, fileCount: 100, cacheState: 'missing', hasValidIndex: false,
+        });
+        (vscode.window.showInformationMessage as jest.Mock).mockReturnValueOnce(new Promise(() => undefined));
+        await (WorkspacePanel.prototype as any).initialize.call(context);
+        expect(context.setWebviewHtml).toHaveBeenLastCalledWith(expect.stringContaining('Start Analysis'));
+        expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
         expect(context.buildIndexWithProgress).not.toHaveBeenCalled();
         expect(context.rebuildAndRenderGraph).not.toHaveBeenCalled();
     });

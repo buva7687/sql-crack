@@ -59,6 +59,7 @@ describe('webpack config production detection', () => {
         expect(keep?.test('extension.js')).toBe(true);
         expect(keep?.test('webview.js')).toBe(true);
         expect(keep?.test('parser.worker.js')).toBe(true);
+        expect(keep?.test('diagnostics.worker.js')).toBe(true);
         expect(keep?.test('1.extension.js')).toBe(false);
         expect(keep?.test('extension.js.map')).toBe(false);
         // A second cleaner would delete async chunks emitted by the extension compiler.

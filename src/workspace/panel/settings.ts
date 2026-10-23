@@ -32,7 +32,7 @@ export function resolveDefaultLineageDepthFromConfig(): number {
 
 export function resolveWorkspaceThemeFromSettings(): WorkspaceThemeSettings {
     const config = vscode.workspace.getConfiguration('sqlCrack');
-    const themePreference = config.get<string>('advanced.defaultTheme', 'light');
+    const themePreference = config.get<string>('advanced.defaultTheme', 'auto');
     const themeKind = vscode.window.activeColorTheme.kind;
     const isHighContrast = themeKind === vscode.ColorThemeKind.HighContrast
         || themeKind === vscode.ColorThemeKind.HighContrastLight;

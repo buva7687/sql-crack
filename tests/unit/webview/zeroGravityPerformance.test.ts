@@ -1,8 +1,8 @@
-import { readFileSync } from 'fs';
+import { readTextFile } from '../../helpers/readTextFile';
 import { join } from 'path';
 
 describe('zero-gravity rendering performance guards', () => {
-    const rendererSource = readFileSync(join(__dirname, '../../../src/webview/renderer.ts'), 'utf8');
+    const rendererSource = readTextFile(join(__dirname, '../../../src/webview/renderer.ts'), 'utf8');
 
     it('uses cached rendered node elements and rects while applying animated positions', () => {
         const body = rendererSource.match(/function applyNodePositionsToDom\(\): void {[\s\S]*?function applyEdgePositionsToDom/)?.[0] || '';

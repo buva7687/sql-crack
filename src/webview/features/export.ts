@@ -122,11 +122,21 @@ ${mermaidCode}
 \`\`\`
 `;
 
+    const filename = `sql-flow-${Date.now()}.md`;
+    // Save through the host like PNG/SVG/PDF so the dialog opens beside the
+    // SQL file. A download link would use the browser's Downloads dialog.
+    const vscodeApi = (window as any).vscodeApi;
+    if (vscodeApi?.postMessage) {
+        vscodeApi.postMessage({ command: 'saveMermaid', data: markdownContent, filename });
+        showExportToast('Save dialog opened', context.isDarkTheme());
+        return;
+    }
+
     const blob = new Blob([markdownContent], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);
 
     const a = document.createElement('a');
-    a.download = `sql-flow-${Date.now()}.md`;
+    a.download = filename;
     a.href = url;
     a.click();
 

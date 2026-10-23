@@ -9,7 +9,7 @@ import {
     TableReference
 } from '../types';
 import { ColumnInfo, QueryAnalysis } from '../extraction/types';
-import { getColumnKey, getDisplayName, getQualifiedKey, parseQualifiedKey } from '../identifiers';
+import { getColumnKey, getDisplayName, getQualifiedKey, parseQualifiedKey, getIdentifierSemantics } from '../identifiers';
 import {
     dialectSupportsBackslashEscapes,
     dialectSupportsHashComments,
@@ -327,6 +327,7 @@ export class LineageBuilder implements LineageGraph {
     private incomingEdgesByNodeId: Map<string, LineageEdge[]> = new Map();
     private outgoingEdgesByNodeId: Map<string, LineageEdge[]> = new Map();
     private columnNodesByParentId: Map<string, LineageNode[]> = new Map();
+    private queryCteScopes = new WeakMap<QueryAnalysis, Map<string, string>>();
     private options: LineageBuilderOptions;
     private readonly sqlLexRules: SqlLexRules;
 
@@ -356,6 +357,7 @@ export class LineageBuilder implements LineageGraph {
         this.incomingEdgesByNodeId.clear();
         this.outgoingEdgesByNodeId.clear();
         this.columnNodesByParentId.clear();
+        this.queryCteScopes = new WeakMap();
 
         // Add all table/view definitions as nodes
         const seenNodes = new Set<string>();
@@ -369,66 +371,23 @@ export class LineageBuilder implements LineageGraph {
             }
         }
 
-        // Add CTEs by extracting them from file references
-        // CTEs are referenced in queries but we need to find their definitions
-        // We'll use the ReferenceExtractor to parse files and extract CTE definitions
-        const cteNames = new Map<string, { name: string; filePath: string; lineNumber: number }>();
-        const collectQueryCtes = (query: QueryAnalysis, filePath: string): void => {
-            for (const cte of query.ctes || []) {
-                const cteKey = cte.name.toLowerCase();
-                if (!cteNames.has(cteKey)) {
-                    cteNames.set(cteKey, {
-                        name: cte.name,
-                        filePath,
-                        lineNumber: cte.lineNumber,
-                    });
-                }
-                if (cte.query) {
-                    collectQueryCtes(cte.query, filePath);
-                }
-            }
-        };
-        
-        // Extract CTEs from query analysis (if available)
+        // CTEs are lexical bindings, not workspace-wide physical relations.
         for (const [filePath, analysis] of index.files) {
-            if (analysis.queries) {
-                for (const query of analysis.queries) {
-                    collectQueryCtes(query, filePath);
-                }
-            }
-        }
-        
-        // Also extract CTEs by parsing SQL files
-        // This is a fallback when queries array is not populated
-        for (const [filePath, analysis] of index.files) {
-            // Only process if we don't have queries array (which would have CTEs)
-            if (!analysis.queries || analysis.queries.length === 0) {
+            if (analysis.queries?.length) {
+                analysis.queries.forEach((query, index) => {
+                    this.registerQueryCtes(query, filePath, String(query.statementIndex ?? index), new Map());
+                });
+            } else {
+                if (analysis.parseError || analysis.skippedReason) {continue;}
                 const sql = this.resolveFileSql(filePath, analysis, fileSqlByPath, 'debug', 'CTE extraction');
                 if (!sql) {continue;}
-
-                this.extractCTEsFromSQL(sql, filePath, cteNames);
-            }
-        }
-        
-        // Create CTE nodes
-        for (const [cteKey, cteInfo] of cteNames) {
-            const nodeId = this.getTableNodeId('cte', cteKey);
-            if (seenNodes.has(nodeId)) {continue;}
-            seenNodes.add(nodeId);
-            
-            // Create CTE node
-            const cteNode: LineageNode = {
-                id: nodeId,
-                type: 'cte',
-                name: cteInfo.name,
-                filePath: cteInfo.filePath,
-                lineNumber: cteInfo.lineNumber,
-                metadata: {
-                    isCTE: true
+                const ctes = new Map<string, {name: string; filePath: string; lineNumber: number}>();
+                this.extractCTEsFromSQL(sql, filePath, ctes);
+                for (const [scopeKey, cte] of ctes) {
+                    const id = `cte:${encodeURIComponent(filePath)}:fallback:${encodeURIComponent(scopeKey)}:${encodeURIComponent(cte.name)}`;
+                    this.nodes.set(id, {id, type: 'cte', ...cte, metadata: {isCTE: true}});
                 }
-            };
-            
-            this.nodes.set(nodeId, cteNode);
+            }
         }
 
         // Add column nodes if enabled
@@ -452,10 +411,26 @@ export class LineageBuilder implements LineageGraph {
         return this;
     }
 
+    private registerQueryCtes(query: QueryAnalysis, filePath: string, scopePath: string, inherited: Map<string, string>): void {
+        const scope = new Map(inherited);
+        const semantics = getIdentifierSemantics(this.options.dialect || 'MySQL');
+        (query.ctes || []).forEach((cte, index) => {
+            const key = getQualifiedKey(cte.name, undefined, {...semantics, nameQuoted: cte.nameQuoted});
+            const id = `cte:${encodeURIComponent(filePath)}:${scopePath}:${index}:${encodeURIComponent(key)}`;
+            scope.set(key, id);
+            this.nodes.set(id, {id, type: 'cte', name: cte.name, filePath, lineNumber: cte.lineNumber, metadata: {isCTE: true}});
+        });
+        this.queryCteScopes.set(query, scope);
+        (query.ctes || []).forEach((cte, index) => {
+            if (cte.query) {this.registerQueryCtes(cte.query, filePath, `${scopePath}.${index}`, scope);}
+        });
+        (query.subqueries || []).forEach((subquery, index) => this.registerQueryCtes(subquery, filePath, `${scopePath}.sub${index}`, scope));
+    }
+
     private async preloadFileSql(files: Map<string, FileAnalysis>): Promise<Map<string, string>> {
         const fileSqlByPath = new Map<string, string>();
         const filePaths = Array.from(files.entries())
-            .filter(([, analysis]) => !analysis.queries || analysis.queries.length === 0)
+            .filter(([, analysis]) => !analysis.parseError && !analysis.skippedReason && (!analysis.queries || analysis.queries.length === 0))
             .map(([filePath]) => filePath);
         let nextIndex = 0;
 
@@ -688,6 +663,14 @@ export class LineageBuilder implements LineageGraph {
 
             if (!isView && !isCtas) {continue;}
 
+            // An exact empty bucket is meaningful (for example SELECT 1).
+            // Only legacy definitions without statement identity use proximity.
+            if (typeof def.statementIndex === 'number') {
+                const bucket = statementRefs.get(def.statementIndex);
+                if (bucket) {bucket.outputs.add(tableKey);}
+                continue;
+            }
+
             // Find the statement bucket whose reference line numbers are closest to
             // (and at or after) the definition's lineNumber
             let bestStmtIndex: number | null = null;
@@ -809,7 +792,7 @@ export class LineageBuilder implements LineageGraph {
 
     private addCteColumnEdges(filePath: string, query: QueryAnalysis): void {
         for (const cte of query.ctes || []) {
-            const targetTableId = this.resolveTableId(cte.name, filePath);
+            const targetTableId = this.resolveTableId(cte.name, filePath, this.queryCteScopes.get(query));
             if (targetTableId && cte.query) {
                 this.addQueryColumnEdges(filePath, cte.query, targetTableId);
             }
@@ -833,7 +816,8 @@ export class LineageBuilder implements LineageGraph {
                 // Resolve source table
                 const sourceTableId = this.resolveTableId(
                     inputCol.tableName || inputCol.tableAlias,
-                    filePath
+                    filePath,
+                    this.queryCteScopes.get(query)
                 );
 
                 if (!sourceTableId) {continue;} // Skip if source table not found
@@ -867,11 +851,13 @@ export class LineageBuilder implements LineageGraph {
     /**
      * Resolve table ID from table name or alias
      */
-    private resolveTableId(tableName: string | undefined, filePath: string): string | null {
+    private resolveTableId(tableName: string | undefined, filePath: string, scope?: Map<string, string>): string | null {
         if (!tableName) {return null;}
 
         const exactName = tableName.trim();
         const normalizedName = exactName.toLowerCase();
+        const scopedCte = scope?.get(exactName);
+        if (scopedCte) {return scopedCte;}
 
         for (const type of ['table', 'view', 'cte', 'external']) {
             const exactId = `${type}:${exactName}`;
@@ -1358,7 +1344,13 @@ export class LineageBuilder implements LineageGraph {
                     const ast = parser.astify(statementSql, { database: dialect });
                     const statements = Array.isArray(ast) ? ast : [ast];
                     for (const stmt of statements) {
-                        this.collectAstCteNames(stmt, filePath, cteNames, cteLineNumbers);
+                        const localNames = new Map<string, {name: string; filePath: string; lineNumber: number}>();
+                        this.collectAstCteNames(stmt, filePath, localNames, cteLineNumbers);
+                        for (const [name, cte] of localNames) {
+                            const declaration = declarations.find(item => item.index >= range.start && item.index < range.end && item.name.toLowerCase() === name);
+                            const offset = declaration?.index ?? range.start;
+                            cteNames.set(`${offset}:${name}`, {...cte, lineNumber: countStartsAtOrBefore(lineStarts, offset)});
+                        }
                     }
                     parsedSuccessfully = true;
                     break;
@@ -1422,7 +1414,7 @@ export class LineageBuilder implements LineageGraph {
             const cteName = declaration.name;
             if (cteName && !this.isReservedWord(cteName)) {
                 const lineNumber = countStartsAtOrBefore(lineStarts, declaration.index);
-                const cteKey = cteName.toLowerCase();
+                const cteKey = `${declaration.index}:${cteName.toLowerCase()}`;
                 if (!cteNames.has(cteKey)) {
                     cteNames.set(cteKey, {
                         name: cteName,

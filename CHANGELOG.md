@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-10-22
+
+### Fixed
+- Preserve correct lineage across self-joins, repeated output names, per-file/per-statement CTE scopes, and mixed supported/unsupported statements.
+- Decline nested CTE rewrites that could change bindings and clearly mark the result as partial.
+- Apply custom aggregate/window functions in the webview parser worker and during configuration updates.
+- Activate configured SQL file extensions without first opening a `.sql` file; recognize `.sql` files with other language IDs.
+- Package walkthrough illustrations and show a useful partial card for unsupported CREATE TABLE syntax.
+- Open export dialogs beside the SQL source or workspace and bound persisted panel state.
+- Preserve the lineage panel and selected output when refreshing the same query.
+- Treat a table joined to itself under distinct aliases as an informational hint rather than recommending removal of an intentional self-join. Separate UNION branches, CTEs and subqueries that read the same table still report a repeated scan.
+- Keep the large-workspace **Start Analysis** choice in the panel, avoiding a notification that remains after analysis starts.
+- Restore large workspace indexes from compressed extension storage instead of rebuilding them on each open.
+- Stack statistics and hints in narrow SQL Flow panels and restore their saved widths when the view widens.
+- Keep the SQL Flow minimap off the Performance Hints panel: it moves up when the panel reaches it, a minimap set to `always` stays visible in narrow panels that have room for it, and changing `sqlCrack.showMinimap` applies without re-running the query. Fit-to-view uses the larger free area around stacked panels instead of always squeezing the graph beside them.
+- Return keyboard focus to the Export button when the export preview closes, name the Workspace panel's close button for screen readers, and raise muted text to at least 7:1 in the Workspace panel under high-contrast themes.
+- Keep Tab and Shift+Tab inside Export Preview while controls change, and raise SQL Flow muted-label contrast in high-contrast themes, including live theme changes.
+- Match hint severity labels, function badges, loading cards and clause-popup text to light and dark themes, including live high-contrast changes.
+- In the SQL clause popup shown for a clicked edge, pick white or near-black badge text by contrast, name the close button for screen readers, and keep the popup above the legend bar.
+- Use the current theme background on the Workspace loading, empty and manual-analysis pages, and render keys in the walkthrough as code instead of literal backticks.
+- Stop repeating the joined table's name or alias as a third line on SQL Flow join nodes; the joined table already appears as its own node feeding the join.
+- Save SQL Flow Mermaid exports through the VS Code save dialog beside the SQL file, like PNG, SVG and PDF, instead of a browser download into Downloads.
+- Show **Visualize SQL Query** in the Explorer context menu for the clicked file's type rather than the active editor's, so a configured extension such as `.hql` gets the item and unrelated files do not. `.sql` and configured extensions of up to six letters match in any letter case, such as `.Sql` or `.Hql`; longer configured extensions match in lower case, upper case or with a capital first letter.
+- Open files from the Workspace graph when the workspace is a drive or filesystem root such as `D:\` or `/`.
+- Give the query-tab navigation buttons, query tabs (with their Q number and parse status), the Copy table names button and the SQL clause popup accessible names, so screen readers no longer announce glyphs such as ⏮ ◀ ▶ ⏭.
+
+### Changed
+- Default to the VS Code theme and use **Cmd/Ctrl+K, then Q** for Visualize SQL Query. Existing custom keybindings and explicit theme settings remain available.
+- Parse workspace files and optional Problems diagnostics in background workers with cancellation, deadlines and memory limits; ignore diagnostics from superseded document versions.
+- Reduce the webview bundle by excluding unused jsPDF HTML-rendering dependencies; preserve PDF graph export.
+- Refresh repeated visualizations without rebuilding the same document's webview, and embed bootstrap SQL once.
+- Improve keyboard and screen-reader controls for collapsible panels and hide development metrics unless instrumentation is enabled.
+
+### Security and release tooling
+- Update dependency tooling, enforce full dependency audits in the release build and report them as a separate CI job, pin VS Code types to the minimum supported API, and isolate release credentials from install/test/build steps.
+- Declare Restricted Mode support, document static-analysis limits and private vulnerability reporting, and include third-party license notices.
+- Test installed VSIX activation, packaged assets and worker responsiveness on VS Code 1.85 and stable on Linux, macOS and Windows, with Restricted Mode checks on stable.
+- Update DOMPurify to 3.4.17 for three advisories published before release. It is an optional jsPDF dependency that the extension does not bundle, but the production and full dependency audits gate the release.
+- Keep LF line endings in every checkout with `.gitattributes`, read sources line-ending-independently in source-reading tests, and run the unit tests on Windows in CI.
+
 ## [0.9.4] - 2026-10-01
 
 ### Added
@@ -1653,7 +1693,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/buva7687/sql-crack/compare/v0.9.3...HEAD
+[Unreleased]: https://github.com/buva7687/sql-crack/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/buva7687/sql-crack/compare/v0.9.4...v1.0.0
 [0.9.4]: https://github.com/buva7687/sql-crack/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/buva7687/sql-crack/compare/v0.9.2...v0.9.3
 [0.9.2]: https://github.com/buva7687/sql-crack/compare/v0.9.1...v0.9.2

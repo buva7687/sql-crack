@@ -103,13 +103,13 @@ describe('nodeRenderer behavior', () => {
         expect(texts).toContain('DELETE');
     });
 
-    it('renders join nodes with a foreignObject venn diagram and detail labels', () => {
+    it.each([true, false])('renders the join condition without a standalone alias (dark: %s)', (isDarkTheme) => {
         const group = createSvgElement('g');
         const node: FlowNode = {
             id: 'j1',
             type: 'join',
             label: 'LEFT JOIN',
-            details: ['u.id = o.user_id', 'orders'],
+            details: ['p.product_id = i.product_id', 'i'],
             x: 10,
             y: 20,
             width: 180,
@@ -117,6 +117,7 @@ describe('nodeRenderer behavior', () => {
         };
 
         renderJoinNodeVisual(node, group as any, createDeps({
+            state: { isDarkTheme } as ViewState,
             truncate: (value, maxLen) => value.slice(0, maxLen),
         }));
 
@@ -127,9 +128,8 @@ describe('nodeRenderer behavior', () => {
         expect(foreignObject).toBeDefined();
         expect(div).toBeDefined();
         expect(div!.innerHTML).toContain('venn');
-        expect(texts).toContain('LEFT JOIN');
-        expect(texts).toContain('u.id = o.user_id'.slice(0, 18));
-        expect(texts).toContain('orders');
+        expect(texts).toEqual(['LEFT JOIN', 'p.product_id = i.product_id'.slice(0, 18)]);
+        expect(node.details).toEqual(['p.product_id = i.product_id', 'i']);
     });
 
     it('renders window nodes with partition/order badges and overflow summary', () => {

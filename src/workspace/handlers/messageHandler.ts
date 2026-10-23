@@ -1,3 +1,4 @@
+import { getExportDefaultUri } from '../../exportPaths';
 // Message Handler - Handles all webview messages for workspace panel
 // Extracted from workspacePanel.ts for modularity
 
@@ -220,7 +221,11 @@ export class MessageHandler {
             return canonicalRoot || this.normalizePathForComparison(folder.uri.fsPath);
         }));
 
-        return rootCandidates.some((root) => candidate === root || candidate.startsWith(root + path.sep));
+        return rootCandidates.some((root) => {
+            // A drive or filesystem root (D:\ or /) already ends with a separator.
+            const prefix = root.endsWith(path.sep) ? root : root + path.sep;
+            return candidate === root || candidate.startsWith(prefix);
+        });
     }
 
     /**
@@ -1294,7 +1299,7 @@ export class MessageHandler {
         };
 
         const uri = await vscode.window.showSaveDialog({
-            defaultUri: vscode.Uri.file(`lineage-${safeLabel}.json`),
+            defaultUri: getExportDefaultUri(`lineage-${safeLabel}.json`),
             filters: { 'JSON': ['json'] }
         });
 

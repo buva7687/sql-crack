@@ -35,7 +35,7 @@ describe('Message Protocol Contracts', () => {
                 'error', 'info', 'requestRefresh', 'persistUiState',
                 'goToLine', 'traceInWorkspaceLineage', 'requestFullscreen',
                 'pinVisualization', 'changeViewLocation', 'getViewLocationOptions',
-                'openPinnedTab', 'unpinTab', 'savePng', 'saveSvg', 'savePdf',
+                'openPinnedTab', 'unpinTab', 'savePng', 'saveSvg', 'savePdf', 'saveMermaid',
             ];
             for (const cmd of requiredCommands) {
                 expect(source).toContain(`command: '${cmd}'`);

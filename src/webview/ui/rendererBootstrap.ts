@@ -1,10 +1,11 @@
-import { UI_COLORS } from '../constants';
+import { UI_COLORS, getComponentUiColors } from '../constants';
 import { MONO_FONT_STACK } from '../../shared/themeTokens';
 import { ICONS, Z_INDEX } from '../../shared';
 import { COLUMN_LINEAGE_BANNER_TEXT } from '../columnLineageUx';
 
 export interface RendererBootstrapOptions {
     container: HTMLElement;
+    isDarkTheme: boolean;
     existingSpinnerStyleElement: HTMLStyleElement | null;
     onToggleColumnFlows: (show?: boolean) => void;
     onSetupMinimapDrag: (minimapContainer: HTMLDivElement) => void;
@@ -24,7 +25,8 @@ export interface RendererBootstrapResult {
 }
 
 export function createRendererBootstrap(options: RendererBootstrapOptions): RendererBootstrapResult {
-    const { container, existingSpinnerStyleElement, onToggleColumnFlows, onSetupMinimapDrag } = options;
+    const { container, isDarkTheme, existingSpinnerStyleElement, onToggleColumnFlows, onSetupMinimapDrag } = options;
+    const colors = getComponentUiColors(isDarkTheme);
 
     const detailsPanel = document.createElement('div');
     detailsPanel.className = 'details-panel';
@@ -34,8 +36,8 @@ export function createRendererBootstrap(options: RendererBootstrapOptions): Rend
         top: 50%;
         width: 260px;
         max-height: 50vh;
-        background: ${UI_COLORS.backgroundPanelSolid};
-        border: 1px solid ${UI_COLORS.border};
+        background: ${colors.modalBg};
+        border: 1px solid ${colors.border};
         border-radius: 8px;
         padding: 12px;
         box-sizing: border-box;
@@ -55,13 +57,13 @@ export function createRendererBootstrap(options: RendererBootstrapOptions): Rend
         top: 80px;
         left: 50%;
         transform: translateX(-50%);
-        background: ${UI_COLORS.backgroundPanel};
-        border: 1px solid ${UI_COLORS.border};
+        background: ${colors.surface};
+        border: 1px solid ${colors.border};
         border-radius: 8px;
         padding: 8px 16px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 13px;
-        color: ${UI_COLORS.textSubtle};
+        color: ${colors.text};
         z-index: ${Z_INDEX.panel};
         display: none;
         max-width: 80%;
@@ -114,15 +116,15 @@ export function createRendererBootstrap(options: RendererBootstrapOptions): Rend
         position: absolute;
         left: 16px;
         bottom: 16px;
-        background: ${UI_COLORS.backgroundPanel};
-        border: 1px solid ${UI_COLORS.border};
+        background: ${colors.surface};
+        border: 1px solid ${colors.border};
         border-radius: 8px;
         width: 300px;
         padding: 12px 16px;
         box-sizing: border-box;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
-        color: ${UI_COLORS.textMuted};
+        color: ${colors.textMuted};
         z-index: ${Z_INDEX.toolbar};
     `;
     container.appendChild(statsPanel);
@@ -133,15 +135,15 @@ export function createRendererBootstrap(options: RendererBootstrapOptions): Rend
         position: absolute;
         right: 16px;
         bottom: 16px;
-        background: ${UI_COLORS.backgroundPanel};
-        border: 1px solid ${UI_COLORS.border};
+        background: ${colors.surface};
+        border: 1px solid ${colors.border};
         border-radius: 8px;
         width: 350px;
         padding: 12px 16px;
         box-sizing: border-box;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
-        color: ${UI_COLORS.textMuted};
+        color: ${colors.textMuted};
         z-index: ${Z_INDEX.toolbar};
         max-height: 200px;
         overflow-y: auto;
@@ -160,13 +162,13 @@ export function createRendererBootstrap(options: RendererBootstrapOptions): Rend
         bottom: 0;
         width: 100%;
         max-height: 200px;
-        background: ${UI_COLORS.backgroundPanelSolid};
-        border-top: 1px solid ${UI_COLORS.border};
+        background: ${colors.modalBg};
+        border-top: 1px solid ${colors.border};
         padding: 12px 16px;
         box-sizing: border-box;
         font-family: ${MONO_FONT_STACK};
         font-size: 12px;
-        color: ${UI_COLORS.textBright};
+        color: ${colors.textBright};
         z-index: ${Z_INDEX.panel};
         opacity: 0;
         visibility: hidden;
@@ -185,8 +187,8 @@ export function createRendererBootstrap(options: RendererBootstrapOptions): Rend
         transform: translateY(-50%);
         width: 150px;
         height: 100px;
-        background: ${UI_COLORS.backgroundPanel};
-        border: 1px solid ${UI_COLORS.border};
+        background: ${colors.surface};
+        border: 1px solid ${colors.border};
         border-radius: 8px;
         overflow: hidden;
         z-index: ${Z_INDEX.toolbar};
@@ -216,13 +218,13 @@ export function createRendererBootstrap(options: RendererBootstrapOptions): Rend
     tooltipElement.id = 'node-tooltip';
     tooltipElement.style.cssText = `
         position: fixed;
-        background: ${UI_COLORS.backgroundPanelSolid};
-        border: 1px solid ${UI_COLORS.borderMedium};
+        background: ${colors.modalBg};
+        border: 1px solid ${colors.border};
         border-radius: 8px;
         padding: 10px 14px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
-        color: ${UI_COLORS.textBright};
+        color: ${colors.textBright};
         z-index: ${Z_INDEX.dropdown};
         pointer-events: none;
         opacity: 0;
@@ -238,13 +240,13 @@ export function createRendererBootstrap(options: RendererBootstrapOptions): Rend
     contextMenuElement.setAttribute('aria-label', 'Node actions');
     contextMenuElement.style.cssText = `
         position: fixed;
-        background: ${UI_COLORS.backgroundPanelSolid};
-        border: 1px solid ${UI_COLORS.borderMedium};
+        background: ${colors.modalBg};
+        border: 1px solid ${colors.border};
         border-radius: 8px;
         padding: 4px 0;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         font-size: 12px;
-        color: ${UI_COLORS.textBright};
+        color: ${colors.textBright};
         z-index: ${Z_INDEX.commandBar};
         display: none;
         min-width: 180px;
@@ -274,8 +276,8 @@ export function createRendererBootstrap(options: RendererBootstrapOptions): Rend
             align-items: center;
             gap: 12px;
             padding: 20px 32px;
-            background: ${UI_COLORS.backgroundPanelSolid};
-            border: 1px solid ${UI_COLORS.border};
+            background: var(--loading-panel-bg);
+            border: 1px solid var(--loading-panel-border);
             border-radius: 12px;
             box-shadow: ${UI_COLORS.shadowMedium};
         ">
@@ -287,9 +289,10 @@ export function createRendererBootstrap(options: RendererBootstrapOptions): Rend
                 border-radius: 50%;
                 animation: spin 0.8s linear infinite;
             "></div>
-            <span style="color: ${UI_COLORS.textMuted}; font-size: 12px;">Calculating layout...</span>
+            <span style="color: inherit; font-size: 12px;">Calculating layout...</span>
         </div>
     `;
+    updateLoadingOverlayTheme(loadingOverlay, isDarkTheme);
     container.appendChild(loadingOverlay);
 
     existingSpinnerStyleElement?.remove();
@@ -313,4 +316,13 @@ export function createRendererBootstrap(options: RendererBootstrapOptions): Rend
         loadingOverlay,
         spinnerStyleElement,
     };
+}
+
+/** Keep the existing loading card readable when theme or contrast changes. */
+export function updateLoadingOverlayTheme(overlay: HTMLDivElement, isDarkTheme: boolean): void {
+    const colors = getComponentUiColors(isDarkTheme);
+    overlay.style.background = colors.overlayBg;
+    overlay.style.color = colors.textDim;
+    overlay.style.setProperty('--loading-panel-bg', colors.modalBg);
+    overlay.style.setProperty('--loading-panel-border', colors.border);
 }

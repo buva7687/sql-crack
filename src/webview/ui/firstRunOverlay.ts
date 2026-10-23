@@ -1,3 +1,4 @@
+import { getHighContrastTextColor } from '../constants';
 // First Run Overlay — Semi-transparent onboarding overlay
 // Shows on first visualization open with callout hotspots
 
@@ -65,7 +66,7 @@ export function showFirstRunOverlay(
     `;
 
     const textColor = isDark ? '#F1F5F9' : '#1E293B';
-    const mutedColor = isDark ? '#94A3B8' : '#64748B';
+    const mutedColor = getHighContrastTextColor(isDark ? '#94A3B8' : '#64748B', isDark);
     const accentColor = isDark ? '#818CF8' : '#6366F1';
     const accentBg = isDark ? 'rgba(99, 102, 241, 0.12)' : 'rgba(99, 102, 241, 0.08)';
 

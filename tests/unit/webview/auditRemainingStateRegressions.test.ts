@@ -1,19 +1,27 @@
-import { readFileSync } from 'fs';
+import { readTextFile } from '../../helpers/readTextFile';
 import { join } from 'path';
 
 describe('remaining audit state and lifecycle regressions', () => {
-    const indexSource = readFileSync(join(__dirname, '../../../src/webview/index.ts'), 'utf8');
-    const rendererSource = readFileSync(join(__dirname, '../../../src/webview/renderer.ts'), 'utf8');
-    const panelSource = readFileSync(join(__dirname, '../../../src/workspace/workspacePanel.ts'), 'utf8');
-    const managerSource = readFileSync(join(__dirname, '../../../src/workspace/indexManager.ts'), 'utf8');
-    const referenceExtractorSource = readFileSync(
+    const indexSource = readTextFile(join(__dirname, '../../../src/webview/index.ts'), 'utf8');
+    const rendererSource = readTextFile(join(__dirname, '../../../src/webview/renderer.ts'), 'utf8');
+    const panelSource = readTextFile(join(__dirname, '../../../src/workspace/workspacePanel.ts'), 'utf8');
+    const managerSource = readTextFile(join(__dirname, '../../../src/workspace/indexManager.ts'), 'utf8');
+    const referenceExtractorSource = readTextFile(
         join(__dirname, '../../../src/workspace/extraction/referenceExtractor.ts'),
         'utf8'
     );
-    const workspaceCommandBarSource = readFileSync(
+    const workspaceCommandBarSource = readTextFile(
         join(__dirname, '../../../src/workspace/ui/scripts/workspaceCommandBar.ts'),
         'utf8'
     );
+
+    it('preserves interaction state only when reparsing the same document and query', () => {
+        const visualize = indexSource.slice(indexSource.indexOf('async function visualize('), indexSource.indexOf('function clampQueryIndex('));
+        expect(visualize).toContain('batchResult !== null && renderedDocumentKey === documentKeyForParse');
+        expect(visualize).toContain('renderCurrentQuery(preserveInteractionState)');
+        const renderCurrent = indexSource.slice(indexSource.indexOf('function renderCurrentQuery('), indexSource.indexOf('async function switchToQueryIndex('));
+        expect(renderCurrent).toContain('preserveInteractionState && renderedQueryIndex === currentQueryIndex');
+    });
 
     it('does not mutate per-query view state while merely capturing persistence', () => {
         const capture = indexSource.match(/function capturePersistedState\(\)[\s\S]*?^}/m)?.[0] || '';
@@ -74,13 +82,13 @@ describe('remaining audit state and lifecycle regressions', () => {
         expect(workspaceCommandBarSource).toContain("event.code === 'KeyK'");
     });
 
-    it('discards partial AST references before whole-file regex fallback', () => {
+    it('discards only the failed statement before regex fallback', () => {
         const catchBlock = referenceExtractorSource.slice(
             referenceExtractorSource.indexOf('} catch (error) {'),
             referenceExtractorSource.indexOf('// MERGE remains unsupported')
         );
-        expect(catchBlock).toContain('references.length = 0;');
-        expect(catchBlock).toContain('parsedStatements.length = 0;');
+        expect(catchBlock).toContain('references.length = referenceStart;');
+        expect(catchBlock).toContain('parsedStatements.length = parsedStart;');
     });
 
     it('reuses masked SQL and statement boundaries for reference locations', () => {

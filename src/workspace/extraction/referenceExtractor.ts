@@ -67,6 +67,7 @@ export class ReferenceExtractor {
     private _activeDialect: SqlDialect = 'MySQL'; // Per-call dialect for reserved word scoping
     private tableLineLookup: TableLineLookup | null = null;
     private locationSearchSource: string | null = null;
+    private hasQuotedSourceIdentifiers = false;
     private locationSearchSql: string = '';
     private locationStatementBoundaries: number[] = [];
     /** Per-extraction line lookup; cleared after each call so file text is not retained. */
@@ -192,6 +193,7 @@ export class ReferenceExtractor {
         const reservedWords = new Set(['select', 'from', 'where', 'join', 'inner', 'left', 'right', 'outer', 'on', 'as', 'with', 'recursive']);
         const statementBoundaries = this.getStatementBoundaries(sqlNoComments);
         this.locationSearchSource = normalizedSql;
+        this.hasQuotedSourceIdentifiers = /["`\[]/.test(normalizedSql);
         this.locationSearchSql = sqlNoComments;
         this.locationStatementBoundaries = statementBoundaries;
         const getStatementIndex = (charIndex: number): number => this.getStatementIndex(statementBoundaries, charIndex);
@@ -263,17 +265,17 @@ export class ReferenceExtractor {
 
         this.extractUpdateFromAliases(sqlNoComments, addScopedCteName, reservedWords);
 
-        try {
-            const dbDialect = this.mapDialect(dialect);
-            // node-sql-parser's multi-statement path scales quadratically. Split
-            // on the already masked statement boundaries and parse each statement
-            // independently while retaining the original SQL for locations.
-            for (let stmtIndex = 0; stmtIndex < statementBoundaries.length; stmtIndex++) {
-                const start = statementBoundaries[stmtIndex];
-                const end = statementBoundaries[stmtIndex + 1] ?? normalizedSql.length;
-                const structuralStatement = sqlNoComments.slice(start, end).replace(/;\s*$/, '');
-                if (!structuralStatement.trim()) {continue;}
-
+        const dbDialect = this.mapDialect(dialect);
+        let fallbackReferences: TableReference[] | undefined;
+        // Parse independently: unsupported syntax must not erase successful statements.
+        for (let stmtIndex = 0; stmtIndex < statementBoundaries.length; stmtIndex++) {
+            const start = statementBoundaries[stmtIndex];
+            const end = statementBoundaries[stmtIndex + 1] ?? normalizedSql.length;
+            const structuralStatement = sqlNoComments.slice(start, end).replace(/;\s*$/, '');
+            if (!structuralStatement.trim()) {continue;}
+            const referenceStart = references.length;
+            const parsedStart = parsedStatements.length;
+            try {
                 const ast = this.parser.astify(normalizedSql.slice(start, end), { database: dbDialect });
                 const statements = (Array.isArray(ast) ? ast : [ast]).filter(Boolean) as AstStatement[];
                 for (const stmt of statements) {
@@ -282,34 +284,25 @@ export class ReferenceExtractor {
                     this.collectCTENames(stmt, aliasMap.cteNames);
                     this.extractFromStatement(stmt, filePath, normalizedSql, references, aliasMap, 0, stmtIndex);
                 }
-            }
-        } catch (error) {
-            // Fallback to regex extraction with statement-local CTE/alias names.
-            // Discard AST output collected before the failing statement so the
-            // whole-file fallback cannot duplicate those references or leave a
-            // mixed query-analysis payload.
-            references.length = 0;
-            parsedStatements.length = 0;
-            warnings.push(this.formatParserWarning('Reference', error));
-            const regexRefs = this.extractWithRegex(normalizedSql, filePath);
-            for (const ref of regexRefs) {
-                const tableIdentity = getQualifiedKey(ref.tableName, ref.schema, {
-                    ...ref,
-                    ...getIdentifierSemantics(dialect),
-                });
-                const statementIndex = ref.statementIndex ?? 0;
-                const isShadowedCteUsage = scopedCteNames.get(statementIndex)?.has(tableIdentity)
-                    && !this.isInsideCteBodyLineRange(
-                        cteBodyLineRanges,
-                        scopedCteKey(statementIndex, tableIdentity),
-                        ref.lineNumber
-                    );
-                if (!isShadowedCteUsage) {
-                    references.push(ref);
+            } catch (error) {
+                // Roll back only this statement before adding its regex approximation.
+                references.length = referenceStart;
+                parsedStatements.length = parsedStart;
+                warnings.push(this.formatParserWarning(`Reference statement ${stmtIndex + 1}`, error));
+                fallbackReferences ??= this.extractWithRegex(normalizedSql, filePath);
+                const regexRefs = fallbackReferences.filter(reference => reference.statementIndex === stmtIndex);
+                for (const ref of regexRefs) {
+                    const tableIdentity = getQualifiedKey(ref.tableName, ref.schema, {
+                        ...ref,
+                        ...getIdentifierSemantics(dialect),
+                    });
+                    const statementIndex = ref.statementIndex ?? 0;
+                    const isShadowedCteUsage = scopedCteNames.get(statementIndex)?.has(tableIdentity)
+                        && !this.isInsideCteBodyLineRange(cteBodyLineRanges, scopedCteKey(statementIndex, tableIdentity), ref.lineNumber);
+                    if (!isShadowedCteUsage) {references.push(ref);}
                 }
             }
         }
-
 
         // MERGE remains unsupported or only partially supported by several
         // node-sql-parser dialects. Extract its target/source from a masked,
@@ -380,10 +373,10 @@ export class ReferenceExtractor {
             [...tableAliases.values()]
                 .filter((name): name is string => typeof name === 'string' && name.length > 0)
         )];
+        const directSourceNames = new Set(directSourceTableNames.map(name => name.toLowerCase()));
+        const inputTableNames = new Set(allInputTables.map(reference => reference.tableName.toLowerCase()));
         const scopedInputTables = directSourceTableNames.length > 0
-            ? allInputTables.filter(reference => directSourceTableNames.some(name =>
-                name.toLowerCase() === reference.tableName.toLowerCase()
-            ))
+            ? allInputTables.filter(reference => directSourceNames.has(reference.tableName.toLowerCase()))
             : allInputTables;
         // A direct source naming an in-scope CTE has no TableReference by
         // design, so an empty scoped result is accurate rather than a lookup
@@ -391,8 +384,7 @@ export class ReferenceExtractor {
         // accounted for as either a reference or a CTE.
         const unresolvedDirectSources = directSourceTableNames.filter(name =>
             !cteNamesInScope.has(name.toLowerCase())
-            && !allInputTables.some(reference =>
-                reference.tableName.toLowerCase() === name.toLowerCase())
+            && !inputTableNames.has(name.toLowerCase())
         );
         const inputTables = scopedInputTables.length > 0 || unresolvedDirectSources.length === 0
             ? scopedInputTables
@@ -485,6 +477,7 @@ export class ReferenceExtractor {
                 : undefined;
             return [{
                 name,
+                nameQuoted: this.isQuotedAstIdentifier(cte.name),
                 ...(columns && columns.length > 0 ? { columns } : {}),
                 query: this.buildQueryAnalysis(
                     cteStatement,
@@ -1363,7 +1356,7 @@ export class ReferenceExtractor {
                     : refType === 'delete'
                         ? 'DELETE FROM'
                         : 'FROM';
-        const needsSourceMetadata = Boolean(schema || catalog || /["`\[]/.test(sql));
+        const needsSourceMetadata = Boolean(schema || catalog || this.hasQuotedSourceIdentifiers);
         const location = needsSourceMetadata
             ? this.findTableReferenceLocation(
                 sql,

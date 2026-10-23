@@ -2,6 +2,7 @@
 
 import { SqlDialect, BatchParseResult } from '../sqlParser';
 import { Z_INDEX } from '../../shared/zIndex';
+import { getHighContrastTextColor } from '../constants';
 
 export interface PinnedTab {
     id: string;
@@ -189,7 +190,7 @@ function createTabElement(tab: PinnedTab, isActive: boolean, callbacks: PinnedTa
         font-size: 12px;
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
         background: ${isActive ? 'rgba(99, 102, 241, 0.3)' : 'transparent'};
-        color: ${isActive ? (callbacks.isDarkTheme?.() !== false ? '#f1f5f9' : '#1e293b') : '#94a3b8'};
+        color: ${isActive ? (callbacks.isDarkTheme?.() !== false ? '#f1f5f9' : '#1e293b') : getHighContrastTextColor('#94a3b8', callbacks.isDarkTheme?.() !== false)};
         transition: background 0.15s;
         white-space: nowrap;
     `;

@@ -23,7 +23,7 @@ describe('release changelog date gate', () => {
         const workflow = readFileSync(join(__dirname, '../../.github/workflows/release.yml'), 'utf8');
         const gate = workflow.indexOf('node scripts/validateReleaseChangelog.js "$VERSION"');
         expect(gate).toBeGreaterThan(-1);
-        expect(gate).toBeLessThan(workflow.indexOf('npm run package'));
+        expect(gate).toBeLessThan(workflow.indexOf('@vscode/vsce@3.9.2 package'));
         expect(gate).toBeLessThan(workflow.indexOf('softprops/action-gh-release@v2'));
     });
 });

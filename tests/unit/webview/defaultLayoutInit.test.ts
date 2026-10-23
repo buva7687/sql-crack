@@ -1,16 +1,16 @@
-import { readFileSync } from 'fs';
+import { readTextFile } from '../../helpers/readTextFile';
 import { join } from 'path';
 
 describe('default layout initialization', () => {
-    const rendererSource = readFileSync(
+    const rendererSource = readTextFile(
         join(__dirname, '../../../src/webview/renderer.ts'),
         'utf8'
     );
-    const stateSource = readFileSync(
+    const stateSource = readTextFile(
         join(__dirname, '../../../src/webview/state/rendererState.ts'),
         'utf8'
     );
-    const listenerSource = readFileSync(
+    const listenerSource = readTextFile(
         join(__dirname, '../../../src/webview/interaction/dragListeners.ts'),
         'utf8'
     );
@@ -97,7 +97,7 @@ describe('default layout initialization', () => {
 
 describe('SQL Server dialect in package.json', () => {
     const packageJson = JSON.parse(
-        readFileSync(join(__dirname, '../../../package.json'), 'utf8')
+        readTextFile(join(__dirname, '../../../package.json'), 'utf8')
     );
     const dialectConfig = packageJson.contributes.configuration.properties['sqlCrack.defaultDialect'];
 

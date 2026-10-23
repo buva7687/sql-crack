@@ -1,4 +1,4 @@
-import type { FlowNode } from '../../types';
+import type { FlowEdge, FlowNode } from '../../types';
 import type { ParserContext } from '../context';
 import { escapeRegex, stripSqlComments } from '../../../shared';
 import { maskStringsAndComments } from '../dialects/preprocessing';
@@ -185,7 +185,7 @@ function isColumnUsedInSql(sql: string, columnNames: string[], options: { includ
     return false;
 }
 
-export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], sql: string): void {
+export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], sql: string, edges: FlowEdge[] = []): void {
     // Detect unused CTEs
     // Fix: Properly match CTE names by removing "WITH " prefix and checking all table references
     const cteNodes = nodes.filter(n => n.type === 'cte');
@@ -675,6 +675,17 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
 
     tableUsage.forEach((usages, tableName) => {
         if (usages.length > 1) {
+            const bindings = new Set(usages.map(node => node.alias || node.label));
+            if (bindings.size === usages.length && sharesJoinChain(usages, nodes, edges)) {
+                context.hints.push({
+                    type: 'info',
+                    message: `Table "${tableName}" is accessed ${usages.length} times with distinct aliases`,
+                    suggestion: 'Distinct aliases can represent intentional self-joins. Check the database execution plan before changing these references.',
+                    category: 'performance',
+                    severity: 'low'
+                });
+                return;
+            }
             usages.forEach(node => {
                 if (!node.warnings) {node.warnings = [];}
                 node.warnings.push({
@@ -693,6 +704,30 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
             });
         }
     });
+}
+
+/**
+ * True when every usage feeds the same chain of JOIN nodes, i.e. the table is
+ * joined to itself within one FROM clause. Separate UNION branches, CTEs or
+ * subqueries read the table independently and remain repeated scans.
+ */
+function sharesJoinChain(usages: FlowNode[], nodes: FlowNode[], edges: FlowEdge[]): boolean {
+    const joinIds = new Set(nodes.filter(node => node.type === 'join').map(node => node.id));
+    const chainOf = new Map<string, string>();
+    const find = (id: string): string => {
+        let root = id;
+        while (chainOf.has(root) && chainOf.get(root) !== root) {
+            root = chainOf.get(root)!;
+        }
+        return root;
+    };
+    edges.forEach(edge => {
+        if (joinIds.has(edge.target)) {
+            chainOf.set(find(edge.source), find(edge.target));
+        }
+    });
+    const chains = new Set(usages.map(node => find(node.id)));
+    return chains.size === 1 && joinIds.has([...chains][0]);
 }
 
 // Calculate enhanced complexity metrics

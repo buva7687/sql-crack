@@ -1,0 +1,11 @@
+# Keep LF in the repository and in every checkout, including Windows with
+# core.autocrlf=true. Source-reading tests and the packaged bundles assume LF.
+* text=auto eol=lf
+
+# Binary assets
+*.png binary
+*.gif binary
+*.jpg binary
+*.ico binary
+*.vsix binary
+*.pptx binary

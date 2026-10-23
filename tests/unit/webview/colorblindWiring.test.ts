@@ -1,11 +1,11 @@
-import { readFileSync } from 'fs';
+import { readTextFile } from '../../helpers/readTextFile';
 import { join } from 'path';
 
 describe('colorblind mode wiring', () => {
-    const rendererSource = readFileSync(join(__dirname, '../../../src/webview/renderer.ts'), 'utf8');
-    const edgeRendererSource = readFileSync(join(__dirname, '../../../src/webview/rendering/edgeRenderer.ts'), 'utf8');
-    const panelSource = readFileSync(join(__dirname, '../../../src/visualizationPanel.ts'), 'utf8');
-    const packageJson = JSON.parse(readFileSync(join(__dirname, '../../../package.json'), 'utf8'));
+    const rendererSource = readTextFile(join(__dirname, '../../../src/webview/renderer.ts'), 'utf8');
+    const edgeRendererSource = readTextFile(join(__dirname, '../../../src/webview/rendering/edgeRenderer.ts'), 'utf8');
+    const panelSource = readTextFile(join(__dirname, '../../../src/visualizationPanel.ts'), 'utf8');
+    const packageJson = JSON.parse(readTextFile(join(__dirname, '../../../package.json'), 'utf8'));
 
     it('wires renderer colorblind mode updates without forcing a full graph re-render', () => {
         expect(rendererSource).toContain('function applyColorblindModeToRenderedGraph()');
@@ -24,7 +24,7 @@ describe('colorblind mode wiring', () => {
 
     it('injects colorblind mode config into webview bootstrap script', () => {
         expect(panelSource).toMatch(/const colorblindMode\w*\s*=\s*config\.get<string>\('colorblindMode'\)\s*\|\|\s*'off'/);
-        expect(panelSource).toContain('window.colorblindMode =');
+        expect(panelSource).toContain('colorblindMode: ${');
     });
 
     it('registers sqlCrack.colorblindMode setting in package configuration', () => {

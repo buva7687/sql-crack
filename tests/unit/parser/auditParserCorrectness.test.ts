@@ -129,7 +129,7 @@ describe('regex fallback table detection', () => {
     it('ignores ON DUPLICATE KEY UPDATE and ON UPDATE CASCADE', () => {
         expect(tableLabels('INSERT INTO t1 (a) VALUES (1) ON DUPLICATE KEY UPDATE a = 2', 'MySQL')).toEqual(['t1']);
         expect(tableLabels('CREATE TABLE c (id int REFERENCES p(id) ON UPDATE CASCADE); UPDATE real_upd SET a = 1', 'MySQL'))
-            .toEqual(['real_upd']);
+            .toEqual(['c', 'real_upd']);
     });
 
     it('keeps tables after a PostgreSQL # operator and still strips MySQL # comments', () => {

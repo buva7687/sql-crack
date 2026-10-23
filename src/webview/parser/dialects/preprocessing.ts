@@ -1,5 +1,5 @@
 import type { SqlDialect } from '../../types';
-import { dialectSupportsHashComments, getDollarQuoteDelimiterAt, isPostgresJsonPathOperatorAt } from '../../../shared';
+import { dialectSupportsHashComments, getDollarQuoteDelimiterAt, isPostgresJsonPathOperatorAt, maskSqlCommentsPreservingPositions } from '../../../shared';
 import { preprocessJinjaTemplates } from './jinjaPreprocessor';
 
 interface TextRewrite {
@@ -1216,6 +1216,7 @@ export function collapseSnowflakePaths(sql: string, dialect: SqlDialect): string
  * Returns the transformed SQL or `null` if no hoisting was needed.
  */
 export function hoistNestedCtes(sql: string): string | null {
+    if (getUnsafeNestedCteReason(sql)) {return null;}
     const masked = maskStringsAndComments(sql);
 
     let current = sql;
@@ -1233,6 +1234,46 @@ export function hoistNestedCtes(sql: string): string | null {
     }
 
     return hoisted ? current : null;
+}
+
+/** Decline hoists whose promoted names could change a binding outside their scope. */
+export function getUnsafeNestedCteReason(sql: string): string | null {
+    const masked = maskStringsAndComments(sql);
+    if (!/\(\s*WITH\b/i.test(masked)) {return null;}
+    const declarations: Array<{ name: string; start: number; end: number; nested: boolean }> = [];
+    const withPattern = /\bWITH\b/gi;
+    let match: RegExpExecArray | null;
+    while ((match = withPattern.exec(masked))) {
+        const definition = extractCteDefinitions(sql, masked, match.index);
+        if (!definition) {
+            return 'Nested CTE scope cannot be verified for this syntax; hoisting was skipped.';
+        }
+        let before = match.index - 1;
+        while (before >= 0 && /\s/.test(masked[before])) {before--;}
+        const nested = masked[before] === '(';
+        const end = nested ? findMatchingParen(masked, before) : sql.length;
+        for (const name of definition.names) {
+            declarations.push({name: name.toLowerCase(), start: nested ? before : 0, end, nested});
+        }
+    }
+    for (const declaration of declarations.filter(item => item.nested)) {
+        if (declarations.filter(item => item.name === declaration.name).length > 1) {
+            return 'Nested CTE scope overlaps another CTE name; hoisting would change source bindings.';
+        }
+        // Conservative: even an outside alias/column with this name declines the
+        // rewrite. False partial results are preferable to false source bindings.
+        const tokens = maskSqlCommentsPreservingPositions(sql).matchAll(/'(?:''|[^'])*'|"(?:""|[^"])*"|`(?:``|[^`])*`|\[(?:\]\]|[^\]])*\]|[\p{L}_][\p{L}\p{N}_$]*/gu);
+        for (const token of tokens) {
+            if (token[0].startsWith("'")) {continue;}
+            const position = token.index!;
+            if (position >= declaration.start && position <= declaration.end) {continue;}
+            const name = token[0].replace(/^["`\[]|["`\]]$/g, '').replace(/""/g, '"').replace(/``/g, '`').replace(/\]\]/g, ']');
+            if (name.toLowerCase() === declaration.name) {
+                return 'Nested CTE scope overlaps an identifier outside its subquery; hoisting could change source bindings.';
+            }
+        }
+    }
+    return null;
 }
 
 function rewriteGroupingSetsClause(clauseSql: string, clauseMasked: string): string | null {
@@ -1626,7 +1667,7 @@ function extractCteDefinitions(
     sql: string,
     masked: string,
     withKeywordStart: number
-): { cteBlock: string; innerSelectStart: number } | null {
+): { cteBlock: string; innerSelectStart: number; names: string[] } | null {
     const withMatch = masked.substring(withKeywordStart).match(/^(\s*WITH)\b/i);
     if (!withMatch) {
         return null;
@@ -1634,6 +1675,7 @@ function extractCteDefinitions(
 
     let pos = withKeywordStart + withMatch[0].length;
     const cteStartPos = withKeywordStart;
+    const names: string[] = [];
 
     // Skip whitespace after WITH, but stop at quoted names in original sql
     while (pos < masked.length && /\s/.test(masked[pos]) && sql[pos] !== '"' && sql[pos] !== '`' && sql[pos] !== '[') { pos++; }
@@ -1646,7 +1688,13 @@ function extractCteDefinitions(
         if (sql[pos] === '"' || sql[pos] === '`' || sql[pos] === '[') {
             const closeChar = sql[pos] === '[' ? ']' : sql[pos];
             pos++;
-            while (pos < sql.length && sql[pos] !== closeChar) { pos++; }
+            while (pos < sql.length) {
+                if (sql[pos] === closeChar) {
+                    if (sql[pos + 1] === closeChar) {pos += 2; continue;}
+                    break;
+                }
+                pos++;
+            }
             if (pos < sql.length) { pos++; }
         } else {
             while (pos < sql.length && /\w/.test(sql[pos])) { pos++; }
@@ -1655,6 +1703,7 @@ function extractCteDefinitions(
         if (pos === nameStart) {
             return null;
         }
+        names.push(sql.slice(nameStart, pos).replace(/^["`\[]|["`\]]$/g, '').replace(/""/g, '"').replace(/``/g, '`').replace(/\]\]/g, ']'));
 
         while (pos < masked.length && /\s/.test(masked[pos])) { pos++; }
 
@@ -1690,7 +1739,7 @@ function extractCteDefinitions(
     }
 
     const innerSelectStart = pos + (masked.substring(pos).length - masked.substring(pos).trimStart().length);
-    return { cteBlock, innerSelectStart };
+    return { cteBlock, innerSelectStart, names };
 }
 
 /**

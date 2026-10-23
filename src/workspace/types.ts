@@ -76,6 +76,8 @@ export interface SerializedWorkspaceIndex {
      * "missing" so it does not re-prompt on every open.
      */
     oversized?: boolean;
+    /** Payload lives in the fixed cache file under ExtensionContext.storageUri. */
+    disk?: boolean;
     lastUpdated: number;
     fileCount: number;
     filesArray: [string, FileAnalysis][];
