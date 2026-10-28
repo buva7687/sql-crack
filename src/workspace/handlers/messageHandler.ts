@@ -125,9 +125,19 @@ function createEmptyLineageGraph(): LineageGraph {
     };
 }
 
+// These commands replace the active content/root. Nested Impact analysis must
+// leave its form request valid, so it uses a separate generation below.
+const NAVIGATION_COMMANDS = new Set<WorkspaceWebviewMessage['command']>([
+    'switchView', 'switchGraphMode', 'showInGraph', 'showFileTables', 'refresh',
+    'switchToLineageView', 'switchToImpactView', 'getLineage', 'getUpstream',
+    'getDownstream', 'getLineageGraph', 'exploreTable', 'setLineageDirection',
+]);
+
 export class MessageHandler {
     private _context: MessageHandlerContext;
     private _disposed = false;
+    private _navigationVersion = 0;
+    private _impactVersion = 0;
 
     constructor(context: MessageHandlerContext) {
         this._context = context;
@@ -135,6 +145,10 @@ export class MessageHandler {
 
     public markDisposed(): void {
         this._disposed = true;
+    }
+
+    private isCurrentNavigation(version: number): boolean {
+        return !this._disposed && version === this._navigationVersion;
     }
 
     private resolveRequestedDepth(depth: unknown): number {
@@ -252,6 +266,12 @@ export class MessageHandler {
     public async handleMessage(message: WorkspaceWebviewMessage): Promise<void> {
         if (this._disposed) {
             return;
+        }
+        if (NAVIGATION_COMMANDS.has(message.command)) {
+            this._navigationVersion++;
+        }
+        if (message.command === 'analyzeImpact') {
+            this._impactVersion++;
         }
         try {
             switch (message.command) {
@@ -629,7 +649,9 @@ export class MessageHandler {
         this._context.setCurrentView('lineage');
         // Switching to overview clears detail state
         this._context.setLineageDetailNodeId(null);
+        const navigationVersion = this._navigationVersion;
         await this._context.buildLineageGraph();
+        if (!this.isCurrentNavigation(navigationVersion)) { return; }
 
         const lineageGraph = this._context.getLineageGraph();
         const graph = lineageGraph || createEmptyLineageGraph();
@@ -646,7 +668,9 @@ export class MessageHandler {
     private async handleSwitchToImpactView(requestId?: number): Promise<void> {
         this._context.setCurrentView('impact');
         this._context.setLineageDetailNodeId(null);
+        const navigationVersion = this._navigationVersion;
         await this._context.buildLineageGraph();
+        if (!this.isCurrentNavigation(navigationVersion)) { return; }
 
         const currentImpactReport = this._context.getCurrentImpactReport();
         if (currentImpactReport) {
@@ -684,7 +708,10 @@ export class MessageHandler {
         depth: number,
         requestId?: number
     ): Promise<void> {
+        const navigationVersion = this._navigationVersion;
         await this._context.buildLineageGraph();
+        if (!this.isCurrentNavigation(navigationVersion)) { return; }
+
         const flowAnalyzer = this._context.getFlowAnalyzer();
         const lineageGraph = this._context.getLineageGraph();
 
@@ -755,7 +782,11 @@ export class MessageHandler {
             return;
         }
 
+        const navigationVersion = this._navigationVersion;
+        const impactVersion = this._impactVersion;
         await this._context.buildLineageGraph();
+        if (!this.isCurrentNavigation(navigationVersion) || impactVersion !== this._impactVersion) { return; }
+
         const impactAnalyzer = this._context.getImpactAnalyzer();
 
         if (!impactAnalyzer) {return;}
@@ -783,7 +814,10 @@ export class MessageHandler {
     }
 
     private async handleExploreTable(tableName: string, providedNodeId?: string, requestId?: number): Promise<void> {
+        const navigationVersion = this._navigationVersion;
         await this._context.buildLineageGraph();
+        if (!this.isCurrentNavigation(navigationVersion)) { return; }
+
         const lineageGraph = this._context.getLineageGraph();
 
         if (!lineageGraph) {return;}
@@ -848,7 +882,10 @@ export class MessageHandler {
     }
 
     private async handleGetColumnLineage(tableName: string, columnName: string, requestId?: number): Promise<void> {
+        const navigationVersion = this._navigationVersion;
         await this._context.buildLineageGraph();
+        if (!this.isCurrentNavigation(navigationVersion)) { return; }
+
         const columnLineageTracker = this._context.getColumnLineageTracker();
         const lineageGraph = this._context.getLineageGraph();
 
@@ -895,7 +932,10 @@ export class MessageHandler {
         filePath?: string,
         requestId?: number
     ): Promise<void> {
+        const navigationVersion = this._navigationVersion;
         await this._context.buildLineageGraph();
+        if (!this.isCurrentNavigation(navigationVersion)) { return; }
+
         const lineageGraph = this._context.getLineageGraph();
         const flowAnalyzer = this._context.getFlowAnalyzer();
 
@@ -960,7 +1000,10 @@ export class MessageHandler {
         filePath?: string,
         requestId?: number
     ): Promise<void> {
+        const navigationVersion = this._navigationVersion;
         await this._context.buildLineageGraph();
+        if (!this.isCurrentNavigation(navigationVersion)) { return; }
+
         const lineageGraph = this._context.getLineageGraph();
         const flowAnalyzer = this._context.getFlowAnalyzer();
 
@@ -1021,7 +1064,10 @@ export class MessageHandler {
     // ========== Visual Lineage Graph Commands ==========
 
     private async handleSearchLineageTables(query: string, typeFilter?: string, requestId?: number): Promise<void> {
+        const navigationVersion = this._navigationVersion;
         await this._context.buildLineageGraph();
+        if (!this.isCurrentNavigation(navigationVersion)) { return; }
+
         const lineageGraph = this._context.getLineageGraph();
 
         if (!lineageGraph) {
@@ -1077,7 +1123,10 @@ export class MessageHandler {
         nodeType?: string,
         requestId?: number
     ): Promise<void> {
+        const navigationVersion = this._navigationVersion;
         await this._context.buildLineageGraph();
+        if (!this.isCurrentNavigation(navigationVersion)) { return; }
+
         const lineageGraph = this._context.getLineageGraph();
 
         if (!lineageGraph) {
@@ -1125,7 +1174,10 @@ export class MessageHandler {
     }
 
     private async handleExpandNodeColumns(nodeId: string): Promise<void> {
+        const navigationVersion = this._navigationVersion;
         await this._context.buildLineageGraph();
+        if (!this.isCurrentNavigation(navigationVersion)) { return; }
+
         const lineageGraph = this._context.getLineageGraph();
 
         if (!lineageGraph) {return;}
@@ -1157,7 +1209,10 @@ export class MessageHandler {
     }
 
     private async handleSelectColumn(tableId: string, columnName: string, requestId?: number): Promise<void> {
+        const navigationVersion = this._navigationVersion;
         await this._context.buildLineageGraph();
+        if (!this.isCurrentNavigation(navigationVersion)) { return; }
+
         const lineageGraph = this._context.getLineageGraph();
         const columnLineageTracker = this._context.getColumnLineageTracker();
 

@@ -157,3 +157,116 @@ describe('MessageHandler lineage null-state rendering', () => {
         });
     });
 });
+
+function deferredBuild() {
+    let resolve!: () => void;
+    const promise = new Promise<void>(done => { resolve = done; });
+    return { promise, resolve };
+}
+
+function pendingDetailContext() {
+    const build = deferredBuild();
+    let detail: string | null = null;
+    const graph = { nodes: new Map([
+        ['table:orders', { id: 'table:orders', name: 'orders', type: 'table', metadata: {} }],
+        ['table:users', { id: 'table:users', name: 'users', type: 'table', metadata: {} }],
+    ]), edges: [], columnEdges: [] };
+    const result = createContext({
+        buildLineageGraph: jest.fn(() => build.promise),
+        getLineageGraph: jest.fn(() => graph),
+        setLineageDetailNodeId: jest.fn(value => { detail = value; }),
+        getLineageView: jest.fn(() => ({ generateLineageGraphView: jest.fn(() => '<detail>'), generateLineageSearchView: jest.fn(() => '<overview>') })),
+    });
+    return { ...result, build, detail: () => detail };
+}
+
+describe('host navigation ordering', () => {
+    it('does not restore old detail state after returning to the overview during a shared build', async () => {
+        const h = pendingDetailContext();
+        const handler = new MessageHandler(h.context);
+        const old = handler.handleMessage({ command: 'getLineageGraph', nodeId: 'table:orders', requestId: 1 });
+        const overview = handler.handleMessage({ command: 'switchToLineageView', requestId: 2 });
+        h.build.resolve(); await Promise.all([old, overview]);
+        expect(h.detail()).toBeNull();
+        expect(h.postMessage.mock.calls.map(call => call[0].command)).toEqual(['lineageOverviewResult']);
+        expect(h.context.setLineageDetailDirection).not.toHaveBeenCalled();
+        expect(h.context.setLineageDetailExpandedNodes).not.toHaveBeenCalled();
+    });
+    it('lets a newer detail win over an older pending overview', async () => {
+        const h = pendingDetailContext(); const handler = new MessageHandler(h.context);
+        const root = handler.handleMessage({ command: 'switchToLineageView', requestId: 1 });
+        const detail = handler.handleMessage({ command: 'getLineageGraph', nodeId: 'table:users', requestId: 2 });
+        h.build.resolve(); await Promise.all([root, detail]);
+        expect(h.detail()).toBe('table:users');
+        expect(h.postMessage.mock.calls.map(call => call[0].command)).toEqual(['lineageGraphResult']);
+    });
+
+    it('rejects an older detail that finishes after a newer detail on another build', async () => {
+        const h = pendingDetailContext(), newer = deferredBuild();
+        h.context.buildLineageGraph.mockImplementationOnce(() => h.build.promise).mockImplementationOnce(() => newer.promise);
+        const handler = new MessageHandler(h.context);
+        const old = handler.handleMessage({ command: 'getLineageGraph', nodeId: 'table:orders', requestId: 1 });
+        const current = handler.handleMessage({ command: 'getLineageGraph', nodeId: 'table:users', requestId: 2 });
+        newer.resolve(); await current; h.build.resolve(); await old;
+        expect(h.detail()).toBe('table:users');
+        expect(h.postMessage).toHaveBeenCalledTimes(1);
+        expect(h.postMessage.mock.calls[0][0].data.requestId).toBe(2);
+    });
+
+    it('invalidates pending detail when returning to Graph', async () => {
+        const h = pendingDetailContext(); const handler = new MessageHandler(h.context);
+        const old = handler.handleMessage({ command: 'getLineageGraph', nodeId: 'table:orders', requestId: 1 });
+        await handler.handleMessage({ command: 'switchView', view: 'graph' });
+        h.build.resolve(); await old;
+        expect(h.detail()).toBeNull();
+        expect(h.postMessage).not.toHaveBeenCalled();
+    });
+
+    it('does not mutate persisted detail after disposal while a build is pending', async () => {
+        const h = pendingDetailContext(); const handler = new MessageHandler(h.context);
+        const old = handler.handleMessage({ command: 'getLineageGraph', nodeId: 'table:orders', requestId: 1 });
+        handler.markDisposed(); h.build.resolve(); await old;
+        expect(h.context.setLineageDetailNodeId).not.toHaveBeenCalled();
+        expect(h.context.setLineageDetailDirection).not.toHaveBeenCalled();
+        expect(h.context.setLineageDetailExpandedNodes).not.toHaveBeenCalled();
+    });
+
+    it('does not let an older table-details request change selection after root navigation', async () => {
+        const h = pendingDetailContext(); const handler = new MessageHandler(h.context);
+        const old = handler.handleMessage({ command: 'exploreTable', tableName: 'orders', nodeId: 'table:orders', requestId: 1 });
+        const root = handler.handleMessage({ command: 'switchToLineageView', requestId: 2 });
+        h.build.resolve(); await Promise.all([old, root]);
+        expect(h.context.setSelectedLineageNode).not.toHaveBeenCalled();
+        expect(h.postMessage.mock.calls.map(call => call[0].command)).toEqual(['lineageOverviewResult']);
+    });
+
+    it('preserves the Impact form and report while rejecting older Lineage detail', async () => {
+        const h = pendingDetailContext();
+        const report = { changeType: 'modify', target: { type: 'table', name: 'orders' }, severity: 'low', summary: {}, directImpacts: [], transitiveImpacts: [], suggestions: [] };
+        h.context.getImpactAnalyzer.mockReturnValue({ analyzeTableChange: jest.fn(() => report) });
+        h.context.getImpactView.mockReturnValue({ generateImpactForm: jest.fn(() => '<form>'), generateImpactReport: jest.fn(() => '<report>') });
+        const handler = new MessageHandler(h.context);
+        const old = handler.handleMessage({ command: 'getLineageGraph', nodeId: 'table:orders', requestId: 1 });
+        const form = handler.handleMessage({ command: 'switchToImpactView', requestId: 2 });
+        const analysis = handler.handleMessage({ command: 'analyzeImpact', type: 'table', name: 'orders', requestId: 3 });
+        h.build.resolve(); await Promise.all([old, form, analysis]);
+        expect(h.detail()).toBeNull();
+        expect(h.postMessage.mock.calls.map(call => call[0].command)).toEqual(['impactFormResult', 'impactResult']);
+        expect(h.context.setCurrentImpactReport).toHaveBeenCalledWith(report);
+    });
+
+    it('does not persist an obsolete Impact report when analyses finish out of order', async () => {
+        const h = pendingDetailContext(), newer = deferredBuild();
+        h.context.buildLineageGraph.mockImplementationOnce(() => h.build.promise).mockImplementationOnce(() => newer.promise);
+        h.context.getImpactAnalyzer.mockReturnValue({ analyzeTableChange: jest.fn((name: string) => ({ changeType: 'modify', target: { type: 'table', name }, severity: 'low', summary: {}, directImpacts: [], transitiveImpacts: [], suggestions: [] })) });
+        h.context.getImpactView.mockReturnValue({ generateImpactReport: jest.fn(() => '<report>') });
+        const handler = new MessageHandler(h.context);
+        const old = handler.handleMessage({ command: 'analyzeImpact', type: 'table', name: 'orders', requestId: 1 });
+        const current = handler.handleMessage({ command: 'analyzeImpact', type: 'table', name: 'users', requestId: 2 });
+        newer.resolve(); await current; h.build.resolve(); await old;
+        expect(h.context.setCurrentImpactReport).toHaveBeenCalledTimes(1);
+        expect(h.context.setCurrentImpactReport).toHaveBeenCalledWith(expect.objectContaining({ target: { type: 'table', name: 'users' } }));
+        expect(h.postMessage).toHaveBeenCalledTimes(1);
+    });
+
+});

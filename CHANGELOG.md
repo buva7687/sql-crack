@@ -19,13 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Use the current graph for minimap clicks and drags, including when the minimap first appears automatically.
 - Allow Workspace Graph fit-to-view and zoom-out below the old 30% floor.
 - Ignore late Workspace navigation responses while preserving independent Impact form and report requests.
-
 - Search the complete SQL Flow graph, including nodes outside the virtualized viewport, and restore match highlights as nodes return to view.
 - Preserve focus dimming and zoom-to-node visibility when virtualized nodes and edges are redrawn.
-
 - Resolve SQL Flow column sources within each SELECT branch and merge UNION output lineage by column position, preserving distinct aliases and table instances.
-
 - Distinguish repeated table and operation instances in Compare, so added self-joins and removed instances receive the correct highlights and ghost nodes.
+- Reject obsolete Workspace analysis completions before they change host navigation state, preventing old Lineage details or Impact reports from returning after newer navigation.
 
 ## [1.0.0] - 2026-10-22
 
