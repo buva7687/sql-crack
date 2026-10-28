@@ -172,6 +172,7 @@ import {
     clearSearchFeature,
     createSearchRuntimeState,
     highlightMatchesFeature,
+    refreshSearchHighlightsFeature,
     navigateSearchFeature,
     navigateToFirstResultFeature,
     performSearchFeature,
@@ -189,7 +190,7 @@ import {
     showLineagePathFeature,
     type ColumnLineageRuntimeState,
 } from './features/columnLineage';
-import { applyFocusModeFeature, clearFocusModeFeature } from './features/focusMode';
+import { applyFocusModeFeature, clearFocusModeFeature, applyNodeZoomVisibilityFeature } from './features/focusMode';
 import { toggleFullscreen as toggleFullscreenFeature } from './features/fullscreen';
 import { getQueryComplexityInfoFeature } from './features/queryComplexity';
 import {
@@ -1457,6 +1458,7 @@ function updateVisibleNodes(): void {
         isDarkTheme: state.isDarkTheme,
         renderNode,
         renderEdge,
+        onElementsChanged: restoreViewportPresentation,
         nodeElementsById: renderedNodeElementsById,
         edgeElementsById: renderedEdgeElementsById,
         onNodeRemoved: (nodeId) => {
@@ -1468,6 +1470,19 @@ function updateVisibleNodes(): void {
         },
     });
     offscreenIndicator = nextIndicator;
+}
+
+/** New virtualized elements must inherit the active logical graph presentation. */
+function restoreViewportPresentation(): void {
+    if (state.zoomedNodeId && mainGroup) {
+        applyNodeZoomVisibilityFeature(state.zoomedNodeId, mainGroup, renderEdges);
+    }
+    if (state.focusModeEnabled && state.selectedNodeId) {
+        applyFocusMode(state.selectedNodeId);
+    }
+    if (state.searchTerm) {
+        refreshSearchHighlightsFeature({ state, mainGroup, selectedNodeId: state.selectedNodeId, highlightColor: EDGE_COLORS.highlight });
+    }
 }
 
 /**
@@ -1485,6 +1500,7 @@ export function setVirtualizationEnabled(enabled: boolean): void {
         currentOffscreenIndicator: offscreenIndicator,
         renderNode,
         renderEdge,
+        onElementsChanged: restoreViewportPresentation,
         nodeElementsById: renderedNodeElementsById,
         edgeElementsById: renderedEdgeElementsById,
         onNodeRemoved: (nodeId) => {
@@ -2773,6 +2789,7 @@ function updateSearchCountDisplay(): void {
 function highlightMatches(term: string): void {
     highlightMatchesFeature({
         term,
+        nodes: renderNodes,
         state,
         mainGroup,
         selectedNodeId: state.selectedNodeId,
@@ -2815,10 +2832,17 @@ function navigateSearch(delta: number): void {
             if (!node) {
                 return;
             }
+            if (state.zoomedNodeId) {
+                clearFocusMode();
+            }
             if (node.type === 'cluster') {
                 centerOnNode(node);
             } else {
                 zoomToNode(node);
+            }
+            // Selection and its pulse must see the target even if the pan/zoom throttle is pending.
+            if (virtualizationEnabled && shouldVirtualize(renderNodes.length)) {
+                updateVisibleNodes();
             }
             selectNode(nodeId, { skipNavigation: true });
             pulseNode(nodeId);

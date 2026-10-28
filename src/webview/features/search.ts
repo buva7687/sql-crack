@@ -21,6 +21,7 @@ export interface SearchCallbacks {
 
 export interface SearchMatchOptions {
     term: string;
+    nodes: FlowNode[];
     state: ViewState;
     mainGroup: SVGGElement | null;
     selectedNodeId: string | null;
@@ -141,30 +142,42 @@ function clearExistingMatchHighlights(mainGroup: SVGGElement | null, selectedNod
     });
 }
 
+/** Match the complete render model; mounted SVG elements are only a presentation cache. */
 export function highlightMatchesFeature(options: SearchMatchOptions): void {
-    const { term, state, mainGroup, selectedNodeId, highlightColor } = options;
-    const theme = getComponentUiColors(state.isDarkTheme);
+    const { term, nodes, state } = options;
     state.searchTerm = term.toLowerCase();
-    state.searchResults = [];
-    state.currentSearchIndex = -1;
-
-    clearExistingMatchHighlights(mainGroup, selectedNodeId);
+    state.searchResults = nodes
+        .filter(node => node.label.toLowerCase().includes(state.searchTerm) || node.id.toLowerCase().includes(state.searchTerm))
+        .map(node => node.id);
     if (!term) {
-        return;
+        state.searchResults = [];
     }
-
-    const allNodes = mainGroup?.querySelectorAll('.node');
-    allNodes?.forEach((group) => {
-        const label = group.getAttribute('data-label') || '';
+    // Keep searches of already expanded cloud children working as before.
+    options.mainGroup?.querySelectorAll('.node').forEach(group => {
         const id = group.getAttribute('data-id') || '';
-        if (label.includes(state.searchTerm) || id.includes(state.searchTerm)) {
+        const label = group.getAttribute('data-label') || '';
+        if (term && (label.includes(state.searchTerm) || id.toLowerCase().includes(state.searchTerm)) && !state.searchResults.includes(id)) {
             state.searchResults.push(id);
-            group.classList.add('search-match');
-            const rect = group.querySelector('.node-rect');
-            if (rect) {
-                rect.setAttribute('stroke', state.isDarkTheme ? highlightColor : theme.accent);
-                rect.setAttribute('stroke-width', '2');
-            }
+        }
+    });
+    state.currentSearchIndex = -1;
+    refreshSearchHighlightsFeature(options);
+}
+
+/** Restore highlights after viewport culling without replacing the match list or active index. */
+export function refreshSearchHighlightsFeature(options: Pick<SearchMatchOptions, 'state' | 'mainGroup' | 'selectedNodeId' | 'highlightColor'>): void {
+    const { state, mainGroup, selectedNodeId, highlightColor } = options;
+    const theme = getComponentUiColors(state.isDarkTheme);
+    clearExistingMatchHighlights(mainGroup, selectedNodeId);
+    const matches = new Set(state.searchResults);
+    mainGroup?.querySelectorAll('.node').forEach(group => {
+        const id = group.getAttribute('data-id') || '';
+        if (!matches.has(id)) { return; }
+        group.classList.add('search-match');
+        const rect = group.querySelector('.node-rect');
+        if (rect && id !== selectedNodeId) {
+            rect.setAttribute('stroke', state.isDarkTheme ? highlightColor : theme.accent);
+            rect.setAttribute('stroke-width', '2');
         }
     });
 }

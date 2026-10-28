@@ -20,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Allow Workspace Graph fit-to-view and zoom-out below the old 30% floor.
 - Ignore late Workspace navigation responses while preserving independent Impact form and report requests.
 
+- Search the complete SQL Flow graph, including nodes outside the virtualized viewport, and restore match highlights as nodes return to view.
+- Preserve focus dimming and zoom-to-node visibility when virtualized nodes and edges are redrawn.
+
 ## [1.0.0] - 2026-10-22
 
 ### Fixed

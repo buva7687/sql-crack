@@ -9,6 +9,7 @@ import type {
 import { getConnectedNodeIds, getCycledNode, getKeyboardNavigableNodes, getSiblingCycleTarget } from './keyboardNavigation';
 import { isCompactPanelLayout } from '../ui/compactPanelLayout';
 import { FLOATING_PANEL_GAP } from '../ui/panelLayout';
+import { applyNodeZoomVisibilityFeature } from '../features/focusMode';
 import { getMinimapMode } from '../minimapVisibility';
 
 /** Fit height a compact layout always leaves the graph, however tall the stacked panels are. */
@@ -469,46 +470,7 @@ export function zoomToNodeFeature(options: ZoomToNodeOptions): void {
 
     onSelectNode(node.id);
 
-    const immediateNeighbors = new Set<string>([node.id]);
-    for (const edge of currentEdges) {
-        if (edge.target === node.id) {
-            immediateNeighbors.add(edge.source);
-        }
-        if (edge.source === node.id) {
-            immediateNeighbors.add(edge.target);
-        }
-    }
-
-    mainGroup.querySelectorAll('.node').forEach((nodeEl) => {
-        const id = nodeEl.getAttribute('data-id');
-        if (id && !immediateNeighbors.has(id)) {
-            (nodeEl as SVGGElement).style.display = 'none';
-        } else {
-            (nodeEl as SVGGElement).style.display = '';
-            (nodeEl as SVGGElement).style.opacity = '1';
-        }
-    });
-
-    mainGroup.querySelectorAll('.cloud-container').forEach((cloudEl) => {
-        const nodeId = cloudEl.getAttribute('data-node-id');
-        if (nodeId && immediateNeighbors.has(nodeId)) {
-            (cloudEl as SVGGElement).style.display = '';
-            (cloudEl as SVGGElement).style.opacity = '1';
-        } else {
-            (cloudEl as SVGGElement).style.display = 'none';
-        }
-    });
-
-    mainGroup.querySelectorAll('.edge').forEach((edgeEl) => {
-        const source = edgeEl.getAttribute('data-source');
-        const target = edgeEl.getAttribute('data-target');
-        if (source && target && immediateNeighbors.has(source) && immediateNeighbors.has(target)) {
-            (edgeEl as SVGPathElement).style.display = '';
-            (edgeEl as SVGPathElement).style.opacity = '1';
-        } else {
-            (edgeEl as SVGPathElement).style.display = 'none';
-        }
-    });
+    const immediateNeighbors = applyNodeZoomVisibilityFeature(node.id, mainGroup, currentEdges);
 
     let minX = Infinity;
     let minY = Infinity;

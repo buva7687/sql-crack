@@ -149,6 +149,7 @@ describe('search feature helpers', () => {
 
         highlightMatchesFeature({
             term: 'orders',
+            nodes: [{ id: 'orders', label: 'orders' } as FlowNode],
             state: darkState,
             mainGroup: {
                 querySelectorAll: jest.fn(() => [darkNode]),
@@ -160,6 +161,7 @@ describe('search feature helpers', () => {
 
         highlightMatchesFeature({
             term: 'orders',
+            nodes: [{ id: 'orders', label: 'orders' } as FlowNode],
             state: lightState,
             mainGroup: {
                 querySelectorAll: jest.fn(() => [lightNode]),

@@ -24,6 +24,7 @@ interface UpdateVisibleNodesFeatureOptions {
     edgeElementsById?: Map<string, SVGPathElement>;
     onNodeRemoved?: (nodeId: string) => void;
     onEdgeRemoved?: (edgeId: string) => void;
+    onElementsChanged?: () => void;
 }
 
 interface SetVirtualizationEnabledFeatureOptions {
@@ -41,6 +42,7 @@ interface SetVirtualizationEnabledFeatureOptions {
     edgeElementsById?: Map<string, SVGPathElement>;
     onNodeRemoved?: (nodeId: string) => void;
     onEdgeRemoved?: (edgeId: string) => void;
+    onElementsChanged?: () => void;
 }
 
 interface VirtualizationUpdateResult {
@@ -175,6 +177,7 @@ export function updateVisibleNodesFeature(
     }
 
     const visibleEdgeIds = new Set(result.visibleEdges.map(edge => edge.id));
+    const hasNewEdges = result.visibleEdges.some(edge => !renderedEdgeIds.has(edge.id));
     const edgeIdsToRemove = [...renderedEdgeIds].filter(edgeId => !visibleEdgeIds.has(edgeId));
     for (const edgeId of edgeIdsToRemove) {
         const edgeElement = edgeElementsById?.get(edgeId) || edgesGroup.querySelector(`[data-edge-id="${edgeId}"]`) as SVGPathElement | null;
@@ -190,6 +193,9 @@ export function updateVisibleNodesFeature(
         renderedEdgeIds.add(edge.id);
     }
 
+    if (nodesToAdd.length || nodeIdsToRemove.length || edgeIdsToRemove.length || hasNewEdges) {
+        options.onElementsChanged?.();
+    }
     const offscreenIndicator = buildOffscreenIndicators(result, svg, currentOffscreenIndicator, isDarkTheme);
     return { offscreenIndicator };
 }
@@ -261,6 +267,7 @@ export function setVirtualizationEnabledFeature(
             renderedEdgeIds.add(edge.id);
         }
 
+        options.onElementsChanged?.();
         currentOffscreenIndicator?.remove();
         return { offscreenIndicator: null };
     }
