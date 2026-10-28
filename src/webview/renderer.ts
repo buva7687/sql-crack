@@ -1496,7 +1496,11 @@ export function setVirtualizationEnabled(enabled: boolean): void {
             updateVisibleNodes();
         },
     });
-    offscreenIndicator = nextIndicator;
+    // The enabled callback updates the indicator itself; do not overwrite it
+    // with the stale value captured before the viewport was rebuilt.
+    if (!enabled) {
+        offscreenIndicator = nextIndicator;
+    }
 }
 
 /**
@@ -2856,6 +2860,10 @@ function getExportFeatureContext() {
         getCurrentEdges: () => currentEdges,
         isDarkTheme: () => state.isDarkTheme,
         calculateBounds,
+        virtualization: {
+            isEnabled: () => virtualizationEnabled && shouldVirtualize(renderNodes.length),
+            setEnabled: setVirtualizationEnabled,
+        },
     };
 }
 
@@ -3427,9 +3435,9 @@ export function getFormattedSql(): string {
 function getMinimapContext() {
     return {
         calculateBounds,
-        currentNodes,
+        get currentNodes() { return currentNodes; },
         getNodeColor,
-        renderNodes,
+        get renderNodes() { return renderNodes; },
         shouldShowMinimap,
         state,
         svg,

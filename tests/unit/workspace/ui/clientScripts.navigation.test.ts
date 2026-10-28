@@ -213,7 +213,7 @@ describe('workspace clientScripts navigation context', () => {
         });
 
         expect(script).toContain("switchToImpactView: ['impact-form', 'impact-result']");
-        expect(script).toContain("lineageResult: 'flow-result'");
+        expect(script).toContain("lineageResult: 'view-content'");
         expect(script).toContain('const initialWorkspaceRestoreState = {"impact":{"hasReport":true,"html":"\\u003cdiv\\u003eimpact-report\\u003c/div\\u003e"}};');
         expect(script).toContain("persistImpactResult(message.data.html, message.data.report || null);");
         expect(script).toContain("if (persistedImpact.html && lineageContent) {");

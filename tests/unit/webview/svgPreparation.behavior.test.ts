@@ -1,4 +1,6 @@
 import { prepareSvgForExport } from '../../../src/webview/features/export/svgPreparation';
+import { setVirtualizationEnabledFeature, updateVisibleNodesFeature } from '../../../src/webview/rendering/virtualizedViewport';
+import type { FlowEdge, FlowNode } from '../../../src/webview/types';
 
 class FakeElement {
     public readonly attributes = new Map<string, string>();
@@ -54,6 +56,9 @@ class FakeElement {
 
     setAttribute(name: string, value: string): void {
         this.attributes.set(name, value);
+        if (name === 'class') {
+            this.classList.splice(0, this.classList.length, ...value.split(/\s+/));
+        }
     }
 
     getAttribute(name: string): string | null {
@@ -159,5 +164,106 @@ describe('prepareSvgForExport behavior', () => {
         expect(clonedNode.getAttribute('fill')).toBe('#123456');
         expect(clonedNode.styleValues.get('fill')).toBeUndefined();
         expect(clonedNode.styleValues.get('font-size')).toBe('14px');
+    });
+
+    it('captures all virtualized nodes and restores the visible subset after cloning', () => {
+        const svg = new FakeElement('svg');
+        Object.assign(svg, { getBoundingClientRect: () => ({ width: 800, height: 600 }) });
+        const mainGroup = svg.appendChild(new FakeElement('g'));
+        const nodesGroup = mainGroup.appendChild(new FakeElement('g', ['nodes']));
+        const edgesGroup = mainGroup.appendChild(new FakeElement('g', ['edges']));
+        const nodes: FlowNode[] = Array.from({ length: 60 }, (_, i) => ({
+            id: `n${i}`, type: 'table', label: `table${i}`, x: i * 300, y: 0, width: 180, height: 60,
+        }));
+        const renderedNodeIds = new Set<string>();
+        const nodeElements = new Map<string, SVGGElement>();
+        const edges: FlowEdge[] = nodes.slice(1).map((node, i) => ({ id: `e${i}`, source: nodes[i].id, target: node.id }));
+        const edgeElements = new Map<string, SVGPathElement>();
+        const renderNode = (node: FlowNode) => {
+            const element = nodesGroup.appendChild(new FakeElement('g', ['node']));
+            element.setAttribute('data-id', node.id);
+            nodeElements.set(node.id, element as unknown as SVGGElement);
+        };
+        const shared = {
+            mainGroup: mainGroup as unknown as SVGGElement,
+            renderedNodeIds, renderedEdgeIds: new Set<string>(),
+            currentOffscreenIndicator: null,
+            nodeElementsById: nodeElements,
+            onNodeRemoved: (id: string) => nodeElements.delete(id),
+            edgeElementsById: edgeElements,
+            onEdgeRemoved: (id: string) => edgeElements.delete(id),
+            renderNode,
+            renderEdge: (edge: FlowEdge) => {
+                const element = edgesGroup.appendChild(new FakeElement('path', ['edge']));
+                element.setAttribute('data-edge-id', edge.id);
+                edgeElements.set(edge.id, element as unknown as SVGPathElement);
+            },
+        };
+        let offscreenIndicator: SVGGElement | null = null;
+        const update = () => {
+            offscreenIndicator = updateVisibleNodesFeature({
+                ...shared, currentOffscreenIndicator: offscreenIndicator,
+                svg: svg as unknown as SVGSVGElement, renderNodes: nodes, renderEdges: edges,
+                scale: 1, offsetX: 0, offsetY: 0, isDarkTheme: true,
+            }).offscreenIndicator;
+        };
+        update();
+        const visibleIds = [...renderedNodeIds];
+        const visibleEdgeIds = [...shared.renderedEdgeIds];
+        expect(visibleIds.length).toBeLessThan(nodes.length);
+        let enabled = true;
+        const virtualization = {
+            isEnabled: () => enabled,
+            setEnabled: (value: boolean) => {
+                enabled = value;
+                const result = setVirtualizationEnabledFeature({
+                    ...shared, currentOffscreenIndicator: offscreenIndicator,
+                    enabled: value, currentNodes: nodes, currentEdges: edges, onVirtualizedUpdate: update,
+                });
+                if (!value) { offscreenIndicator = result.offscreenIndicator; }
+            },
+        };
+        const bounds = () => ({ minX: 0, minY: 0, width: 17880, height: 60 });
+        const result = prepareSvgForExport(svg as unknown as SVGSVGElement, bounds, virtualization);
+
+        expect((result.svgClone as unknown as FakeElement).querySelectorAll('.node')).toHaveLength(60);
+        expect((result.svgClone as unknown as FakeElement).querySelectorAll('.edge')).toHaveLength(59);
+        expect((result.svgClone as unknown as FakeElement).querySelectorAll('.offscreen-indicators')).toHaveLength(0);
+        expect(svg.querySelectorAll('.node')).toHaveLength(visibleIds.length);
+        expect([...renderedNodeIds]).toEqual(visibleIds);
+        expect([...shared.renderedEdgeIds]).toEqual(visibleEdgeIds);
+        expect(svg.querySelectorAll('.offscreen-indicators')).toHaveLength(1);
+        expect(enabled).toBe(true);
+    });
+
+    it.each(['clone', 'bounds', 'materialize'])('restores virtualization when %s fails', failure => {
+        const svg = new FakeElement('svg');
+        let enabled = true;
+        const virtualization = {
+            isEnabled: () => enabled,
+            setEnabled: jest.fn((value: boolean) => {
+                enabled = value;
+                if (!value && failure === 'materialize') { throw new Error('materialize failed'); }
+            }),
+        };
+        const clone = svg.cloneNode.bind(svg);
+        svg.cloneNode = (deep: boolean) => {
+            if (failure === 'clone') { throw new Error('clone failed'); }
+            return clone(deep);
+        };
+        const bounds = () => {
+            if (failure === 'bounds') { throw new Error('bounds failed'); }
+            return { minX: 0, minY: 0, width: 100, height: 50 };
+        };
+        expect(() => prepareSvgForExport(svg as unknown as SVGSVGElement, bounds, virtualization)).toThrow(`${failure} failed`);
+        expect(virtualization.setEnabled.mock.calls).toEqual([[false], [true]]);
+        expect(enabled).toBe(true);
+    });
+
+    it('leaves virtualization disabled when it was already disabled', () => {
+        const svg = new FakeElement('svg');
+        const virtualization = { isEnabled: () => false, setEnabled: jest.fn() };
+        prepareSvgForExport(svg as unknown as SVGSVGElement, () => ({ minX: 0, minY: 0, width: 100, height: 50 }), virtualization);
+        expect(virtualization.setEnabled).not.toHaveBeenCalled();
     });
 });

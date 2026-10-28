@@ -4,32 +4,36 @@
 export function getWorkspaceRequestStateScriptFragment(): string {
     return `
         const workspaceRequestScopes = {
-            switchToLineageView: 'lineage-overview',
+            switchToLineageView: 'view-content',
             switchToImpactView: ['impact-form', 'impact-result'],
-            getLineage: 'flow-result',
+            getLineage: 'view-content',
             analyzeImpact: 'impact-result',
-            exploreTable: 'table-detail',
+            exploreTable: 'view-content',
             getColumnLineage: 'column-lineage',
-            getUpstream: 'flow-result',
-            getDownstream: 'flow-result',
+            getUpstream: 'view-content',
+            getDownstream: 'view-content',
             searchLineageTables: 'lineage-search',
-            getLineageGraph: 'lineage-graph',
+            getLineageGraph: 'view-content',
             selectColumn: 'column-lineage'
         };
         const workspaceResponseScopes = {
-            lineageOverviewResult: 'lineage-overview',
-            lineageResult: 'flow-result',
+            lineageOverviewResult: 'view-content',
+            lineageResult: 'view-content',
             impactFormResult: 'impact-form',
             impactResult: 'impact-result',
-            tableDetailResult: 'table-detail',
+            tableDetailResult: 'view-content',
             columnLineageResult: 'column-lineage',
-            upstreamResult: 'flow-result',
-            downstreamResult: 'flow-result',
+            upstreamResult: 'view-content',
+            downstreamResult: 'view-content',
             lineageSearchResults: 'lineage-search',
-            lineageGraphResult: 'lineage-graph'
+            lineageGraphResult: 'view-content'
         };
         let workspaceRequestSequence = 0;
         const latestWorkspaceRequestIds = {};
+
+        function invalidateWorkspaceRequests() {
+            Object.keys(latestWorkspaceRequestIds).forEach(scope => delete latestWorkspaceRequestIds[scope]);
+        }
 
         function registerWorkspaceRequest(command) {
             const scopes = workspaceRequestScopes[command];
@@ -38,6 +42,12 @@ export function getWorkspaceRequestStateScriptFragment(): string {
             }
             const requestId = ++workspaceRequestSequence;
             const scopeList = Array.isArray(scopes) ? scopes : [scopes];
+            // Starting a view or replacing Lineage content invalidates the old DOM's
+            // requests. Impact analysis updates a nested result, so it must leave
+            // an in-flight Impact form request valid.
+            if (scopeList.includes('view-content') || command === 'switchToImpactView') {
+                invalidateWorkspaceRequests();
+            }
             scopeList.forEach((scope) => {
                 latestWorkspaceRequestIds[scope] = requestId;
             });
@@ -49,6 +59,13 @@ export function getWorkspaceRequestStateScriptFragment(): string {
                 return;
             }
             const command = message.command;
+            // A delayed callback from a view we left must not invalidate the
+            // active view's request before its response has arrived.
+            const requestView = command === 'switchToImpactView' || command === 'analyzeImpact'
+                ? 'impact' : workspaceRequestScopes[command] ? 'lineage' : null;
+            if (requestView && typeof currentViewMode === 'string' && currentViewMode !== requestView) {
+                return undefined;
+            }
             const requestId = registerWorkspaceRequest(command);
             if (typeof requestId === 'number') {
                 vscode.postMessage(Object.assign({}, message, { requestId }));

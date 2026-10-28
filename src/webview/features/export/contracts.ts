@@ -7,6 +7,11 @@ export interface ExportContext {
     getCurrentEdges: () => FlowEdge[];
     isDarkTheme: () => boolean;
     calculateBounds: () => { minX: number; minY: number; width: number; height: number };
+    /** Synchronously render the complete graph for capture, then restore virtualization. */
+    virtualization?: {
+        isEnabled: () => boolean;
+        setEnabled: (enabled: boolean) => void;
+    };
 }
 
 export type ExportPreviewFormat = 'png' | 'svg' | 'pdf';

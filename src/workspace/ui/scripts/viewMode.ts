@@ -253,6 +253,7 @@ export function getViewModeScriptFragment(): string {
                 return;
             }
             const previousView = currentViewMode;
+            invalidateWorkspaceRequests();
 
             // Clear column trace when leaving a lineage-related view to prevent stale state
             if (typeof clearColumnHighlighting === 'function') {

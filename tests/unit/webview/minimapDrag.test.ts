@@ -1,5 +1,8 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
+import { setupMinimapDrag } from '../../../src/webview/features/minimap';
+import { setMinimapMode, shouldShowMinimap } from '../../../src/webview/minimapVisibility';
+import { createFakeElement, installFakeDocument, uninstallFakeDocument } from '../../helpers/fakeDom';
 
 describe('minimap drag-to-pan', () => {
     const rendererSource = readFileSync(
@@ -59,5 +62,49 @@ describe('minimap drag-to-pan', () => {
 
     it('delegates setupMinimapDrag from renderer to minimap feature module', () => {
         expect(rendererSource).toContain('setupMinimapDragFeature(minimapContainer, getMinimapContext(), updateTransform)');
+    });
+
+    it('uses the current query after drag listeners were installed before the first render', () => {
+        installFakeDocument();
+        Object.assign(document, { addEventListener: jest.fn(), removeEventListener: jest.fn() });
+        setMinimapMode('auto');
+        try {
+            const contextSource = rendererSource.slice(
+                rendererSource.indexOf('function getMinimapContext()'),
+                rendererSource.indexOf('export function updateMinimap()'),
+            );
+            const runtime = new Function('shouldShowMinimap', `
+                let currentNodes = [], renderNodes = [];
+                const state = { scale: 1, offsetX: 0, offsetY: 0 };
+                const svg = { getBoundingClientRect: () => ({ width: 1000, height: 700 }) };
+                const calculateBounds = () => ({ minX: 0, minY: 0, width: 500, height: 200 });
+                const getNodeColor = () => '#fff';
+                ${contextSource}
+                return {
+                    context: getMinimapContext(),
+                    load: (count) => { currentNodes = Array.from({ length: count }, (_, i) => ({ id: 'n' + i })); renderNodes = currentNodes; }
+                };
+            `)(shouldShowMinimap);
+            const minimap = createFakeElement('div');
+            minimap.getBoundingClientRect.mockReturnValue({ left: 0, top: 0, width: 150, height: 100 });
+            const updateTransform = jest.fn();
+            setupMinimapDrag(minimap as unknown as HTMLDivElement, runtime.context, updateTransform);
+            const click = () => minimap.dispatchEvent({ type: 'mousedown', clientX: 30, clientY: 30, preventDefault: jest.fn(), stopPropagation: jest.fn() });
+
+            runtime.load(2);
+            click();
+            expect(updateTransform).toHaveBeenCalledTimes(1);
+            expect(runtime.context.state.offsetX).not.toBe(0);
+
+            runtime.load(0);
+            click();
+            expect(updateTransform).toHaveBeenCalledTimes(1);
+            runtime.load(3);
+            click();
+            expect(updateTransform).toHaveBeenCalledTimes(2);
+        } finally {
+            uninstallFakeDocument();
+            setMinimapMode('auto');
+        }
     });
 });

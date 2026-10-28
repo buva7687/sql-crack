@@ -195,7 +195,7 @@ export function copyToClipboard(context: ExportContext): void {
     }
 
     try {
-        const { svgClone, width, height } = prepareSvgForExport(svgElement, context.calculateBounds);
+        const { svgClone, width, height } = prepareSvgForExport(svgElement, context.calculateBounds, context.virtualization);
         const svgData = new XMLSerializer().serializeToString(svgClone);
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d');

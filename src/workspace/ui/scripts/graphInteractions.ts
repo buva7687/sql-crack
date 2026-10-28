@@ -35,6 +35,7 @@ export function getGraphInteractionsScriptFragment(): string {
         }
 
         // ========== Zoom Functions ==========
+        let graphMinScale = 0.2;
         function updateTransform() {
             if (mainGroup) {
                 mainGroup.setAttribute('transform', 'translate(' + offsetX + ',' + offsetY + ') scale(' + scale + ')');
@@ -50,7 +51,7 @@ export function getGraphInteractionsScriptFragment(): string {
         }
 
         function zoomOut() {
-            scale = Math.max(0.2, scale / 1.2);
+            scale = Math.max(graphMinScale, scale / 1.2);
             updateTransform();
         }
 
@@ -132,8 +133,8 @@ export function getGraphInteractionsScriptFragment(): string {
 
             // Work in pixel coordinates (no viewBox transformation) - same as Lineage
             const padding = 60;
-            const availableWidth = containerRect.width - padding * 2;
-            const availableHeight = containerRect.height - padding * 2;
+            const availableWidth = Math.max(1, containerRect.width - padding * 2);
+            const availableHeight = Math.max(1, containerRect.height - padding * 2);
 
             const scaleX = availableWidth / bbox.width;
             const scaleY = availableHeight / bbox.height;
@@ -149,7 +150,8 @@ export function getGraphInteractionsScriptFragment(): string {
                 // Graph is larger than container - cap at 100% (don't zoom in)
                 scale = Math.min(scale, 1.0);
             }
-            scale = Math.max(0.3, scale); // Minimum 30% to prevent too small
+            // A fit must be allowed below the manual zoom floor for large graphs.
+            graphMinScale = Math.min(0.2, scale);
 
             // Calculate bbox center
             const bboxCenterX = bbox.x + bbox.width / 2;
@@ -1580,7 +1582,7 @@ export function getGraphInteractionsScriptFragment(): string {
             svg.addEventListener('wheel', (e) => {
                 e.preventDefault();
                 const delta = e.deltaY > 0 ? 0.9 : 1.1;
-                scale = Math.max(0.2, Math.min(3, scale * delta));
+                scale = Math.max(graphMinScale, Math.min(3, scale * delta));
                 updateTransform();
             }, { passive: false });
         }

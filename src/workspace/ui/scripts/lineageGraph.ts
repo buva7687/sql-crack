@@ -34,7 +34,9 @@ export function getLineageGraphScriptFragment(): string {
 
             const queued = pendingLineageGraphMessage;
             pendingLineageGraphMessage = null;
-            processLineageGraphResult(queued);
+            if (currentViewMode === 'lineage' && isLatestWorkspaceResponse(queued)) {
+                processLineageGraphResult(queued);
+            }
         }
 
         function processLineageGraphResult(message) {

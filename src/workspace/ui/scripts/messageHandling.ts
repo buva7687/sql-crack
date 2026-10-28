@@ -72,6 +72,7 @@ export function getMessageHandlingScriptFragment(): string {
                 case 'upstreamResult':
                 case 'downstreamResult':
                     if (!isLatestWorkspaceResponse(message)) break;
+                    if (currentViewMode !== 'lineage') break;
                     if (lineageContent && message.data) {
                         const nodes = message.data.nodes || message.data.result?.nodes || [];
                         let html = '<h2>' + (message.command === 'upstreamResult' ? 'Upstream' : message.command === 'downstreamResult' ? 'Downstream' : 'Lineage') + ' Analysis</h2>';
@@ -99,6 +100,7 @@ export function getMessageHandlingScriptFragment(): string {
                     break;
                 case 'impactResult':
                     if (!isLatestWorkspaceResponse(message)) break;
+                    if (currentViewMode !== 'impact') break;
                     if (lineageContent) {
                         const resultsDiv = document.getElementById('impact-results');
                         if (message.data?.error) {
@@ -139,6 +141,7 @@ export function getMessageHandlingScriptFragment(): string {
                     break;
                 case 'tableDetailResult':
                     if (!isLatestWorkspaceResponse(message)) break;
+                    if (currentViewMode !== 'lineage') break;
                     if (lineageContent) {
                         if (message.data?.error) {
                             showWorkspaceAlert(lineageContent, message.data.error, message.data.reason, 'Table details unavailable');
@@ -152,6 +155,7 @@ export function getMessageHandlingScriptFragment(): string {
                     break;
                 case 'columnLineageResult':
                     if (!isLatestWorkspaceResponse(message)) break;
+                    if (currentViewMode !== 'lineage') break;
                     handleColumnLineageResult(message.data);
                     break;
                 case 'columnSelectionCleared':
@@ -194,12 +198,14 @@ export function getMessageHandlingScriptFragment(): string {
                     break;
                 case 'lineageSearchResults':
                     if (!isLatestWorkspaceResponse(message)) break;
+                    if (currentViewMode !== 'lineage') break;
                     if (message.data?.results) {
                         showLineageSearchResults(message.data.results);
                     }
                     break;
                 case 'lineageGraphResult':
                     if (!isLatestWorkspaceResponse(message)) break;
+                    if (currentViewMode !== 'lineage') break;
                     if (message.data?.error) {
                         if (lineageContent) {
                             lineageSetupInProgress = false;
@@ -218,11 +224,13 @@ export function getMessageHandlingScriptFragment(): string {
                     processLineageGraphResult(message);
                     break;
                 case 'nodeColumnsResult':
+                    if (currentViewMode !== 'lineage' || !lineageDetailView) break;
                     if (message.data?.nodeId) {
                         expandNodeWithColumns(message.data.nodeId);
                     }
                     break;
                 case 'nodeCollapsedResult':
+                    if (currentViewMode !== 'lineage' || !lineageDetailView) break;
                     if (message.data?.nodeId) {
                         collapseNodeWithColumns(message.data.nodeId);
                     }

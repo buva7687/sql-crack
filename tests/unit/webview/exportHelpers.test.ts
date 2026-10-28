@@ -35,6 +35,18 @@ describe('export helpers', () => {
         expect(exportFeatureSource).toContain("from './export/index';");
     });
 
+    it('wires full-graph capture into image exports and clipboard copying', () => {
+        const renderer = readFileSync(join(__dirname, '../../../src/webview/renderer.ts'), 'utf8');
+        expect(renderer).toContain('isEnabled: () => virtualizationEnabled && shouldVirtualize(renderNodes.length)');
+        expect(renderer).toContain('setEnabled: setVirtualizationEnabled,');
+        expect(artifactsSource).toContain('prepareSvgForExport(svgElement, context.calculateBounds, context.virtualization)');
+        expect(exportFeatureSource).toContain('prepareSvgForExport(svgElement, context.calculateBounds, context.virtualization)');
+        // Restoring virtualization rebuilds its indicator inside the callback.
+        // The caller must not then replace that live reference with the old one.
+        const toggle = renderer.slice(renderer.indexOf('export function setVirtualizationEnabled('), renderer.indexOf('export function isVirtualizationEnabled('));
+        expect(toggle).toMatch(/if \(!enabled\)\s*\{\s*offscreenIndicator = nextIndicator;/);
+    });
+
     it('preserves SVG presentation attributes instead of overriding with computed styles', () => {
         // Regression: embedInlineStyles used to override per-element SVG fill/stroke
         // attributes with computed styles from the first class-matched element,

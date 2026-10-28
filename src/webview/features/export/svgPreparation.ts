@@ -4,6 +4,7 @@ import {
     EXPORT_SVG_PADDING,
     MAX_EXPORT_DIMENSION,
 } from './constants';
+import type { ExportContext } from './contracts';
 
 export interface ExportBounds {
     minX: number;
@@ -19,6 +20,24 @@ export interface PreparedSvgExport {
 }
 
 export function prepareSvgForExport(
+    svgElement: SVGSVGElement,
+    calculateBounds: () => ExportBounds,
+    virtualization?: ExportContext['virtualization']
+): PreparedSvgExport {
+    const restoreVirtualization = virtualization?.isEnabled() === true;
+    try {
+        if (restoreVirtualization) {
+            virtualization!.setEnabled(false);
+        }
+        return prepareSvgClone(svgElement, calculateBounds);
+    } finally {
+        if (restoreVirtualization) {
+            virtualization!.setEnabled(true);
+        }
+    }
+}
+
+function prepareSvgClone(
     svgElement: SVGSVGElement,
     calculateBounds: () => ExportBounds
 ): PreparedSvgExport {

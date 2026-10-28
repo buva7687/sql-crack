@@ -24,7 +24,7 @@ export function buildSvgExportArtifact(
     options: SvgExportOptions
 ): SvgExportArtifact {
     const svgElement = getExportSvgElement(context);
-    const { svgClone, width, height } = prepareSvgForExport(svgElement, context.calculateBounds);
+    const { svgClone, width, height } = prepareSvgForExport(svgElement, context.calculateBounds, context.virtualization);
 
     applyExportBackground(svgClone, options.background, context.isDarkTheme());
     applyExportContrastAdjustments(svgClone, options.background);
