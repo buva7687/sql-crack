@@ -45,9 +45,10 @@ let activeOverlay: HTMLDivElement | null = null;
 let activeCleanupHandlers: Array<() => void> = [];
 let activeCompareContext: ActiveCompareContext | null = null;
 
-function normalizeNodeKey(node: Pick<FlowNode, 'type' | 'label'>): string {
+function normalizeNodeKey(node: Pick<FlowNode, 'type' | 'label' | 'alias'>): string {
     const normalizedLabel = node.label.trim().toLowerCase().replace(/\s+/g, ' ');
-    return `${node.type}:${normalizedLabel}`;
+    const alias = node.alias?.trim().toLowerCase();
+    return `${node.type}:${encodeURIComponent(normalizedLabel)}${alias ? `:alias:${encodeURIComponent(alias)}` : ''}`;
 }
 
 function nodeSignature(node: FlowNode): string {
@@ -62,8 +63,14 @@ function nodeSignature(node: FlowNode): string {
 
 function toNodeMap(nodes: FlowNode[]): Map<string, FlowNode> {
     const map = new Map<string, FlowNode>();
+    const occurrences = new Map<string, number>();
     for (const node of nodes) {
-        map.set(normalizeNodeKey(node), node);
+        const base = normalizeNodeKey(node);
+        const occurrence = (occurrences.get(base) || 0) + 1;
+        occurrences.set(base, occurrence);
+        // Keep the first key stable when a second instance appears on the other side.
+        const key = occurrence === 1 ? base : `${base}:instance:${occurrence}`;
+        map.set(key, node);
     }
     return map;
 }
@@ -217,7 +224,8 @@ function createNodeGroup(
     node: FlowNode,
     state: CompareNodeState,
     dark: boolean,
-    indexHint: number
+    indexHint: number,
+    nodeKey: string
 ): SVGGElement {
     const ns = 'http://www.w3.org/2000/svg';
     const group = document.createElementNS(ns, 'g');
@@ -263,7 +271,7 @@ function createNodeGroup(
     group.appendChild(type);
 
     group.setAttribute('data-compare-state', state);
-    group.setAttribute('data-node-key', normalizeNodeKey(node));
+    group.setAttribute('data-node-key', nodeKey);
     if (state === 'removed') {
         group.setAttribute('data-ghost-node', 'true');
     }
@@ -338,14 +346,14 @@ function renderGraphPane(
         graphGroup.appendChild(line);
     });
 
-    result.nodes.forEach((node, index) => {
-        const key = normalizeNodeKey(node);
+    let nodeIndex = 0;
+    toNodeMap(result.nodes).forEach((node, key) => {
         const state = nodeStates.get(key) || 'default';
-        graphGroup.appendChild(createNodeGroup(svg, node, state, dark, index));
+        graphGroup.appendChild(createNodeGroup(svg, node, state, dark, nodeIndex++, key));
     });
 
-    positionedGhostNodes.forEach((node, index) => {
-        graphGroup.appendChild(createNodeGroup(svg, node, 'removed', dark, result.nodes.length + index));
+    toNodeMap(positionedGhostNodes).forEach((node, key) => {
+        graphGroup.appendChild(createNodeGroup(svg, node, 'removed', dark, nodeIndex++, key));
     });
 
     const state = {

@@ -195,3 +195,38 @@ describe('compareView', () => {
         expect(source).toContain("document.removeEventListener('theme-change', themeChangeHandler)");
     });
 });
+
+it('counts added and removed repeated instances instead of overwriting them', () => {
+    const left = makeResult(['employees', 'employees']);
+    left.nodes[0].alias = 'e'; left.nodes[1].alias = 'm';
+    const right = makeResult(['employees', 'employees', 'employees']);
+    right.nodes[0].alias = 'e'; right.nodes[1].alias = 'm'; right.nodes[2].alias = 'n';
+    const added = computeCompareDiff(left, right);
+    expect(added.addedNodeKeys).toHaveLength(1);
+    expect(added.removedNodeKeys).toEqual([]);
+    expect(computeCompareDiff(right, left).removedNodeKeys).toEqual(added.addedNodeKeys);
+});
+
+it('retains duplicate nodes without aliases, including repeated JOIN labels', () => {
+    const left = makeResult(['INNER JOIN', 'INNER JOIN']);
+    const right = makeResult(['INNER JOIN', 'INNER JOIN', 'INNER JOIN']);
+    left.nodes.forEach(node => { node.type = 'join'; });
+    right.nodes.forEach(node => { node.type = 'join'; });
+    expect(computeCompareDiff(left, right).addedNodeKeys).toHaveLength(1);
+    expect(computeCompareDiff(right, left).removedNodeKeys).toHaveLength(1);
+    expect(computeCompareDiff(right, right).addedNodeKeys).toEqual([]);
+});
+
+it('keeps aliases stable when repeated table instances are reordered', () => {
+    const left = makeResult(['employees', 'employees']);
+    left.nodes[0].alias = 'e'; left.nodes[1].alias = 'm';
+    const right = { ...left, nodes: [...left.nodes].reverse() };
+    expect(computeCompareDiff(left, right)).toEqual(expect.objectContaining({ addedNodeKeys: [], removedNodeKeys: [], changedNodeKeys: [] }));
+});
+
+it('does not let identifier text collide with instance-key delimiters', () => {
+    const left = makeResult(['employees', 'employees', 'employees:instance:2']);
+    const right = makeResult(['employees']);
+    const diff = computeCompareDiff(left, right);
+    expect(diff.removedNodeKeys).toHaveLength(2);
+});

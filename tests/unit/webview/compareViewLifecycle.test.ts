@@ -3,6 +3,7 @@ import {
     isCompareViewActive,
     showCompareView,
 } from '../../../src/webview/ui/compareView';
+import { parseSql } from '../../../src/webview/sqlParser';
 import type { ParseResult } from '../../../src/webview/types';
 
 type Listener = (event: any) => void;
@@ -298,4 +299,25 @@ describe('compareView lifecycle', () => {
         expect(isCompareViewActive()).toBe(false);
         expect(container.children.find((child) => child.id === 'sql-crack-compare-overlay')).toBeUndefined();
     });
+    it('renders exactly the added instances and both removed ghosts for a third self-join', () => {
+        global.document = {
+            createElement: jest.fn((tag: string) => createElement(tag)),
+            createElementNS: jest.fn((_ns: string, tag: string) => createElement(tag)),
+            addEventListener: jest.fn(), removeEventListener: jest.fn(),
+        } as unknown as Document;
+        global.window = { addEventListener: jest.fn(), removeEventListener: jest.fn() } as unknown as Window & typeof globalThis;
+        const container = createElement('div');
+        const left = parseSql('SELECT * FROM employees e JOIN employees m ON e.manager_id=m.id', 'MySQL');
+        const right = parseSql('SELECT * FROM employees e JOIN employees m ON e.manager_id=m.id JOIN employees n ON m.manager_id=n.id', 'MySQL');
+        const render = (before: ParseResult, after: ParseResult) => {
+            showCompareView({ container: container as unknown as HTMLElement, left: { label: 'Before', result: before }, right: { label: 'After', result: after }, isDarkTheme: true });
+            return flatten(container.children).filter(element => element.getAttribute('data-compare-state'));
+        };
+        const added = render(left, right).filter(element => element.getAttribute('data-compare-state') === 'added');
+        expect(added.map(element => element.getAttribute('data-node-key'))).toEqual(['table:employees:alias:n', 'join:inner%20join:instance:2']);
+        const removed = render(right, left).filter(element => element.getAttribute('data-ghost-node') === 'true');
+        expect(removed).toHaveLength(2);
+        expect(new Set(removed.map(element => element.getAttribute('data-node-key'))).size).toBe(2);
+    });
+
 });

@@ -25,6 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Resolve SQL Flow column sources within each SELECT branch and merge UNION output lineage by column position, preserving distinct aliases and table instances.
 
+- Distinguish repeated table and operation instances in Compare, so added self-joins and removed instances receive the correct highlights and ghost nodes.
+
 ## [1.0.0] - 2026-10-22
 
 ### Fixed
