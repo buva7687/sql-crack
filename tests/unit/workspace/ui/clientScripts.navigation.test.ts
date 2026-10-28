@@ -529,7 +529,7 @@ describe('workspace clientScripts navigation context', () => {
         });
 
         expect(script).toContain('const padding = Math.max(18, Math.min(36');
-        expect(script).toContain('lineageScale = Math.max(0.3, Math.min(1.4, lineageScale));');
+        expect(script).toContain('lineageScale = Math.min(1.4, lineageScale);');
     });
 
     it('synchronizes lineage overlay offsets with clamped legend height values', () => {

@@ -261,6 +261,8 @@ describe('minimap in the compact stacked layout', () => {
 });
 
 describe('fit to view around stacked panels', () => {
+    afterEach(() => setMinimapMode('auto'));
+
     function createNode(id: string, x: number, y: number): FlowNode {
         return { id, type: 'table', label: id, x, y, width: 180, height: 60 };
     }
@@ -279,7 +281,7 @@ describe('fit to view around stacked panels', () => {
         } as unknown as SVGSVGElement;
     }
 
-    function fit(svg: SVGSVGElement, nodes: FlowNode[]): ViewState {
+    function fit(svg: SVGSVGElement, nodes: FlowNode[], minimapReserve = 0): ViewState {
         const state = { scale: 1, offsetX: 0, offsetY: 0, selectedNodeId: null, zoomedNodeId: null, previousZoomState: null } as unknown as ViewState;
         fitViewFeature({
             svg,
@@ -287,6 +289,7 @@ describe('fit to view around stacked panels', () => {
             currentNodes: nodes,
             cloudOffsets: new Map(),
             state,
+            minimapReserve,
             onUpdateTransform: jest.fn(),
             onUpdateZoomIndicator: jest.fn(),
             onSetFitViewScale: jest.fn(),
@@ -296,6 +299,27 @@ describe('fit to view around stacked panels', () => {
 
     const wideGraph = [createNode('a', 0, 0), createNode('b', 200, 0), createNode('c', 100, 660)]; // 380 x 720
     const slimGraph = [createNode('a', 0, 0), createNode('c', 0, 660)]; // 180 x 720
+
+    it.each(['auto', 'always'] as const)('reserves minimap space in a narrow viewport only when pinned (%s)', mode => {
+        setMinimapMode(mode);
+        const minimap = minimapElement();
+        applyCompactPanelLayout({
+            stats: null, hints: null, minimap, width: 650, height: 700, legendHeight: 0,
+            minimapPinned: mode === 'always',
+        });
+        const nodes = Array.from({ length: 8 }, (_, i) => createNode(`n${i}`, i * 200, 0));
+        const state = fit(createSvg(650, 700, [0, 0], [0, 0]), nodes, 182);
+        const last = nodes[nodes.length - 1];
+        const right = (last.x + last.width) * state.scale + state.offsetX;
+
+        if (mode === 'always') {
+            expect(minimap.style.visibility).not.toBe('hidden');
+            expect(right).toBeLessThanOrEqual(650 - 182);
+        } else {
+            expect(minimap.style.visibility).toBe('hidden');
+            expect(right).toBeCloseTo(620);
+        }
+    });
 
     it('uses the full width above the stack instead of the strip beside the hints panel', () => {
         const state = fit(createSvg(545, 1000, [272, 155], [272, 263]), wideGraph);

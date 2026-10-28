@@ -84,6 +84,7 @@ export function getLineageGraphScriptFragment(): string {
             lineageOffsetX = 0;
             lineageOffsetY = 0;
             refreshLineageMinimapViewport = null;
+            let lineageMinScale = 0.2;
 
             if (lineageDocumentMouseMoveHandler) {
                 document.removeEventListener('mousemove', lineageDocumentMouseMoveHandler);
@@ -143,15 +144,17 @@ export function getLineageGraphScriptFragment(): string {
                 if (bbox.width > 0 && bbox.height > 0 && containerRect.width > 0 && fitHeight > 0) {
                     // Work in pixel coordinates (no viewBox transformation)
                     const padding = Math.max(18, Math.min(36, Math.round(Math.min(containerRect.width, fitHeight) * 0.04)));
-                    const availableWidth = containerRect.width - padding * 2;
-                    const availableHeight = fitHeight - padding * 2;
+                    const availableWidth = Math.max(1, containerRect.width - padding * 2);
+                    const availableHeight = Math.max(1, fitHeight - padding * 2);
 
                     const scaleX = availableWidth / bbox.width;
                     const scaleY = availableHeight / bbox.height;
 
                     lineageScale = Math.min(scaleX, scaleY);
-                    // Allow moderate zoom-in so sparse graphs use available canvas.
-                    lineageScale = Math.max(0.3, Math.min(1.4, lineageScale));
+                    // Fit large graphs fully while allowing moderate zoom-in for sparse graphs.
+                    lineageScale = Math.min(1.4, lineageScale);
+                    // Zoom-out controls must not zoom back in after a fit below 20%.
+                    lineageMinScale = Math.min(0.2, lineageScale);
 
                     // Calculate bbox center
                     const bboxCenterX = bbox.x + bbox.width / 2;
@@ -179,7 +182,7 @@ export function getLineageGraphScriptFragment(): string {
             });
 
             zoomOutBtn?.addEventListener('click', () => {
-                lineageScale = Math.max(0.2, lineageScale / 1.2);
+                lineageScale = Math.max(lineageMinScale, lineageScale / 1.2);
                 updateLineageTransform();
             });
 
@@ -200,7 +203,7 @@ export function getLineageGraphScriptFragment(): string {
             svg.addEventListener('wheel', (e) => {
                 e.preventDefault();
                 const delta = e.deltaY > 0 ? 0.9 : 1.1;
-                lineageScale = Math.max(0.2, Math.min(3, lineageScale * delta));
+                lineageScale = Math.max(lineageMinScale, Math.min(3, lineageScale * delta));
                 updateLineageTransform();
             }, { passive: false });
 

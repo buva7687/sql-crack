@@ -9,6 +9,7 @@ import type {
 import { getConnectedNodeIds, getCycledNode, getKeyboardNavigableNodes, getSiblingCycleTarget } from './keyboardNavigation';
 import { isCompactPanelLayout } from '../ui/compactPanelLayout';
 import { FLOATING_PANEL_GAP } from '../ui/panelLayout';
+import { getMinimapMode } from '../minimapVisibility';
 
 /** Fit height a compact layout always leaves the graph, however tall the stacked panels are. */
 const COMPACT_MIN_GRAPH_FIT_HEIGHT = 320;
@@ -45,10 +46,11 @@ function measurePanelReserved(
         && hintsPanel.style.visibility !== 'hidden');
     const rightWithHints = hintsShown ? Math.max(right, hintsPanel!.offsetWidth + 32) : right;
     if (!compact) {
-        // The minimap sits on the right edge; a compact layout hides or moves it.
         return { right: Math.max(rightWithHints, minimapReserve), bottom: 0 };
     }
 
+    // Auto minimaps are hidden in compact layouts, but a pinned one stays on the right.
+    const pinnedMinimapReserve = getMinimapMode() === 'always' ? minimapReserve : 0;
     const statsHeight = statsPanel?.offsetHeight || 0;
     const hintsHeight = hintsShown ? hintsPanel!.offsetHeight : 0;
     const stackHeight = statsHeight && hintsHeight
@@ -56,8 +58,8 @@ function measurePanelReserved(
         : Math.max(statsHeight, hintsHeight);
     const limitBottom = (height: number): number =>
         Math.max(0, Math.min(height, viewport.height - 100 - COMPACT_MIN_GRAPH_FIT_HEIGHT));
-    const besideHints = { right: rightWithHints, bottom: limitBottom(statsHeight) };
-    const aboveStack = { right, bottom: limitBottom(stackHeight) };
+    const besideHints = { right: Math.max(rightWithHints, pinnedMinimapReserve), bottom: limitBottom(statsHeight) };
+    const aboveStack = { right: Math.max(right, pinnedMinimapReserve), bottom: limitBottom(stackHeight) };
     const fitScale = (reserved: { right: number; bottom: number }): number => Math.min(
         (viewport.width - reserved.right - padding) / graph.width,
         (viewport.height - 100 - reserved.bottom - padding) / graph.height
