@@ -1,4 +1,5 @@
 import type { EventListenerCallbacks, EventListenerContext } from './eventListenerTypes';
+import { MIN_MANUAL_ZOOM } from './zoomLimits';
 
 export function registerZoomPanListeners(
     context: EventListenerContext,
@@ -9,11 +10,12 @@ export function registerZoomPanListeners(
     if (!svg) {
         return;
     }
+    const getMinScale = (): number => context.getMinZoomScale?.() ?? MIN_MANUAL_ZOOM;
 
     svg.addEventListener('wheel', (e) => {
         e.preventDefault();
         const delta = e.deltaY > 0 ? 0.9 : 1.1;
-        const newScale = Math.min(Math.max(state.scale * delta, 0.2), 3);
+        const newScale = Math.min(Math.max(state.scale * delta, Math.min(getMinScale(), state.scale)), 3);
 
         const rect = svg.getBoundingClientRect();
         const mouseX = e.clientX - rect.left;
@@ -92,7 +94,7 @@ export function registerZoomPanListeners(
             const centerX = ((e.touches[0].clientX + e.touches[1].clientX) / 2) - rect.left;
             const centerY = ((e.touches[0].clientY + e.touches[1].clientY) / 2) - rect.top;
             const pinchScale = newDistance / pinchState.startDistance;
-            const newScale = Math.min(Math.max(pinchState.startScale * pinchScale, 0.2), 3);
+            const newScale = Math.min(Math.max(pinchState.startScale * pinchScale, Math.min(getMinScale(), pinchState.startScale)), 3);
 
             state.offsetX = centerX - (centerX - pinchState.startOffsetX) * (newScale / pinchState.startScale);
             state.offsetY = centerY - (centerY - pinchState.startOffsetY) * (newScale / pinchState.startScale);

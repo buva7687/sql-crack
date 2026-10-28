@@ -98,6 +98,18 @@ describe('Cloud drag regressions', () => {
 });
 
 describe('Search clear on empty input', () => {
+    it('wires the renderer clear callback to the real clear, not a no-op', () => {
+        // The feature calls onClearSearch, but the renderer used to pass `() => {}`,
+        // leaving old highlights and the "1/N" count after the text was deleted.
+        const setSearchBoxMatch = rendererSource.match(/export function setSearchBox\([\s\S]*?\n}/);
+        expect(setSearchBoxMatch).not.toBeNull();
+        expect(setSearchBoxMatch![0]).toContain('onClearSearch: clearSearch,');
+        const clearSearchMatch = rendererSource.match(/function clearSearch\(\): void \{[\s\S]*?\n}/);
+        expect(clearSearchMatch).not.toBeNull();
+        expect(clearSearchMatch![0]).toContain('onUpdateSearchCountDisplay: updateSearchCountDisplay');
+        expect(clearSearchMatch![0]).toContain("removeBreadcrumbSegment('search')");
+    });
+
     it('calls onClearSearch when input value becomes empty', () => {
         // When the user deletes all search text, clearSearch must fire
         // (same as pressing Escape) to reset breadcrumbs and highlights

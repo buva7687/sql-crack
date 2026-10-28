@@ -1,6 +1,7 @@
 import type { EventListenerCallbacks, EventListenerContext } from '../../../src/webview/interaction/eventListenerTypes';
 import { registerZoomPanListeners } from '../../../src/webview/interaction/zoomPanListeners';
 import type { ViewState } from '../../../src/webview/types';
+import { getMinZoomScale, MIN_MANUAL_ZOOM } from '../../../src/webview/interaction/zoomLimits';
 
 type Listener = (event: any) => void;
 
@@ -227,5 +228,66 @@ describe('zoomPanListeners', () => {
         expect(state.scale).toBeCloseTo(2);
         expect(callbacks.updateZoomIndicator).toHaveBeenCalled();
         expect(pinchMovePrevent).toHaveBeenCalled();
+    });
+
+    describe('zoom-out floor after a fit below the manual minimum', () => {
+        const wheelOut = (svg: FakeSvg) => svg.emit('wheel', { deltaY: 1, clientX: 110, clientY: 220, preventDefault: jest.fn() });
+        const pinch = (svg: FakeSvg, from: number, to: number) => {
+            const touches = (gap: number) => [{ clientX: 100, clientY: 100 }, { clientX: 100 + gap, clientY: 100 }];
+            svg.emit('touchstart', { touches: touches(from), preventDefault: jest.fn() });
+            svg.emit('touchmove', { touches: touches(to), preventDefault: jest.fn() });
+        };
+
+        it('never zooms in when scrolling out from a small fitted scale', () => {
+            const state = createState({ scale: 0.09 });
+            const svg = createSvg();
+            registerZoomPanListeners({ ...createContext(state, svg), getMinZoomScale: () => getMinZoomScale(0.09) } as EventListenerContext, createCallbacks());
+
+            wheelOut(svg);
+            expect(state.scale).toBeCloseTo(0.09);
+            expect(state.scale).toBeLessThan(MIN_MANUAL_ZOOM);
+        });
+
+        it('never zooms in when pinching out from a small fitted scale', () => {
+            const state = createState({ scale: 0.09 });
+            const svg = createSvg();
+            registerZoomPanListeners({ ...createContext(state, svg), getMinZoomScale: () => getMinZoomScale(0.09) } as EventListenerContext, createCallbacks());
+
+            pinch(svg, 200, 100);
+            expect(state.scale).toBeLessThanOrEqual(0.09);
+        });
+
+        it('keeps the manual 20% floor when the fit was larger', () => {
+            const state = createState({ scale: 0.21 });
+            const svg = createSvg();
+            registerZoomPanListeners({ ...createContext(state, svg), getMinZoomScale: () => getMinZoomScale(0.8) } as EventListenerContext, createCallbacks());
+
+            wheelOut(svg);
+            expect(state.scale).toBe(MIN_MANUAL_ZOOM);
+        });
+
+        it('does not raise a scale that is already below the floor, even without a fitted floor', () => {
+            const state = createState({ scale: 0.1 });
+            const svg = createSvg();
+            registerZoomPanListeners(createContext(state, svg), createCallbacks());
+
+            wheelOut(svg);
+            expect(state.scale).toBeLessThanOrEqual(0.1);
+        });
+
+        it('uses the fitted scale as the floor only when it is below the manual minimum', () => {
+            expect(getMinZoomScale(0.05)).toBe(0.05);
+            expect(getMinZoomScale(0.6)).toBe(MIN_MANUAL_ZOOM);
+            expect(getMinZoomScale(0)).toBe(MIN_MANUAL_ZOOM);
+            expect(getMinZoomScale(Number.NaN)).toBe(MIN_MANUAL_ZOOM);
+        });
+
+        it('applies the same floor to the toolbar Zoom out button', () => {
+            const rendererSource = require('fs').readFileSync(require('path').join(__dirname, '../../../src/webview/renderer.ts'), 'utf8') as string;
+            const zoomOut = rendererSource.match(/export function zoomOut\(\): void \{[\s\S]*?\n}/);
+            expect(zoomOut).not.toBeNull();
+            expect(zoomOut![0]).toContain('Math.min(getMinZoomScale(fitViewScale), state.scale)');
+            expect(rendererSource).toContain('getMinZoomScale: () => getMinZoomScale(fitViewScale),');
+        });
     });
 });

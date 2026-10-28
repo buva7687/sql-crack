@@ -10,7 +10,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Keep the SQL Flow minimap from covering the last nodes after fit-to-view, such as the Result node in the horizontal layout.
 - Keep the Performance Hints panel hidden after you hide it with **O**, instead of showing it again when the graph re-renders after a settings change or a CTE is expanded or collapsed.
-- Fit the Workspace lineage graph above its zoom controls, overview box and legend, so none of them covers a node such as the traced table.
+- Fit the Workspace lineage graph above its zoom controls, overview box and legend, and allow fits below 30% for large graphs.
+- Keep SQL Flow fit-to-view clear of the Query Stats panel at regular panel widths, by fitting the graph above or beside it.
+- Stop SQL Flow **Zoom out**, the mouse wheel and pinch from zooming in after fitting a large graph below 20%.
+- Clear the SQL Flow search highlights and result count when you delete the search text, as Escape already did.
+- Reserve space for an always-visible SQL Flow minimap when fitting graphs in narrow panels.
+- Include every graph node and edge in SVG, PNG, PDF and clipboard captures when viewport virtualization is active.
+- Use the current graph for minimap clicks and drags, including when the minimap first appears automatically.
+- Allow Workspace Graph fit-to-view and zoom-out below the old 30% floor.
+- Ignore late Workspace navigation responses while preserving independent Impact form and report requests.
 
 ## [1.0.0] - 2026-10-22
 

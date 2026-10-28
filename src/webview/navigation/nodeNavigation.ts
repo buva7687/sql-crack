@@ -14,13 +14,24 @@ import { getMinimapMode } from '../minimapVisibility';
 /** Fit height a compact layout always leaves the graph, however tall the stacked panels are. */
 const COMPACT_MIN_GRAPH_FIT_HEIGHT = 320;
 
+/** Margin fit keeps around the graph area: 50px at the top and bottom and on the left. */
+const FIT_EDGE_MARGIN = 50;
+
+interface PanelReserved {
+    left: number;
+    right: number;
+    bottom: number;
+}
+
 /**
  * Measure actual panel overlap to avoid hardcoding a fixed offset.
  * Returns the pixels to reserve for visible overlay panels. A regular layout
- * reserves the right side. A compact one stacks the hints panel above the
- * stats panel on opposite sides, so the graph gets whichever free area fits it
- * larger: the column beside the hints panel and above the stats panel, or the
- * full width above both.
+ * reserves the right side for hints, details and the minimap, and keeps the
+ * graph clear of the stats panel in the lower-left corner by fitting either
+ * above it or beside it, whichever fits larger. A compact one stacks the hints
+ * panel above the stats panel on opposite sides, so the graph gets whichever
+ * free area fits it larger: the column beside the hints panel and above the
+ * stats panel, or the full width above both.
  */
 function measurePanelReserved(
     svg: SVGSVGElement,
@@ -28,10 +39,10 @@ function measurePanelReserved(
     graph: { width: number; height: number },
     padding: number,
     minimapReserve = 0
-): { right: number; bottom: number } {
+): PanelReserved {
     const parent = svg.parentElement;
     if (!parent) {
-        return { right: minimapReserve, bottom: 0 };
+        return { left: 0, right: minimapReserve, bottom: 0 };
     }
     let right = 0;
     const detailsPanel = parent.querySelector('.details-panel') as HTMLElement | null;
@@ -45,8 +56,29 @@ function measurePanelReserved(
     const hintsShown = Boolean(hintsPanel && hintsPanel.offsetWidth > 0
         && hintsPanel.style.visibility !== 'hidden');
     const rightWithHints = hintsShown ? Math.max(right, hintsPanel!.offsetWidth + 32) : right;
+    const fitScale = (reserved: PanelReserved): number => Math.min(
+        (viewport.width - reserved.left - reserved.right - padding) / graph.width,
+        (viewport.height - 100 - reserved.bottom - padding) / graph.height
+    );
     if (!compact) {
-        return { right: Math.max(rightWithHints, minimapReserve), bottom: 0 };
+        const regular = { left: 0, right: Math.max(rightWithHints, minimapReserve), bottom: 0 };
+        const stats = measureVisiblePanelBox(svg, statsPanel);
+        if (!stats) {
+            return regular;
+        }
+        // Fit area edges in SVG coordinates: x from 50 + left, y down to height - 50 - bottom.
+        const aboveStats = {
+            ...regular,
+            bottom: Math.max(0, viewport.height - FIT_EDGE_MARGIN - (stats.top - FLOATING_PANEL_GAP)),
+        };
+        const besideStats = {
+            ...regular,
+            left: Math.max(0, stats.right + FLOATING_PANEL_GAP - FIT_EDGE_MARGIN),
+        };
+        if (aboveStats.bottom === 0 || besideStats.left === 0) {
+            return regular;
+        }
+        return fitScale(aboveStats) >= fitScale(besideStats) ? aboveStats : besideStats;
     }
 
     // Auto minimaps are hidden in compact layouts, but a pinned one stays on the right.
@@ -58,13 +90,21 @@ function measurePanelReserved(
         : Math.max(statsHeight, hintsHeight);
     const limitBottom = (height: number): number =>
         Math.max(0, Math.min(height, viewport.height - 100 - COMPACT_MIN_GRAPH_FIT_HEIGHT));
-    const besideHints = { right: Math.max(rightWithHints, pinnedMinimapReserve), bottom: limitBottom(statsHeight) };
-    const aboveStack = { right: Math.max(right, pinnedMinimapReserve), bottom: limitBottom(stackHeight) };
-    const fitScale = (reserved: { right: number; bottom: number }): number => Math.min(
-        (viewport.width - reserved.right - padding) / graph.width,
-        (viewport.height - 100 - reserved.bottom - padding) / graph.height
-    );
+    const besideHints = { left: 0, right: Math.max(rightWithHints, pinnedMinimapReserve), bottom: limitBottom(statsHeight) };
+    const aboveStack = { left: 0, right: Math.max(right, pinnedMinimapReserve), bottom: limitBottom(stackHeight) };
     return fitScale(besideHints) > fitScale(aboveStack) ? besideHints : aboveStack;
+}
+
+/** Box of a shown panel relative to the SVG's top-left corner, or null when hidden or unmeasurable. */
+function measureVisiblePanelBox(svg: SVGSVGElement, panel: HTMLElement | null): { top: number; right: number } | null {
+    if (!panel || panel.offsetWidth <= 0 || panel.style.display === 'none' || panel.style.visibility === 'hidden') {
+        return null;
+    }
+    const svgRect = svg.getBoundingClientRect();
+    const panelRect = panel.getBoundingClientRect();
+    const top = panelRect.top - (svgRect.top ?? 0);
+    const right = panelRect.right - (svgRect.left ?? 0);
+    return Number.isFinite(top) && Number.isFinite(right) ? { top, right } : null;
 }
 
 interface NodeNavigationShared {
@@ -346,7 +386,7 @@ export function fitViewFeature(options: FitViewOptions): void {
     }
 
     const reserved = measurePanelReserved(svg, rect, { width: graphWidth, height: graphHeight }, padding * 2, options.minimapReserve ?? 0);
-    const availableWidth = Math.max(100, rect.width - reserved.right);
+    const availableWidth = Math.max(100, rect.width - reserved.left - reserved.right);
     const availableHeight = Math.max(100, rect.height - 100 - reserved.bottom);
     const scaleX = (availableWidth - padding * 2) / graphWidth;
     const scaleY = (availableHeight - padding * 2) / graphHeight;
@@ -354,7 +394,7 @@ export function fitViewFeature(options: FitViewOptions): void {
     state.scale = Number.isFinite(nextScale) && nextScale > 0 ? nextScale : 1;
     onSetFitViewScale(state.scale);
 
-    state.offsetX = (availableWidth - graphWidth * state.scale) / 2 - minX * state.scale + 50;
+    state.offsetX = (availableWidth - graphWidth * state.scale) / 2 - minX * state.scale + 50 + reserved.left;
     state.offsetY = (availableHeight - graphHeight * state.scale) / 2 - minY * state.scale + 50;
     state.zoomedNodeId = null;
     state.previousZoomState = null;
@@ -520,7 +560,7 @@ export function zoomToNodeFeature(options: ZoomToNodeOptions): void {
     const graphWidth = maxX - minX;
     const graphHeight = maxY - minY;
     const reserved = measurePanelReserved(svg, rect, { width: graphWidth, height: graphHeight }, 0);
-    const availableWidth = rect.width - reserved.right;
+    const availableWidth = rect.width - reserved.left - reserved.right;
     const availableHeight = rect.height - 100 - reserved.bottom;
     if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY) || graphWidth <= 0 || graphHeight <= 0) {
         onFitView();
@@ -539,7 +579,7 @@ export function zoomToNodeFeature(options: ZoomToNodeOptions): void {
     const centerY = (minY + maxY) / 2;
 
     state.scale = targetScale;
-    state.offsetX = availableWidth / 2 - centerX * state.scale + 50;
+    state.offsetX = availableWidth / 2 - centerX * state.scale + 50 + reserved.left;
     state.offsetY = availableHeight / 2 - centerY * state.scale + 50;
     state.zoomedNodeId = node.id;
 

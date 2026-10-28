@@ -551,6 +551,63 @@ describe('nodeNavigation', () => {
     });
 
     describe('fitViewFeature', () => {
+        describe('keeps the graph clear of the Query Stats panel in a regular-width panel', () => {
+            // Measured in the audit (A07): panel 984x799, stats at x 16-316, y 513-730.
+            const statsBox = { left: 16, right: 316, top: 513, bottom: 730, width: 300, height: 217 };
+            function svgWithStats(display = 'block'): SVGSVGElement {
+                const stats = {
+                    offsetWidth: statsBox.width,
+                    offsetHeight: statsBox.height,
+                    style: { display, visibility: '' },
+                    getBoundingClientRect: () => statsBox,
+                };
+                return {
+                    getBoundingClientRect: () => ({ left: 0, top: 0, width: 984, height: 799 }),
+                    parentElement: { querySelector: (selector: string) => (selector === '.stats-panel' ? stats : null) },
+                } as unknown as SVGSVGElement;
+            }
+            function fitAndMeasure(svg: SVGSVGElement, nodes: FlowNode[]) {
+                const state = createState();
+                fitViewFeature({
+                    svg, renderNodes: nodes, currentNodes: nodes, cloudOffsets: new Map(), state,
+                    onUpdateTransform: jest.fn(), onUpdateZoomIndicator: jest.fn(), onSetFitViewScale: jest.fn(),
+                });
+                return nodes.map(node => ({
+                    left: node.x * state.scale + state.offsetX,
+                    right: (node.x + node.width) * state.scale + state.offsetX,
+                    top: node.y * state.scale + state.offsetY,
+                    bottom: (node.y + node.height) * state.scale + state.offsetY,
+                }));
+            }
+            const overlapsStats = (box: { left: number; right: number; top: number; bottom: number }) =>
+                box.left < statsBox.right && box.right > statsBox.left && box.top < statsBox.bottom && box.bottom > statsBox.top;
+
+            // Both graphs have a node in their lower-left corner, which a plain
+            // centred fit puts behind the stats panel.
+            it('fits a graph with a lower-left node without any node behind the stats panel', () => {
+                const nodes = [
+                    createNode('top-left', 0, 0), createNode('top-right', 800, 0),
+                    createNode('mid', 400, 320),
+                    createNode('bottom-left', 0, 640), createNode('bottom-right', 800, 640),
+                ];
+                const boxes = fitAndMeasure(svgWithStats(), nodes);
+                expect(boxes.filter(overlapsStats)).toEqual([]);
+            });
+
+            it('fits a wide two-row graph without any node behind the stats panel', () => {
+                const nodes = Array.from({ length: 16 }, (_, i) => createNode(`n${i}`, (i % 8) * 220, i < 8 ? 0 : 500));
+                const boxes = fitAndMeasure(svgWithStats(), nodes);
+                expect(boxes.filter(overlapsStats)).toEqual([]);
+            });
+
+            it('ignores a hidden stats panel', () => {
+                const nodes = Array.from({ length: 7 }, (_, i) => createNode(`n${i}`, 0, i * 110));
+                const hidden = fitAndMeasure(svgWithStats('none'), nodes);
+                const noPanel = fitAndMeasure(createMockSvg(984, 799), nodes);
+                expect(hidden).toEqual(noPanel);
+            });
+        });
+
         it('keeps the right-hand minimap clear of a wide graph', () => {
             // A single horizontal row, as the horizontal layout produces.
             const nodes = Array.from({ length: 8 }, (_, i) => createNode(`n${i}`, i * 200, 0));

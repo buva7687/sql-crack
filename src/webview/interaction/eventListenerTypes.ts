@@ -13,6 +13,8 @@ export interface EventListenerContext {
     cloudOffsets: Map<string, { offsetX: number; offsetY: number }>;
     getSearchBox: () => HTMLInputElement | null;
     documentListeners: Array<{ type: string; handler: EventListener }>;
+    /** Zoom-out floor for wheel and pinch; defaults to the manual minimum. */
+    getMinZoomScale?: () => number;
 }
 
 export interface EventListenerCallbacks {

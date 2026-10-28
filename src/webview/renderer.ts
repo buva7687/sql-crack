@@ -213,6 +213,7 @@ import { setupEventListeners as setupRendererEventListeners } from './interactio
 import { pulseNodeFeature, pulseNodeInCloudFeature } from './interaction/nodePulse';
 import { selectNodeFeature } from './interaction/nodeSelection';
 import { findNodeAtLine } from './interaction/lineNodeLookup';
+import { getMinZoomScale } from './interaction/zoomLimits';
 import { restoreNodeBorderState } from './nodeBorderState';
 import type { RendererContext } from './types/rendererContext';
 import {
@@ -1261,6 +1262,7 @@ export function initRenderer(container: HTMLElement): void {
             cloudOffsets: rendererContext.cloud.cloudOffsets,
             getSearchBox: rendererContext.dom.getSearchBox,
             documentListeners,
+            getMinZoomScale: () => getMinZoomScale(fitViewScale),
         },
         {
             updateCloudAndArrow,
@@ -2619,7 +2621,8 @@ export function zoomIn(): void {
 }
 
 export function zoomOut(): void {
-    state.scale = Math.max(state.scale / 1.2, 0.2);
+    // Never zoom in: a fit may already sit below the manual minimum.
+    state.scale = Math.max(state.scale / 1.2, Math.min(getMinZoomScale(fitViewScale), state.scale));
     updateTransform();
     updateZoomIndicator();
     recordLayoutHistorySnapshot();
@@ -2758,7 +2761,7 @@ export function setSearchBox(input: HTMLInputElement, countIndicator: HTMLSpanEl
         onNodeMatchActivated: () => {},
         onAddBreadcrumbSegment: () => {},
         onRemoveBreadcrumbSegment: () => {},
-        onClearSearch: () => {},
+        onClearSearch: clearSearch,
     });
 }
 
