@@ -551,6 +551,32 @@ describe('nodeNavigation', () => {
     });
 
     describe('fitViewFeature', () => {
+        it('keeps the right-hand minimap clear of a wide graph', () => {
+            // A single horizontal row, as the horizontal layout produces.
+            const nodes = Array.from({ length: 8 }, (_, i) => createNode(`n${i}`, i * 200, 0));
+            const fit = (minimapReserve?: number) => {
+                const state = createState();
+                fitViewFeature({
+                    svg: createMockSvg(1200, 700),
+                    renderNodes: nodes,
+                    currentNodes: nodes,
+                    cloudOffsets: new Map(),
+                    state,
+                    minimapReserve,
+                    onUpdateTransform: jest.fn(),
+                    onUpdateZoomIndicator: jest.fn(),
+                    onSetFitViewScale: jest.fn(),
+                });
+                const last = nodes[nodes.length - 1];
+                return (last.x + last.width) * state.scale + state.offsetX;
+            };
+
+            // Without a reserve the last node reaches the minimap's area.
+            expect(fit()).toBeGreaterThan(1200 - 182);
+            // With the reserve every node ends before the minimap's left edge.
+            expect(fit(182)).toBeLessThanOrEqual(1200 - 182);
+        });
+
         it('does nothing when svg is null', () => {
             const state = createState();
             const onUpdateTransform = jest.fn();

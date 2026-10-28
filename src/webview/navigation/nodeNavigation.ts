@@ -25,11 +25,12 @@ function measurePanelReserved(
     svg: SVGSVGElement,
     viewport: { width: number; height: number },
     graph: { width: number; height: number },
-    padding: number
+    padding: number,
+    minimapReserve = 0
 ): { right: number; bottom: number } {
     const parent = svg.parentElement;
     if (!parent) {
-        return { right: 0, bottom: 0 };
+        return { right: minimapReserve, bottom: 0 };
     }
     let right = 0;
     const detailsPanel = parent.querySelector('.details-panel') as HTMLElement | null;
@@ -44,7 +45,8 @@ function measurePanelReserved(
         && hintsPanel.style.visibility !== 'hidden');
     const rightWithHints = hintsShown ? Math.max(right, hintsPanel!.offsetWidth + 32) : right;
     if (!compact) {
-        return { right: rightWithHints, bottom: 0 };
+        // The minimap sits on the right edge; a compact layout hides or moves it.
+        return { right: Math.max(rightWithHints, minimapReserve), bottom: 0 };
     }
 
     const statsHeight = statsPanel?.offsetHeight || 0;
@@ -260,6 +262,11 @@ interface FitViewOptions {
     onUpdateTransform: () => void;
     onUpdateZoomIndicator: () => void;
     onSetFitViewScale: (scale: number) => void;
+    /**
+     * Width to keep clear on the right for the minimap. Fit runs before the
+     * minimap is shown during render, so the caller passes whether it will be.
+     */
+    minimapReserve?: number;
     /** @deprecated fitView measures the child layout produced during render. */
     layoutSubflowNodesVertical?: (children: FlowNode[], edges: FlowEdge[]) => { width: number; height: number };
 }
@@ -336,7 +343,7 @@ export function fitViewFeature(options: FitViewOptions): void {
         return;
     }
 
-    const reserved = measurePanelReserved(svg, rect, { width: graphWidth, height: graphHeight }, padding * 2);
+    const reserved = measurePanelReserved(svg, rect, { width: graphWidth, height: graphHeight }, padding * 2, options.minimapReserve ?? 0);
     const availableWidth = Math.max(100, rect.width - reserved.right);
     const availableHeight = Math.max(100, rect.height - 100 - reserved.bottom);
     const scaleX = (availableWidth - padding * 2) / graphWidth;

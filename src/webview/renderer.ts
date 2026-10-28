@@ -2526,6 +2526,7 @@ function updateHintsPanel(): void {
         isDarkTheme: state.isDarkTheme,
         panelBottom,
         hintsMinimized,
+        hiddenByUser: !hintsVisible,
         setHintsMinimized: (value) => {
             hintsMinimized = value;
         },
@@ -2554,13 +2555,18 @@ function updateHintsPanel(): void {
         },
     });
 }
+/** Minimap width (150px) plus its 16px edge offset and a 16px gap. */
+const MINIMAP_FIT_RESERVE = 182;
+
 function fitView(): void {
+    const minimapNodeCount = renderNodes.length > 0 ? renderNodes.length : currentNodes.length;
     fitViewFeature({
         svg,
         renderNodes,
         currentNodes,
         cloudOffsets,
         state,
+        minimapReserve: shouldShowMinimap(minimapNodeCount) ? MINIMAP_FIT_RESERVE : 0,
         onSetFitViewScale: (scale) => {
             fitViewScale = scale;
         },

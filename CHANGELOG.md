@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Keep the SQL Flow minimap from covering the last nodes after fit-to-view, such as the Result node in the horizontal layout.
+- Keep the Performance Hints panel hidden after you hide it with **O**, instead of showing it again when the graph re-renders after a settings change or a CTE is expanded or collapsed.
+- Fit the Workspace lineage graph above its zoom controls, overview box and legend, so none of them covers a node such as the traced table.
+
 ## [1.0.0] - 2026-10-22
 
 ### Fixed

@@ -108,6 +108,20 @@ export function getLineageGraphScriptFragment(): string {
                 }
             }
 
+            function getLineageFitHeight(currentContainer, containerRect) {
+                let clearBottom = containerRect.bottom;
+                ['.lineage-zoom-controls', '#lineage-minimap', '#lineage-legend'].forEach((selector) => {
+                    const overlay = currentContainer.querySelector(selector);
+                    if (!overlay) return;
+                    const style = getComputedStyle(overlay);
+                    const rect = overlay.getBoundingClientRect();
+                    if (style.display === 'none' || style.visibility === 'hidden' || rect.width <= 0 || rect.height <= 0) return;
+                    if (rect.top > containerRect.top) clearBottom = Math.min(clearBottom, rect.top);
+                });
+                // Never squeeze the graph below a usable height for very short panels.
+                return Math.max(Math.min(containerRect.height, 160), clearBottom - containerRect.top);
+            }
+
             function fitToContainer(isAutoFit = false) {
                 if (isAutoFit && lineageAutoFitNodeId === lineageCurrentNodeId && lineageCurrentNodeId !== null) {
                     return;
@@ -121,12 +135,16 @@ export function getLineageGraphScriptFragment(): string {
 
                 const containerRect = currentContainer.getBoundingClientRect();
                 const bbox = currentGraphContainer.getBBox();
+                // The zoom controls, overview and legend are drawn over the bottom of
+                // the canvas. Fit the graph into the area above all of them so none
+                // of them covers a node.
+                const fitHeight = getLineageFitHeight(currentContainer, containerRect);
 
-                if (bbox.width > 0 && bbox.height > 0 && containerRect.width > 0 && containerRect.height > 0) {
+                if (bbox.width > 0 && bbox.height > 0 && containerRect.width > 0 && fitHeight > 0) {
                     // Work in pixel coordinates (no viewBox transformation)
-                    const padding = Math.max(18, Math.min(36, Math.round(Math.min(containerRect.width, containerRect.height) * 0.04)));
+                    const padding = Math.max(18, Math.min(36, Math.round(Math.min(containerRect.width, fitHeight) * 0.04)));
                     const availableWidth = containerRect.width - padding * 2;
-                    const availableHeight = containerRect.height - padding * 2;
+                    const availableHeight = fitHeight - padding * 2;
 
                     const scaleX = availableWidth / bbox.width;
                     const scaleY = availableHeight / bbox.height;
@@ -139,9 +157,9 @@ export function getLineageGraphScriptFragment(): string {
                     const bboxCenterX = bbox.x + bbox.width / 2;
                     const bboxCenterY = bbox.y + bbox.height / 2;
 
-                    // Container center
+                    // Center of the area left clear of the overlays
                     const containerCenterX = containerRect.width / 2;
-                    const containerCenterY = containerRect.height / 2;
+                    const containerCenterY = fitHeight / 2;
 
                     // Offset to center the scaled bbox in the container
                     lineageOffsetX = containerCenterX - bboxCenterX * lineageScale;

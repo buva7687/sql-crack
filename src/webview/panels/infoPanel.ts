@@ -68,6 +68,8 @@ export interface HintsPanelOptions {
     isDarkTheme: boolean;
     panelBottom: number;
     hintsMinimized: boolean;
+    /** The user hid the panel (O key or command); update its content but keep it hidden. */
+    hiddenByUser?: boolean;
     setHintsMinimized: (value: boolean) => void;
     hintsShowAll: boolean;
     setHintsShowAll: (value: boolean) => void;
@@ -633,6 +635,7 @@ export function updateHintsPanelContent(options: HintsPanelOptions): void {
         isDarkTheme,
         panelBottom,
         hintsMinimized,
+        hiddenByUser = false,
         setHintsMinimized,
         hintsShowAll,
         setHintsShowAll,
@@ -659,9 +662,9 @@ export function updateHintsPanelContent(options: HintsPanelOptions): void {
         return;
     }
 
-    hintsPanel.style.opacity = '1';
-    hintsPanel.style.visibility = 'visible';
-    hintsPanel.style.transform = 'translateY(0)';
+    hintsPanel.style.opacity = hiddenByUser ? '0' : '1';
+    hintsPanel.style.visibility = hiddenByUser ? 'hidden' : 'visible';
+    hintsPanel.style.transform = hiddenByUser ? 'translateY(8px)' : 'translateY(0)';
 
     const textColor = isDarkTheme ? UI_COLORS.text : UI_COLORS.textLight;
     const textColorMuted = isDarkTheme ? UI_COLORS.textMuted : UI_COLORS.textLightMuted;
