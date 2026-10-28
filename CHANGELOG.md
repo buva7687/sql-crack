@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Search the complete SQL Flow graph, including nodes outside the virtualized viewport, and restore match highlights as nodes return to view.
 - Preserve focus dimming and zoom-to-node visibility when virtualized nodes and edges are redrawn.
 
+- Resolve SQL Flow column sources within each SELECT branch and merge UNION output lineage by column position, preserving distinct aliases and table instances.
+
 ## [1.0.0] - 2026-10-22
 
 ### Fixed

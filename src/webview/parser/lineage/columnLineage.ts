@@ -1,6 +1,7 @@
 // Column lineage extraction
 
-import { FlowNode, ColumnLineage } from '../../types';
+import { FlowNode, FlowEdge, ColumnLineage } from '../../types';
+import { getSelectSourceScope, getIncomingEdgeMap } from './sourceScope';
 
 function getAstString(val: any, depth = 0): string | null {
     if (depth > 6 || val === null || val === undefined) { return null; }
@@ -28,7 +29,39 @@ function getAstString(val: any, depth = 0): string | null {
     return null;
 }
 
-export function extractColumnLineage(stmt: any, nodes: FlowNode[]): ColumnLineage[] {
+export function extractColumnLineage(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): ColumnLineage[] {
+    const nodeMap = new Map(nodes.map(node => [node.id, node]));
+    const incoming = getIncomingEdgeMap(edges, false);
+    const selects = nodes.filter(node => node.type === 'select');
+    let branch = stmt;
+    let index = 0;
+    let lineage: ColumnLineage[] = [];
+    const visited = new Set<any>();
+    while (branch && !visited.has(branch)) {
+        visited.add(branch);
+        const select = selects[index];
+        const scope = select ? [...getSelectSourceScope(select.id, nodeMap, incoming).values()] : [];
+        const branchLineage = extractSelectColumnLineage(branch, scope);
+        if (index === 0) {
+            lineage = branchLineage;
+        } else {
+            // UNION output names come from the first SELECT; aliases in later branches may differ.
+            lineage.forEach((column, ordinal) => {
+                for (const source of branchLineage[ordinal]?.sources || []) {
+                    if (!column.sources.some(existing => existing.nodeId === source.nodeId && existing.table === source.table && existing.column === source.column)) {
+                        column.sources.push(source);
+                    }
+                }
+            });
+        }
+        if (!/^UNION\b/i.test(branch.set_op || '')) { break; }
+        branch = branch._next;
+        index++;
+    }
+    return lineage;
+}
+
+function extractSelectColumnLineage(stmt: any, nodes: FlowNode[]): ColumnLineage[] {
     const lineage: ColumnLineage[] = [];
 
     if (!stmt || stmt.type?.toLowerCase() !== 'select' || !stmt.columns) {

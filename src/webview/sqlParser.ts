@@ -1517,7 +1517,7 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
         assignLineNumbers(nodes, originalSql, edges);
 
         // Extract column lineage
-        const columnLineage = extractColumnLineage(innerSelectStmt, nodes);
+        const columnLineage = extractColumnLineage(innerSelectStmt, nodes, edges);
 
         // Generate column flows for visualization
         const columnFlows = generateColumnFlows(innerSelectStmt, nodes, edges);

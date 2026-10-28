@@ -2,6 +2,7 @@
 
 import { FlowNode, FlowEdge, ColumnFlow, ColumnInfo, LineageTransformation } from '../../types';
 import { safeString } from '../../../shared';
+import { getSelectSourceScope, getIncomingEdgeMap } from './sourceScope';
 
 function normalizeIdentifier(value: string | undefined): string {
     if (!value) {
@@ -64,13 +65,8 @@ export function generateColumnFlows(
     nodes.forEach(node => nodeMap.set(node.id, node));
 
     // Build edge map: target -> sources (for tracing backwards)
-    const incomingEdges = new Map<string, string[]>();
-    edges.forEach(edge => {
-        if (!incomingEdges.has(edge.target)) {
-            incomingEdges.set(edge.target, []);
-        }
-        incomingEdges.get(edge.target)!.push(edge.source);
-    });
+    const incomingEdges = getIncomingEdgeMap(edges);
+    const scopeEdges = getIncomingEdgeMap(edges, false);
 
     // Find SELECT nodes (output nodes)
     const selectNodes = nodes.filter(n => n.type === 'select');
@@ -80,12 +76,13 @@ export function generateColumnFlows(
     for (const selectNode of selectNodes) {
         if (!selectNode.columns || selectNode.columns.length === 0) {continue;}
 
+        const sourceScope = getSelectSourceScope(selectNode.id, nodeMap, scopeEdges);
         for (const [outputIndex, outputCol] of selectNode.columns.entries()) {
             // Build full lineage path for this output column
             const lineagePath = buildColumnLineagePath(
                 outputCol,
                 selectNode,
-                nodeMap,
+                sourceScope,
                 incomingEdges
             );
 
