@@ -241,13 +241,21 @@ describe('Bug 7: UNION result node is the final output', () => {
         }
     });
 
-    // Source-reading: verify the fix is present
-    it('processStatement returns unionId when UNION is present', () => {
-        const source = readFileSync(
-            join(__dirname, '../../src/webview/parser/statements/select.ts'),
-            'utf8'
-        );
-        expect(source).toContain('return unionId;');
+    it.each(['cte', 'subquery'] as const)('connects a nested compound output to its outer %s consumer', containerType => {
+        const inner = 'SELECT combined.id FROM (SELECT id FROM t1 UNION ALL SELECT id FROM t2) combined WHERE combined.id > 0';
+        const sql = containerType === 'cte'
+            ? `WITH filtered AS (${inner}) SELECT * FROM filtered`
+            : `SELECT * FROM (${inner}) filtered`;
+        const result = parseSql(sql, 'PostgreSQL');
+        expect(result.error).toBeUndefined();
+        const container = result.nodes.find(node => node.type === containerType)!;
+        const compound = container.children!.find(node => node.type === 'union')!;
+        const consumer = container.children!.find(node => node.type === 'filter' && node.label === 'WHERE')!;
+        expect(compound).toBeDefined();
+        expect(consumer).toBeDefined();
+        expect(container.childEdges).toEqual(expect.arrayContaining([
+            expect.objectContaining({ source: compound.id, target: consumer.id })
+        ]));
     });
 });
 

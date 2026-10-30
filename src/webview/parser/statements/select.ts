@@ -5,6 +5,7 @@ import type {
     SqlDialect
 } from '../../types';
 import { unwrapIdentifierValue } from '../astUtils';
+import { getSetOperationTree, type SetOperationTree } from './setOperations';
 import type { ParserContext } from '../context';
 import {
     extractColumns,
@@ -41,10 +42,6 @@ interface SelectExecutionContext {
 
 function genId(runtime: SelectExecutionContext, prefix: string): string {
     return runtime.deps.genId(prefix);
-}
-
-function processStatement(runtime: SelectExecutionContext, stmt: any, nodes: FlowNode[], edges: FlowEdge[]): string | null {
-    return runtime.deps.processStatement(runtime.context, stmt, nodes, edges);
 }
 
 function trackTableUsage(runtime: SelectExecutionContext, tableName: string): void {
@@ -158,6 +155,11 @@ function processSelect(
     cteNames: Set<string> = new Set()
 ): string {
     const ctx = runtime.context;
+    const setTree = getSetOperationTree(stmt, ctx.dialect);
+    if (setTree) {
+        return processSetOperationTree(runtime, setTree, nodes, edges,
+            branch => processSelect(runtime, branch, nodes, edges, cteNames)).id!;
+    }
     const cteNodeIdsByName = new Map<string, string>();
     const cteReferenceIdsByName = new Map<string, string[]>();
 
@@ -670,59 +672,7 @@ function processSelect(
 
     previousId = selectId;
 
-    // Process ORDER BY
-    // orderby can be an array or an object with columns property
-    const hasOrderBy = stmt.orderby && (
-        (Array.isArray(stmt.orderby) && stmt.orderby.length > 0) ||
-        (stmt.orderby.columns && Array.isArray(stmt.orderby.columns) && stmt.orderby.columns.length > 0)
-    );
-    if (hasOrderBy) {
-        const sortId = genId(runtime, 'sort');
-        const orderbyArr = Array.isArray(stmt.orderby) ? stmt.orderby : (stmt.orderby.columns || []);
-        const sortCols = orderbyArr.map((o: any) => {
-            const col = resolveColumnName(o.expr?.column) || resolveColumnName(o.expr) || o.expr?.value || '?';
-            const dir = o.type || 'ASC';
-            return `${col} ${dir}`;
-        }).join(', ');
-        nodes.push({
-            id: sortId,
-            type: 'sort',
-            label: 'ORDER BY',
-            description: 'Sort results',
-            details: [sortCols],
-            x: 0, y: 0, width: 140, height: 60
-        });
-
-        edges.push({
-            id: genId(runtime, 'e'),
-            source: previousId,
-            target: sortId
-        });
-        previousId = sortId;
-    }
-
-    // Process LIMIT — guard against phantom objects from node-sql-parser
-    // (PostgreSQL, Snowflake, Trino, Redshift return { seperator: "", value: [] } when no LIMIT exists)
-    if (stmt.limit && !(Array.isArray(stmt.limit.value) && stmt.limit.value.length === 0)) {
-        ctx.hasNoLimit = false;
-        const limitId = genId(runtime, 'limit');
-        const limitDetails = resolveLimitDetails(stmt.limit);
-        nodes.push({
-            id: limitId,
-            type: 'limit',
-            label: 'LIMIT',
-            description: 'Limit rows',
-            details: [limitDetails],
-            x: 0, y: 0, width: 120, height: 60
-        });
-
-        edges.push({
-            id: genId(runtime, 'e'),
-            source: previousId,
-            target: limitId
-        });
-        previousId = limitId;
-    }
+    previousId = appendSelectTail(runtime, stmt, nodes, edges, previousId)!;
 
     // Add result node
     const resultId = genId(runtime, 'result');
@@ -740,64 +690,104 @@ function processSelect(
         target: resultId
     });
 
-    // Handle UNION/INTERSECT/EXCEPT
-    if (stmt._next) {
-        ctx.stats.unions++;
-        const nextResultId = processStatement(runtime, stmt._next, nodes, edges);
-        if (nextResultId) {
-            const setOp = stmt.set_op || 'UNION';
-            maybeAddSetOperationColumnCountHint(ctx, setOp, stmt, stmt._next);
-            const lastNode = nodes[nodes.length - 1];
-            const nextNode = lastNode?.id === nextResultId ? lastNode : undefined;
-            // UNION ALL is associative. Reuse the merge node from the next
-            // branch instead of building a merge chain one level per branch.
-            if (setOp.toUpperCase() === 'UNION ALL' && nextNode?.type === 'union' && nextNode.label === 'UNION ALL') {
-                const existingCount = /^(\d+) branches$/.exec(nextNode.details?.[0] ?? '');
-                nextNode.details = [`${(existingCount ? Number(existingCount[1]) : 2) + 1} branches`];
-                edges.push({ id: genId(runtime, 'e'), source: resultId, target: nextResultId });
-                return nextResultId;
-            }
-            const unionId = genId(runtime, 'union');
-
-            // Collect tables from both sides for details
-            const leftTables = extractTablesFromStatement(stmt, ctx.dialect);
-            const rightTables = extractTablesFromStatement(stmt._next, ctx.dialect);
-            const unionDetails: string[] = [];
-            if (leftTables.length > 0) {
-                unionDetails.push(`Left: ${leftTables.join(', ')}`);
-            }
-            if (rightTables.length > 0) {
-                unionDetails.push(`Right: ${rightTables.join(', ')}`);
-            }
-
-            nodes.push({
-                id: unionId,
-                type: 'union',
-                label: setOp.toUpperCase(),
-                description: `${setOp} operation`,
-                details: unionDetails.length > 0 ? unionDetails : undefined,
-                x: 0, y: 0, width: 140, height: 60
-            });
-
-            // Connect both results to the union
-            edges.push({
-                id: genId(runtime, 'e'),
-                source: resultId,
-                target: unionId
-            });
-            edges.push({
-                id: genId(runtime, 'e'),
-                source: nextResultId,
-                target: unionId
-            });
-
-            // Return the union node as the final output so downstream
-            // nodes connect to the combined result, not just the first branch
-            return unionId;
-        }
-    }
-
     return resultId;
+}
+
+interface NestedSelectPosition {
+    parentId?: string;
+    depth: number;
+}
+
+function appendSelectTail(
+    runtime: SelectExecutionContext,
+    stmt: any,
+    nodes: FlowNode[],
+    edges: FlowEdge[],
+    previousId: string | null,
+    nested?: NestedSelectPosition
+): string | null {
+    const position = nested ? { parentId: nested.parentId, depth: nested.depth + 1 } : {};
+    const prefix = nested ? 'child_' : '';
+    const orderby = Array.isArray(stmt.orderby) ? stmt.orderby : stmt.orderby?.columns;
+    if (orderby?.length) {
+        const sortId = genId(runtime, `${prefix}sort`);
+        const sortCols = orderby.map((item: any) => {
+            const column = resolveColumnName(item.expr?.column) || resolveColumnName(item.expr) || item.expr?.value || '?';
+            return `${column} ${item.type || 'ASC'}`;
+        }).join(', ');
+        nodes.push({
+            id: sortId, type: 'sort', label: 'ORDER BY', description: 'Sort results', details: [sortCols],
+            ...position, x: 0, y: 0, width: 140, height: 60
+        });
+        if (previousId) { edges.push({ id: genId(runtime, nested ? 'ce' : 'e'), source: previousId, target: sortId }); }
+        previousId = sortId;
+    }
+    // Several dialects emit an empty LIMIT object when no clause is present.
+    if (stmt.limit && !(Array.isArray(stmt.limit.value) && stmt.limit.value.length === 0)) {
+        if (!nested) { runtime.context.hasNoLimit = false; }
+        const limitId = genId(runtime, `${prefix}limit`);
+        nodes.push({
+            id: limitId, type: 'limit', label: 'LIMIT', description: 'Limit rows', details: [resolveLimitDetails(stmt.limit)],
+            ...position, x: 0, y: 0, width: 120, height: 60
+        });
+        if (previousId) { edges.push({ id: genId(runtime, nested ? 'ce' : 'e'), source: previousId, target: limitId }); }
+        previousId = limitId;
+    }
+    return previousId;
+}
+
+function processSetOperationTree(
+    runtime: SelectExecutionContext,
+    tree: SetOperationTree,
+    nodes: FlowNode[],
+    edges: FlowEdge[],
+    renderBranch: (statement: any) => string | null,
+    nested?: NestedSelectPosition
+): { id: string | null; statement: any; tables: string[] } {
+    if ('statement' in tree) {
+        return { id: renderBranch(tree.statement), statement: tree.statement,
+            tables: extractTablesFromStatement(tree.statement, runtime.context.dialect) };
+    }
+    // Render leaves in SQL order so SELECT/UNION lineage keeps its branch ordinals.
+    const left = processSetOperationTree(runtime, tree.left, nodes, edges, renderBranch, nested);
+    const right = processSetOperationTree(runtime, tree.right, nodes, edges, renderBranch, nested);
+    runtime.context.stats.unions++;
+    maybeAddSetOperationColumnCountHint(runtime.context, tree.operator, left.statement, right.statement);
+    const edgePrefix = nested ? 'ce' : 'e';
+    const leftNode = nodes.find(node => node.id === left.id);
+    const rightNode = nodes.find(node => node.id === right.id);
+    // Keep associative UNION ALL chains shallow for large files. An operand's
+    // local ORDER BY/LIMIT ends in a tail node, so it cannot be flattened here.
+    const reusable = tree.operator === 'UNION ALL'
+        ? [leftNode, rightNode].find(node => node?.type === 'union' && node.label === 'UNION ALL')
+        : undefined;
+    let unionId: string;
+    if (reusable) {
+        unionId = reusable.id;
+        const branchCount = (node: FlowNode | undefined): number => {
+            if (node?.type !== 'union' || node.label !== 'UNION ALL') { return 1; }
+            const count = /^(\d+) branches$/.exec(node.details?.[0] || '');
+            return count ? Number(count[1]) : 2;
+        };
+        reusable.details = [`${branchCount(leftNode) + branchCount(rightNode)} branches`];
+        const addedId = reusable.id === left.id ? right.id : left.id;
+        if (addedId) { edges.push({ id: genId(runtime, edgePrefix), source: addedId, target: unionId }); }
+    } else {
+        unionId = genId(runtime, nested ? 'child_union' : 'union');
+        const details: string[] = [];
+        if (left.tables.length) { details.push(`Left: ${left.tables.join(', ')}`); }
+        if (right.tables.length) { details.push(`Right: ${right.tables.join(', ')}`); }
+        nodes.push({
+            id: unionId, type: 'union', label: tree.operator, description: `${tree.operator} operation`,
+            details: details.length ? details : undefined,
+            ...(nested ? { parentId: nested.parentId, depth: nested.depth + 1 } : {}),
+            x: 0, y: 0, width: 140, height: 60
+        });
+        if (left.id) { edges.push({ id: genId(runtime, edgePrefix), source: left.id, target: unionId }); }
+        if (right.id) { edges.push({ id: genId(runtime, edgePrefix), source: right.id, target: unionId }); }
+    }
+    const id = tree.tail ? appendSelectTail(runtime, tree.tail, nodes, edges, unionId, nested) : unionId;
+    return { id, statement: left.statement, tables: [...new Set([...left.tables, ...right.tables])] };
 }
 
 function getProjectedColumnCount(stmt: any): number | null {
@@ -999,6 +989,12 @@ function parseCteOrSubqueryInternals(
 ): string | null {
     const ctx = runtime.context;
     if (!stmt) { return null; }
+    const setTree = getSetOperationTree(stmt, ctx.dialect);
+    if (setTree) {
+        return processSetOperationTree(runtime, setTree, nodes, edges,
+            branch => parseCteOrSubqueryInternals(runtime, branch, nodes, edges, parentId, depth),
+            { parentId, depth }).id;
+    }
 
     // Track function usage inside nested SELECTs so stats include aggregates/scalars
     // that appear only in scalar/WHERE subqueries (e.g., COUNT(*) in Query 4 demo).
@@ -1308,101 +1304,7 @@ function parseCteOrSubqueryInternals(
         previousId = selectId;
     }
 
-    // Add ORDER BY if present
-    // orderby can be an array or an object with columns property
-    const hasOrderBy = stmt.orderby && (
-        (Array.isArray(stmt.orderby) && stmt.orderby.length > 0) ||
-        (stmt.orderby.columns && Array.isArray(stmt.orderby.columns) && stmt.orderby.columns.length > 0)
-    );
-    if (hasOrderBy) {
-        const sortId = genId(runtime, 'child_sort');
-        const orderbyArr = Array.isArray(stmt.orderby) ? stmt.orderby : (stmt.orderby.columns || []);
-        const sortCols = orderbyArr.map((o: any) => {
-            const col = resolveColumnName(o.expr?.column) || resolveColumnName(o.expr) || o.expr?.value || '?';
-            const dir = o.type || 'ASC';
-            return `${col} ${dir}`;
-        }).join(', ');
-        nodes.push({
-            id: sortId,
-            type: 'sort',
-            label: 'ORDER BY',
-            description: 'Sort results',
-            details: [sortCols],
-            parentId: parentId,
-            depth: depth + 1,
-            x: 0, y: 0, width: 140, height: 60
-        });
-        if (previousId) {
-            edges.push({ id: genId(runtime, 'ce'), source: previousId, target: sortId });
-        }
-        previousId = sortId;
-    }
-
-    // Add LIMIT if present (guard against phantom objects from node-sql-parser)
-    if (stmt.limit && !(Array.isArray(stmt.limit.value) && stmt.limit.value.length === 0)) {
-        const limitId = genId(runtime, 'child_limit');
-        const limitDetails = resolveLimitDetails(stmt.limit);
-        nodes.push({
-            id: limitId,
-            type: 'limit',
-            label: 'LIMIT',
-            description: 'Limit rows',
-            details: [limitDetails],
-            parentId: parentId,
-            depth: depth + 1,
-            x: 0, y: 0, width: 120, height: 60
-        });
-        if (previousId) {
-            edges.push({ id: genId(runtime, 'ce'), source: previousId, target: limitId });
-        }
-        previousId = limitId;
-    }
-
-    // Handle UNION/INTERSECT/EXCEPT inside CTEs and subqueries
-    if (stmt._next) {
-        ctx.stats.unions++;
-        const setOp = stmt.set_op || 'UNION';
-        maybeAddSetOperationColumnCountHint(ctx, setOp, stmt, stmt._next);
-        const unionId = genId(runtime, 'child_union');
-
-        // Collect tables from both sides for details
-        const leftTables = extractTablesFromStatement(stmt, ctx.dialect);
-        const rightTables = extractTablesFromStatement(stmt._next, ctx.dialect);
-        const unionDetails: string[] = [];
-        if (leftTables.length > 0) {
-            unionDetails.push(`Left: ${leftTables.join(', ')}`);
-        }
-        if (rightTables.length > 0) {
-            unionDetails.push(`Right: ${rightTables.join(', ')}`);
-        }
-
-        // Save left branch's last node before processing right branch
-        const leftLastId = previousId;
-
-        // Recursively parse the right branch and capture its last node
-        const rightLastId = parseCteOrSubqueryInternals(runtime, stmt._next, nodes, edges, parentId, depth);
-
-        nodes.push({
-            id: unionId,
-            type: 'union',
-            label: setOp.toUpperCase(),
-            description: `${setOp} operation`,
-            details: unionDetails.length > 0 ? unionDetails : undefined,
-            parentId: parentId,
-            depth: depth + 1,
-            x: 0, y: 0, width: 140, height: 60
-        });
-
-        // Connect both branches to the UNION node for proper convergence
-        if (leftLastId) {
-            edges.push({ id: genId(runtime, 'ce'), source: leftLastId, target: unionId });
-        }
-        if (rightLastId) {
-            edges.push({ id: genId(runtime, 'ce'), source: rightLastId, target: unionId });
-        }
-
-        previousId = unionId;
-    }
+    previousId = appendSelectTail(runtime, stmt, nodes, edges, previousId, { parentId, depth });
 
     return previousId;
 }

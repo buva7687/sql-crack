@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Apply global set-operation sorting and row limits after the merge, and preserve EXCEPT associativity, dialect precedence and supported parenthesized operands.
 - Preserve schema-qualified and quoted identities in Workspace column lineage and tracing.
 - Include column contributors from every UNION branch in Workspace lineage.
 - Preserve each query's saved viewport when switching away during deferred hydration.
