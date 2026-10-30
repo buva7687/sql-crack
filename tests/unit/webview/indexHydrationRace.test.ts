@@ -572,4 +572,61 @@ describe('webview refresh query state (H11, M15)', () => {
             state: expect.objectContaining({ currentQueryIndex: 0 }),
         }));
     });
+    it('preserves the deferred query viewport when switching away before hydration finishes', async () => {
+        const a = { scale: 1, offsetX: 10, offsetY: 20 };
+        const b = { scale: 0.5, offsetX: -400, offsetY: -800 };
+        const { batchCalls, renderer, send, settle } = bootWebview({ initialUiState: {
+            version: 1, currentDialect: 'MySQL', currentQueryIndex: 0, userExplicitlySetDialect: false,
+            compareModeActive: false, activeTabId: null,
+            queryViewStates: [{ queryIndex: 0, viewState: a }, { queryIndex: 1, viewState: b }],
+            renderer: { viewState: a, layout: 'vertical', legendVisible: true, hintsVisible: true,
+                sqlPreviewVisible: false, columnFlowsVisible: false, focusMode: 'all', focusModeEnabled: false,
+                layoutHistory: null }
+        }});
+        renderer.getViewState.mockReturnValue(a);
+        send({ command: 'refresh', sql: 'A', options: { dialect: 'MySQL', fileName: 'big.sql' } });
+        await settle();
+        batchCalls[0].result.resolve(makeBatch('a', 60));
+        await settle();
+        renderer.setViewState.mockClear();
+        send({ command: 'switchToQuery', queryIndex: 1 });
+        await settle();
+        send({ command: 'switchToQuery', queryIndex: 0 });
+        await settle();
+        batchCalls.find(call => call.sql === 'SELECT a1 FROM t;')!.result.resolve({
+            ...makeBatch('h', 1), queries: [makeQuery('SELECT a1 FROM t;')]
+        });
+        await settle();
+        send({ command: 'switchToQuery', queryIndex: 1 });
+        await settle();
+        expect(renderer.setViewState).toHaveBeenLastCalledWith(b);
+
+    });
+    it('suppresses nested and hydrated dead-column warnings when disabled', async () => {
+        const { parseSqlBatch } = jest.requireActual('../../../src/webview/sqlParser');
+        const sql = 'WITH c AS (SELECT id, unused FROM users) SELECT id FROM c;';
+        const realBatch = parseSqlBatch(sql, 'PostgreSQL');
+        expect(realBatch.queries[0].hints.some((h: any) => h.message.includes('dead column'))).toBe(true);
+        const { batchCalls, render, send, settle } = bootWebview();
+        (global as any).window.showDeadColumnHints = false;
+        send({ command: 'refresh', sql: 'A', options: { dialect: 'PostgreSQL', fileName: 'big.sql' } });
+        await settle();
+        const initial: any = makeBatch('a', 60);
+        initial.queries = initial.queries.map(() => parseSqlBatch(sql, 'PostgreSQL').queries[0]);
+        batchCalls[0].result.resolve(initial);
+        await settle();
+        const warnings = (nodes: any[]): any[] => nodes.flatMap(n => [...(n.warnings || []), ...warnings(n.children || [])]);
+        const initialRendered = render.mock.calls.at(-1)?.[0];
+        expect(initialRendered.hints.filter((h: any) => h.message.includes('dead column'))).toHaveLength(0);
+        expect(warnings(initialRendered.nodes).filter(w => w.type === 'dead-column')).toHaveLength(0);
+        send({ command: 'switchToQuery', queryIndex: 1 });
+        await settle();
+        batchCalls.find(call => call.sql === initial.queries[1].sql)!.result.resolve(parseSqlBatch(sql, 'PostgreSQL'));
+        await settle();
+        const hydratedRendered = render.mock.calls.at(-1)?.[0];
+        expect(hydratedRendered.hints.filter((h: any) => h.message.includes('dead column'))).toHaveLength(0);
+        expect(warnings(hydratedRendered.nodes).filter(w => w.type === 'dead-column')).toHaveLength(0);
+
+    });
+
 });

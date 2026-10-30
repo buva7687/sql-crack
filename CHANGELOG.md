@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Preserve each query's saved viewport when switching away during deferred hydration.
+- Honor disabled dead-column hints for nested nodes and deferred/recovered query results.
 - Keep the SQL Flow minimap from covering the last nodes after fit-to-view, such as the Result node in the horizontal layout.
 - Keep the Performance Hints panel hidden after you hide it with **O**, instead of showing it again when the graph re-renders after a settings change or a CTE is expanded or collapsed.
 - Fit the Workspace lineage graph above its zoom controls, overview box and legend, and allow fits below 30% for large graphs.

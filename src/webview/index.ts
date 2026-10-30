@@ -954,12 +954,28 @@ async function reparseStoredQuery(queryIndex: number, fallbackMessage: string): 
     }
 }
 
+/** Apply presentation settings to every accepted result, including deferred reparses. */
+function applyQuerySettings(query: ParseResult): void {
+    if (window.showDeadColumnHints !== false) { return; }
+    query.hints = query.hints.filter(hint => !hint.message.toLowerCase().includes('dead column'));
+    const filterWarnings = (nodes: ParseResult['nodes']): void => {
+        for (const node of nodes) {
+            if (node.warnings) {
+                node.warnings = node.warnings.filter(warning => warning.type !== 'dead-column');
+            }
+            if (node.children) { filterWarnings(node.children); }
+        }
+    };
+    filterWarnings(query.nodes);
+}
+
 /**
  * Replace one query's result in place (hydration, recovery) and keep the
  * batch's error totals and the toolbar error badge in step with it, using the
  * same definitions as parseSqlBatch: a query with `error` is failed.
  */
 function replaceQueryResult(batch: BatchParseResult, queryIndex: number, result: ParseResult): void {
+    applyQuerySettings(result);
     batch.queries[queryIndex] = result;
     const otherErrors = (batch.parseErrors || []).filter(error => error.queryIndex !== queryIndex);
     if (result.error) {
@@ -1799,22 +1815,7 @@ async function visualize(sql: string): Promise<void> {
     // Stale and cancelled parses returned above, so this result is on screen.
     renderedDocumentKey = documentKeyForParse;
 
-    // Filter out dead column hints/warnings if the setting is disabled
-    // This addresses false positives where columns are used by the application layer
-    if (window.showDeadColumnHints === false && batchResult) {
-        batchResult.queries.forEach(query => {
-            // Filter hints
-            query.hints = query.hints.filter(h =>
-                !h.message.toLowerCase().includes('dead column')
-            );
-            // Filter node warnings
-            query.nodes.forEach(node => {
-                if (node.warnings) {
-                    node.warnings = node.warnings.filter(w => w.type !== 'dead-column');
-                }
-            });
-        });
-    }
+    batchResult?.queries.forEach(applyQuerySettings);
 
     if (!batchResult) {
         return;
@@ -1928,9 +1929,9 @@ function enterQueryIndex(newIndex: number, options: { skipSaveCurrent?: boolean 
         comparePending = false;
     }
 
-    // Save current view state before switching
+    // Save the viewport under the query actually rendered while hydration is pending.
     if (!options.skipSaveCurrent) {
-        queryViewStates.set(currentQueryIndex, getViewState());
+        queryViewStates.set(renderedQueryIndex, getViewState());
     }
 
     currentQueryIndex = newIndex;
