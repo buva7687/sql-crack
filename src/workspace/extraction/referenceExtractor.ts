@@ -368,23 +368,23 @@ export class ReferenceExtractor {
             Number.MAX_SAFE_INTEGER
         );
         const queryLineNumber = lineNumber === Number.MAX_SAFE_INTEGER ? 1 : lineNumber;
-        const tableAliases = this.columnExtractor.buildAliasMap(selectStatement || statement);
+        const tableAliases = this.buildQueryAliasMap(selectStatement || statement, statementReferences);
         const directSourceTableNames = [...new Set(
             [...tableAliases.values()]
                 .filter((name): name is string => typeof name === 'string' && name.length > 0)
         )];
-        const directSourceNames = new Set(directSourceTableNames.map(name => name.toLowerCase()));
-        const inputTableNames = new Set(allInputTables.map(reference => reference.tableName.toLowerCase()));
+        const directSourceNames = new Set(directSourceTableNames);
+        const inputTableNames = new Set(allInputTables.map(reference => getQualifiedKey(reference.tableName, reference.schema, reference)));
         const scopedInputTables = directSourceTableNames.length > 0
-            ? allInputTables.filter(reference => directSourceNames.has(reference.tableName.toLowerCase()))
+            ? allInputTables.filter(reference => directSourceNames.has(getQualifiedKey(reference.tableName, reference.schema, reference)))
             : allInputTables;
         // A direct source naming an in-scope CTE has no TableReference by
         // design, so an empty scoped result is accurate rather than a lookup
         // failure. Widen to the whole statement only when a source cannot be
         // accounted for as either a reference or a CTE.
         const unresolvedDirectSources = directSourceTableNames.filter(name =>
-            !cteNamesInScope.has(name.toLowerCase())
-            && !inputTableNames.has(name.toLowerCase())
+            !cteNamesInScope.has(name)
+            && !inputTableNames.has(name)
         );
         const inputTables = scopedInputTables.length > 0 || unresolvedDirectSources.length === 0
             ? scopedInputTables
@@ -400,11 +400,11 @@ export class ReferenceExtractor {
                 // Only alias resolution for SET expressions needs the MySQL
                 // multi-table list; source scoping above must keep subquery
                 // tables such as `WHERE id IN (SELECT ... FROM other)`.
-                this.columnExtractor.buildAliasMap(this.getMultiTableUpdateAliasSource(statement)),
+                this.buildQueryAliasMap(this.getMultiTableUpdateAliasSource(statement), statementReferences),
                 queryLineNumber
             );
 
-        const sourceTableNames = new Set(inputTables.map(reference => reference.tableName).filter(Boolean));
+        const sourceTableNames = new Set(inputTables.map(reference => getQualifiedKey(reference.tableName, reference.schema, reference)));
         const soleSourceTable = directSourceTableNames.length === 1
             ? directSourceTableNames[0]
             : (sourceTableNames.size === 1 ? [...sourceTableNames][0] : undefined);
@@ -463,7 +463,7 @@ export class ReferenceExtractor {
         for (const cte of withClauses) {
             const siblingName = this.getCTENameString(cte.name);
             if (siblingName) {
-                nestedCteNamesInScope.add(siblingName.toLowerCase());
+                nestedCteNamesInScope.add(this.getCTEIdentity(cte.name) || siblingName);
             }
         }
         const ctes = withClauses.flatMap(cte => {
@@ -490,6 +490,31 @@ export class ReferenceExtractor {
             }];
         });
 
+        const setOperationBranches: QueryAnalysis[] = [];
+        const outputNames = outputColumns.map((column, index) =>
+            unwrapIdentifierValue(column.name) || transformations[index]?.outputColumn
+        );
+        const branchStatements = (selectStatement?.from || [])
+            .filter(item => /^(?:union(?: all)?|intersect(?: all)?|except(?: all)?)$/i.test(item.join || ''))
+            .map(item => item.expr?.ast)
+            .filter((branch): branch is AstStatement => Boolean(branch));
+        if (selectStatement?._next) {branchStatements.push(selectStatement._next);}
+        const mapOutputs = (analysis: QueryAnalysis): void => {
+            analysis.transformations = analysis.transformations.map((transformation, index) => ({
+                ...transformation,
+                outputColumn: outputNames[index] || transformation.outputColumn,
+                outputAlias: outputNames[index] || transformation.outputAlias,
+            }));
+            analysis.setOperationBranches?.forEach(mapOutputs);
+        };
+        for (const branch of branchStatements) {
+            const analysis = this.buildQueryAnalysis(
+                branch, statementIndex, statementReferences, nestedCteNamesInScope
+            );
+            mapOutputs(analysis);
+            setOperationBranches.push(analysis);
+        }
+
         return {
             statementType: this.getQueryStatementType(statement),
             statementIndex,
@@ -499,8 +524,44 @@ export class ReferenceExtractor {
             transformations,
             ctes,
             subqueries: [],
+            ...(setOperationBranches.length > 0 ? { setOperationBranches } : {}),
             lineNumber: queryLineNumber,
         };
+    }
+
+    /** Preserve the canonical relation identity instead of resolving aliases to basenames. */
+    private buildQueryAliasMap(statement: AstStatement, references: TableReference[]): Map<string, string> {
+        const referenceKeys = new Map<string, Set<string>>();
+        const lookupKey = (name: string, schema?: string, catalog?: string, alias?: string): string =>
+            JSON.stringify([name, schema, catalog, alias]);
+        for (const reference of references) {
+            const canonicalKey = getQualifiedKey(reference.tableName, reference.schema, reference);
+            for (const alias of new Set([undefined, reference.alias])) {
+                const key = lookupKey(reference.tableName, reference.schema, reference.catalog, alias);
+                const keys = referenceKeys.get(key) || new Set<string>();
+                keys.add(canonicalKey);
+                referenceKeys.set(key, keys);
+            }
+        }
+        return this.columnExtractor.buildAliasMap(statement, (item: AstTableRef) => {
+            const tableName = this.getTableName(item);
+            if (!tableName) {return null;}
+            const schema = item.schema || item.db || undefined;
+            const catalog = item.schema ? item.db || undefined : undefined;
+            const keys = referenceKeys.get(lookupKey(tableName, schema, catalog, unwrapIdentifierValue(item.as)))
+                || referenceKeys.get(lookupKey(tableName, schema, catalog)) || new Set<string>();
+            if (keys.size === 1) {return keys.values().next().value!;}
+            if (keys.size > 1) {return null;}
+            // In-scope CTEs intentionally have no physical TableReference. AST
+            // delimiter metadata plus dialect semantics still supplies their key.
+            return getQualifiedKey(this.unquoteIdentifier(tableName), schema, {
+                ...getIdentifierSemantics(this._activeDialect),
+                catalog,
+                nameQuoted: this.isQuotedAstIdentifier(item.table),
+                schemaQuoted: this.isQuotedAstIdentifier(item.schema || item.db),
+                catalogQuoted: this.isQuotedAstIdentifier(item.db),
+            });
+        });
     }
 
     private createEmptyQueryAnalysis(

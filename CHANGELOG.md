@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Preserve schema-qualified and quoted identities in Workspace column lineage and tracing.
+- Include column contributors from every UNION branch in Workspace lineage.
 - Preserve each query's saved viewport when switching away during deferred hydration.
 - Honor disabled dead-column hints for nested nodes and deferred/recovered query results.
 - Keep the SQL Flow minimap from covering the last nodes after fit-to-view, such as the Result node in the horizontal layout.

@@ -21,7 +21,7 @@ import { normalizeFileExtensions } from '../shared/fileExtensions';
 import { getQualifiedKey, IdentifierQualification, normalizeIdentifier } from './identifiers';
 import { logger } from '../logger';
 
-const INDEX_VERSION = 8; // Invalidate analyses produced before per-statement fallback and scoped CTE fixes
+const INDEX_VERSION = 9; // Invalidate analyses without canonical column sources and set-operation branches
 const DEFAULT_AUTO_INDEX_THRESHOLD = 50;
 const DEFAULT_CACHE_TTL_HOURS = 24;
 const DEFAULT_MAX_CACHE_BYTES = 4 * 1024 * 1024; // 4MB safety limit for workspaceState

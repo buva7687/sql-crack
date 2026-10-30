@@ -42,19 +42,11 @@ export class ColumnLineageTracker {
         columnName: string
     ): LineagePath[] {
         const paths: LineagePath[] = [];
-        const columnNameLower = columnName.toLowerCase();
-        const tableMatchKey = this.getTableMatchKey(tableId);
-
-        // Find all column edges where this column is the target
-        const upstreamEdges = (graph.columnEdges || []).filter(edge => {
-            const targetMatches = edge.targetTableId === tableId ||
-                (tableMatchKey !== null && this.getTableMatchKey(edge.targetTableId) === tableMatchKey);
-            const columnMatches = edge.targetColumnName.toLowerCase() === columnNameLower;
-            return targetMatches && columnMatches;
-        });
+        const upstreamEdges = this.getMatchingColumnEdges(graph, tableId, columnName, 'target');
 
         if (upstreamEdges.length === 0) {
             // Fall back to table-level lineage
+            if (graph.columnEdges?.some(edge => edge.targetTableId === tableId)) {return [];}
             return this.traceTableUpstream(graph, tableId);
         }
 
@@ -83,8 +75,8 @@ export class ColumnLineageTracker {
                         type: this.mapTransformToEdgeType(e.transformationType),
                         transformation: e.expression,
                         metadata: {
-                            sourceColumn: e.sourceColumnName,
-                            targetColumn: e.targetColumnName,
+                            sourceColumn: graph.nodes.get(e.sourceColumnId || '')?.name || e.sourceColumnName,
+                            targetColumn: graph.nodes.get(e.targetColumnId || '')?.name || e.targetColumnName,
                             ...e.metadata
                         }
                     })),
@@ -106,19 +98,11 @@ export class ColumnLineageTracker {
         columnName: string
     ): LineagePath[] {
         const paths: LineagePath[] = [];
-        const columnNameLower = columnName.toLowerCase();
-        const tableMatchKey = this.getTableMatchKey(tableId);
-
-        // Find all column edges where this column is the source
-        const downstreamEdges = (graph.columnEdges || []).filter(edge => {
-            const sourceMatches = edge.sourceTableId === tableId ||
-                (tableMatchKey !== null && this.getTableMatchKey(edge.sourceTableId) === tableMatchKey);
-            const columnMatches = edge.sourceColumnName.toLowerCase() === columnNameLower;
-            return sourceMatches && columnMatches;
-        });
+        const downstreamEdges = this.getMatchingColumnEdges(graph, tableId, columnName, 'source');
 
         if (downstreamEdges.length === 0) {
             // Fall back to table-level lineage
+            if (graph.columnEdges?.some(edge => edge.sourceTableId === tableId)) {return [];}
             return this.traceTableDownstream(graph, tableId);
         }
 
@@ -147,8 +131,8 @@ export class ColumnLineageTracker {
                         type: this.mapTransformToEdgeType(e.transformationType),
                         transformation: e.expression,
                         metadata: {
-                            sourceColumn: e.sourceColumnName,
-                            targetColumn: e.targetColumnName,
+                            sourceColumn: graph.nodes.get(e.sourceColumnId || '')?.name || e.sourceColumnName,
+                            targetColumn: graph.nodes.get(e.targetColumnId || '')?.name || e.targetColumnName,
                             ...e.metadata
                         }
                     })),
@@ -185,24 +169,8 @@ export class ColumnLineageTracker {
         tableId: string,
         columnName: string
     ): ColumnLineageResult {
-        const columnNameLower = columnName.toLowerCase();
-        const tableMatchKey = this.getTableMatchKey(tableId);
-
-        // Find upstream column paths
-        const upstreamEdges = (graph.columnEdges || []).filter(edge => {
-            const targetMatches = edge.targetTableId === tableId ||
-                (tableMatchKey !== null && this.getTableMatchKey(edge.targetTableId) === tableMatchKey);
-            const columnMatches = edge.targetColumnName.toLowerCase() === columnNameLower;
-            return targetMatches && columnMatches;
-        });
-
-        // Find downstream column paths
-        const downstreamEdges = (graph.columnEdges || []).filter(edge => {
-            const sourceMatches = edge.sourceTableId === tableId ||
-                (tableMatchKey !== null && this.getTableMatchKey(edge.sourceTableId) === tableMatchKey);
-            const columnMatches = edge.sourceColumnName.toLowerCase() === columnNameLower;
-            return sourceMatches && columnMatches;
-        });
+        const upstreamEdges = this.getMatchingColumnEdges(graph, tableId, columnName, 'target');
+        const downstreamEdges = this.getMatchingColumnEdges(graph, tableId, columnName, 'source');
 
         return {
             upstream: upstreamEdges.map(edge => ({
@@ -303,7 +271,44 @@ export class ColumnLineageTracker {
             return null;
         }
 
-        return tableName.toLowerCase();
+        return tableName;
+    }
+
+    private getMatchingColumnEdges(
+        graph: LineageGraph,
+        tableId: string,
+        columnName: string,
+        direction: 'source' | 'target'
+    ): ColumnLineageEdge[] {
+        const requestedKey = this.getTableMatchKey(tableId);
+        const matchesTable = (candidateId: string): boolean => candidateId === tableId || (
+            !graph.nodes.has(tableId) && requestedKey !== null
+            && this.getTableMatchKey(candidateId) === requestedKey
+        );
+        const edges = (graph.columnEdges || []).filter(edge => matchesTable(
+            direction === 'source' ? edge.sourceTableId : edge.targetTableId
+        ));
+        const edgeName = (edge: ColumnLineageEdge): string => direction === 'source'
+            ? edge.sourceColumnName : edge.targetColumnName;
+        const edgeColumnId = (edge: ColumnLineageEdge): string | undefined => direction === 'source'
+            ? edge.sourceColumnId : edge.targetColumnId;
+        const columns = [...graph.nodes.values()].filter(node =>
+            node.type === 'column' && node.parentId && matchesTable(node.parentId)
+        );
+        const exact = columns.find(node => node.name === columnName);
+        if (exact) {
+            return edges.filter(edge => edgeColumnId(edge)
+                ? edgeColumnId(edge) === exact.id : edgeName(edge) === exact.name);
+        }
+        if (columns.length > 0) {return [];}
+        // Legacy graphs may lack column IDs. Keep their case-insensitive lookup
+        // only when it cannot merge distinct quoted columns.
+        const foldedName = columnName.toLowerCase();
+        if (edges.some(edge => edgeName(edge) === columnName)) {
+            return edges.filter(edge => edgeName(edge) === columnName);
+        }
+        const foldedNames = new Set(edges.map(edgeName).filter(name => name.toLowerCase() === foldedName));
+        return foldedNames.size === 1 ? edges.filter(edge => edgeName(edge).toLowerCase() === foldedName) : [];
     }
 
     /**

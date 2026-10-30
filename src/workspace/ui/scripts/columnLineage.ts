@@ -9,7 +9,7 @@ export function getColumnLineageScriptFragment(): string {
         window.__workspaceColumnTraceActive = false;
 
         function normalizeColumnName(columnName) {
-            return typeof columnName === 'string' ? columnName.trim().toLowerCase() : '';
+            return typeof columnName === 'string' ? columnName : '';
         }
 
         function getLineageTableName(tableId) {
@@ -67,7 +67,8 @@ export function getColumnLineageScriptFragment(): string {
             const expected = normalizeColumnName(columnName);
             const rows = nodeElement.querySelectorAll('.column-row');
             for (const row of rows) {
-                if (normalizeColumnName(row.getAttribute('data-column-name')) === expected) {
+                const name = normalizeColumnName(row.getAttribute('data-column-name'));
+                if (name === expected) {
                     return row;
                 }
             }
@@ -85,9 +86,13 @@ export function getColumnLineageScriptFragment(): string {
                 return;
             }
 
+            const matchingRows = new Set();
+            columnRefs.forEach(columnName => {
+                const row = findColumnRow(node, columnName);
+                if (row) matchingRows.add(row);
+            });
             rows.forEach(row => {
-                const rowColumnName = normalizeColumnName(row.getAttribute('data-column-name'));
-                if (columnRefs.has(rowColumnName)) {
+                if (matchingRows.has(row)) {
                     row.classList.add('in-path');
                     row.classList.remove('dimmed');
                     const stateText = row.querySelector('.column-state');

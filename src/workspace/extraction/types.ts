@@ -157,6 +157,9 @@ export interface QueryAnalysis {
     // Subqueries (nested SELECT statements)
     subqueries: QueryAnalysis[];
 
+    // Later UNION/INTERSECT/EXCEPT branches retain their own aliases and CTE scopes.
+    setOperationBranches?: QueryAnalysis[];
+
     // Source location
     lineNumber: number;
     sql?: string;

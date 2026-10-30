@@ -141,7 +141,7 @@ export class ColumnExtractor {
     /**
      * Build table alias map from FROM clause
      */
-    buildAliasMap(ast: any): Map<string, string> {
+    buildAliasMap(ast: any, resolveTable?: (table: any) => string | null): Map<string, string> {
         const aliasMap = new Map<string, string>();
 
         if (!ast || !ast.from) {
@@ -149,13 +149,13 @@ export class ColumnExtractor {
         }
 
         for (const fromClause of this.asArray(ast.from)) {
-            this.extractAliasFromTable(fromClause, aliasMap);
+            this.extractAliasFromTable(fromClause, aliasMap, resolveTable);
         }
 
         // Also extract from JOINs
         if (ast.join) {
             for (const join of this.asArray(ast.join)) {
-                this.extractAliasFromTable(join.table, aliasMap);
+                this.extractAliasFromTable(join.table, aliasMap, resolveTable);
             }
         }
 
@@ -167,11 +167,13 @@ export class ColumnExtractor {
      */
     private extractAliasFromTable(
         tableRef: any,
-        aliasMap: Map<string, string>
+        aliasMap: Map<string, string>,
+        resolveTable?: (table: any) => string | null
     ): void {
         if (!tableRef) {return;}
 
-        const tableName = this.getTableName(tableRef);
+        const rawTableName = this.getTableName(tableRef);
+        const tableName = resolveTable ? resolveTable(tableRef) : rawTableName;
         const alias = tableRef.as;
 
         if (alias && tableName) {
@@ -181,6 +183,7 @@ export class ColumnExtractor {
         // Also register the table name itself
         if (tableName) {
             aliasMap.set(tableName, tableName);
+            if (rawTableName) {aliasMap.set(rawTableName, tableName);}
         }
     }
 

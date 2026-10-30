@@ -425,6 +425,8 @@ export class LineageBuilder implements LineageGraph {
             if (cte.query) {this.registerQueryCtes(cte.query, filePath, `${scopePath}.${index}`, scope);}
         });
         (query.subqueries || []).forEach((subquery, index) => this.registerQueryCtes(subquery, filePath, `${scopePath}.sub${index}`, scope));
+        (query.setOperationBranches || []).forEach((branch, index) =>
+            this.registerQueryCtes(branch, filePath, `${scopePath}.set${index}`, scope));
     }
 
     private async preloadFileSql(files: Map<string, FileAnalysis>): Promise<Map<string, string>> {
@@ -780,7 +782,7 @@ export class LineageBuilder implements LineageGraph {
         for (let queryIndex = 0; queryIndex < analysis.queries.length; queryIndex++) {
             const query = analysis.queries[queryIndex];
             this.addCteColumnEdges(filePath, query);
-            if (!query.transformations || query.transformations.length === 0) {continue;}
+            if ((!query.transformations || query.transformations.length === 0) && !query.setOperationBranches?.length) {continue;}
 
             // Resolve target table for this query
             const targetTableId = this.resolveTargetTableId(query, queryIndex, analysis, filePath);
@@ -799,6 +801,9 @@ export class LineageBuilder implements LineageGraph {
             if (cte.query) {
                 this.addCteColumnEdges(filePath, cte.query);
             }
+        }
+        for (const branch of query.setOperationBranches || []) {
+            this.addCteColumnEdges(filePath, branch);
         }
     }
 
@@ -845,6 +850,9 @@ export class LineageBuilder implements LineageGraph {
                     this.columnEdges.push(columnEdge);
                 }
             }
+        }
+        for (const branch of query.setOperationBranches || []) {
+            this.addQueryColumnEdges(filePath, branch, targetTableId);
         }
     }
 
