@@ -10,7 +10,7 @@ import {
     DEFAULT_EXTRACTION_OPTIONS,
 } from './types';
 import { dialectSupportsBackslashEscapes, dialectSupportsHashComments, escapeRegex, getDollarQuoteDelimiterAt, isPostgresJsonPathOperatorAt, maskSqlCommentsPreservingPositions, quotedStringAllowsBackslashEscapes, stripSqlComments, TextOffsetIndex, unwrapIdentifierValue } from '../../shared';
-import { preprocessSqlForWorkspaceParsing } from '../parserConfig';
+import { parseWorkspaceStatement, preprocessSqlForWorkspaceParsing } from '../parserConfig';
 import { getIdentifierSemantics } from '../identifiers';
 import { SCHEMA_SQL_RESERVED_WORDS } from './constants';
 
@@ -155,7 +155,7 @@ export class SchemaExtractor {
 
             const definitionStart = definitions.length;
             try {
-                const ast = this.parser.astify(normalizedSql.slice(start, end).replace(/;\s*$/, ''), { database: dbDialect });
+                const ast = parseWorkspaceStatement(this.parser, normalizedSql.slice(start, end).replace(/;\s*$/, ''), dbDialect);
                 const statements = Array.isArray(ast) ? ast : [ast];
                 for (const stmt of statements) {
                     if (!stmt) {continue;}

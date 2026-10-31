@@ -214,6 +214,7 @@ export type TransformationType =
 export interface CTEDefinition {
     name: string;
     nameQuoted?: boolean;
+    canonicalKey?: string;       // Dialect-normalized identity captured from the declaration
     columns?: string[];          // Explicit column list if specified
     query: QueryAnalysis;        // The CTE's SELECT statement
     isRecursive: boolean;

@@ -415,7 +415,7 @@ export class LineageBuilder implements LineageGraph {
         const scope = new Map(inherited);
         const semantics = getIdentifierSemantics(this.options.dialect || 'MySQL');
         (query.ctes || []).forEach((cte, index) => {
-            const key = getQualifiedKey(cte.name, undefined, {...semantics, nameQuoted: cte.nameQuoted});
+            const key = cte.canonicalKey || getQualifiedKey(cte.name, undefined, {...semantics, nameQuoted: cte.nameQuoted});
             const id = `cte:${encodeURIComponent(filePath)}:${scopePath}:${index}:${encodeURIComponent(key)}`;
             scope.set(key, id);
             this.nodes.set(id, {id, type: 'cte', name: cte.name, filePath, lineNumber: cte.lineNumber, metadata: {isCTE: true}});
@@ -794,7 +794,10 @@ export class LineageBuilder implements LineageGraph {
 
     private addCteColumnEdges(filePath: string, query: QueryAnalysis): void {
         for (const cte of query.ctes || []) {
-            const targetTableId = this.resolveTableId(cte.name, filePath, this.queryCteScopes.get(query));
+            const key = cte.canonicalKey || getQualifiedKey(cte.name, undefined, {
+                ...getIdentifierSemantics(this.options.dialect || 'MySQL'), nameQuoted: cte.nameQuoted,
+            });
+            const targetTableId = this.resolveTableId(key, filePath, this.queryCteScopes.get(query));
             if (targetTableId && cte.query) {
                 this.addQueryColumnEdges(filePath, cte.query, targetTableId);
             }
@@ -862,6 +865,12 @@ export class LineageBuilder implements LineageGraph {
     private resolveTableId(tableName: string | undefined, filePath: string, scope?: Map<string, string>): string | null {
         if (!tableName) {return null;}
 
+        const canonicalCte = scope?.get(tableName);
+        if (canonicalCte) {return canonicalCte;}
+        for (const type of ['table', 'view', 'cte', 'external']) {
+            const canonicalId = `${type}:${tableName}`;
+            if (this.nodes.has(canonicalId)) {return canonicalId;}
+        }
         const exactName = tableName.trim();
         const normalizedName = exactName.toLowerCase();
         const scopedCte = scope?.get(exactName);

@@ -45,7 +45,7 @@ export function normalizeIdentifier(
     quotedCaseSensitive = true
 ): string | undefined {
     if (!value) {return undefined;}
-    const trimmed = value.trim();
+    const trimmed = quoted ? value : value.trim();
     if (!trimmed) {return undefined;}
     if (quoted && quotedCaseSensitive) {return trimmed;}
     if (caseFolding === 'preserve') {return trimmed;}

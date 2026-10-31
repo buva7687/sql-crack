@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Preserve quoted CTE bindings and normalized CTE targets throughout Workspace column lineage, invalidating older cached analyses.
+- Keep EXCEPT/INTERSECT filtering inputs as table dependencies without treating them as output value sources, and retain parenthesized UNION DISTINCT arms.
+- Parse compound CREATE VIEW bodies in Workspace analysis and omit uncertain wildcard column mappings instead of inventing output ordinals.
 - Connect CTE references in every compound-query branch and include parenthesized UNION contributors in SQL Flow column lineage.
 - Apply dead-column hint settings consistently to Compare baselines.
 - Apply global set-operation sorting and row limits after the merge, and preserve EXCEPT associativity, dialect precedence and supported parenthesized operands.

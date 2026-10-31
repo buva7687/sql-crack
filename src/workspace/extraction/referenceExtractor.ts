@@ -17,10 +17,10 @@ import {
 } from './types';
 import { ColumnExtractor } from './columnExtractor';
 import { TransformExtractor } from './transformExtractor';
-import { countStartsAtOrBefore, dialectSupportsBackslashEscapes, dialectSupportsHashComments, escapeRegex, getDollarQuoteDelimiterAt, maskSqlCommentsPreservingPositions, quotedStringAllowsBackslashEscapes, TextOffsetIndex, unwrapIdentifierValue } from '../../shared';
-import type { StripSqlCommentsOptions } from '../../shared';
+import { countStartsAtOrBefore, dialectSupportsBackslashEscapes, dialectSupportsHashComments, escapeRegex, getDollarQuoteDelimiterAt, getSetOperationTree, maskSqlCommentsPreservingPositions, quotedStringAllowsBackslashEscapes, TextOffsetIndex, unwrapIdentifierValue } from '../../shared';
+import type { SetOperationTree, StripSqlCommentsOptions } from '../../shared';
 import { selectMultiTableUpdateTargets } from '../../shared/dmlTargets';
-import { preprocessSqlForWorkspaceParsing } from '../parserConfig';
+import { parseWorkspaceStatement, preprocessSqlForWorkspaceParsing } from '../parserConfig';
 import { getIdentifierSemantics, getQualifiedKey } from '../identifiers';
 import { REFERENCE_SQL_RESERVED_WORDS, TERADATA_RESERVED_WORDS } from './constants';
 import type {
@@ -78,6 +78,8 @@ export class ReferenceExtractor {
      * AST node so maps are released with it.
      */
     private statementAliasMaps = new WeakMap<object, Map<string, string>>();
+    /** Includes CTE references omitted from the physical dependency list. */
+    private queryRelationKeys = new WeakMap<object, string>();
 
     constructor(options: Partial<ExtractionOptions> = {}) {
         this.parser = new Parser();
@@ -179,6 +181,7 @@ export class ReferenceExtractor {
         dialect: SqlDialect
     ): { references: TableReference[]; warnings: string[]; queries: QueryAnalysis[] } {
         this._activeDialect = dialect;
+        this.queryRelationKeys = new WeakMap();
         this.tableLineLookup = null;
         this.locationSearchSource = null;
         const references: TableReference[] = [];
@@ -276,7 +279,7 @@ export class ReferenceExtractor {
             const referenceStart = references.length;
             const parsedStart = parsedStatements.length;
             try {
-                const ast = this.parser.astify(normalizedSql.slice(start, end), { database: dbDialect });
+                const ast = parseWorkspaceStatement(this.parser, normalizedSql.slice(start, end), dbDialect);
                 const statements = (Array.isArray(ast) ? ast : [ast]).filter(Boolean) as AstStatement[];
                 for (const stmt of statements) {
                     parsedStatements.push({ statement: stmt, statementIndex: stmtIndex });
@@ -356,7 +359,13 @@ export class ReferenceExtractor {
         statementReferences: TableReference[],
         cteNamesInScope: ReadonlySet<string> = new Set()
     ): QueryAnalysis {
-        const selectStatement = this.getAnalysisSelectStatement(statement);
+        const originalSelect = this.getAnalysisSelectStatement(statement);
+        const tree = getSetOperationTree(originalSelect, this._activeDialect);
+        const valueStatements = tree ? this.getValueStatements(tree) : [];
+        const selectStatement = valueStatements[0] || originalSelect;
+        const hasWildcardProjection = Array.isArray(selectStatement?.columns) && selectStatement.columns.some(column =>
+            column.type === 'star' || (column.expr?.type === 'column_ref' && unwrapIdentifierValue(column.expr.column) === '*')
+        );
         const allInputTables = statementReferences.filter(reference =>
             reference.referenceType !== 'insert'
             && reference.referenceType !== 'update'
@@ -390,12 +399,12 @@ export class ReferenceExtractor {
             ? scopedInputTables
             : allInputTables;
 
-        let outputColumns: ColumnInfo[] = selectStatement
+        let outputColumns: ColumnInfo[] = selectStatement && !hasWildcardProjection
             ? this.columnExtractor.extractSelectColumns(selectStatement, tableAliases)
             : [];
-        let transformations: Transformation[] = selectStatement
+        let transformations: Transformation[] = selectStatement && !hasWildcardProjection
             ? this.transformExtractor.extractTransformations(selectStatement, tableAliases)
-            : this.extractUpdateTransformations(
+            : selectStatement ? [] : this.extractUpdateTransformations(
                 statement,
                 // Only alias resolution for SET expressions needs the MySQL
                 // multi-table list; source scoping above must keep subquery
@@ -478,6 +487,7 @@ export class ReferenceExtractor {
             return [{
                 name,
                 nameQuoted: this.isQuotedAstIdentifier(cte.name),
+                canonicalKey: this.getCTEIdentity(cte.name),
                 ...(columns && columns.length > 0 ? { columns } : {}),
                 query: this.buildQueryAnalysis(
                     cteStatement,
@@ -491,20 +501,18 @@ export class ReferenceExtractor {
         });
 
         const setOperationBranches: QueryAnalysis[] = [];
-        const outputNames = outputColumns.map((column, index) =>
-            unwrapIdentifierValue(column.name) || transformations[index]?.outputColumn
-        );
-        const branchStatements = (selectStatement?.from || [])
-            .filter(item => /^(?:union(?: all)?|intersect(?: all)?|except(?: all)?)$/i.test(item.join || ''))
-            .map(item => item.expr?.ast)
-            .filter((branch): branch is AstStatement => Boolean(branch));
-        if (selectStatement?._next) {branchStatements.push(selectStatement._next);}
+        // A wildcard can cover several positions. Until its schema is expanded,
+        // only an explicit destination list establishes output ordinals.
+        const outputNames = targetColumnNames.length > 0
+            ? targetColumnNames : transformations.map(transformation => transformation.outputColumn);
+        const branchStatements = valueStatements.slice(1);
         const mapOutputs = (analysis: QueryAnalysis): void => {
-            analysis.transformations = analysis.transformations.map((transformation, index) => ({
+            analysis.transformations = analysis.transformations.length === outputNames.length
+                ? analysis.transformations.map((transformation, index) => ({
                 ...transformation,
-                outputColumn: outputNames[index] || transformation.outputColumn,
-                outputAlias: outputNames[index] || transformation.outputAlias,
-            }));
+                outputColumn: outputNames[index],
+                outputAlias: outputNames[index],
+            })) : [];
             analysis.setOperationBranches?.forEach(mapOutputs);
         };
         for (const branch of branchStatements) {
@@ -529,6 +537,20 @@ export class ReferenceExtractor {
         };
     }
 
+    private getValueStatements(tree: SetOperationTree): AstSelectStatement[] {
+        const statements: AstSelectStatement[] = [];
+        const pending = [tree];
+        while (pending.length > 0) {
+            const current = pending.pop()!;
+            if ('statement' in current) {statements.push(current.statement as AstSelectStatement); continue;}
+            // EXCEPT and INTERSECT filter left rows. Physical references still
+            // retain both operands, but only UNION supplies right-side values.
+            if (/^UNION\b/i.test(current.operator)) {pending.push(current.right);}
+            pending.push(current.left);
+        }
+        return statements;
+    }
+
     /** Preserve the canonical relation identity instead of resolving aliases to basenames. */
     private buildQueryAliasMap(statement: AstStatement, references: TableReference[]): Map<string, string> {
         const referenceKeys = new Map<string, Set<string>>();
@@ -544,6 +566,8 @@ export class ReferenceExtractor {
             }
         }
         return this.columnExtractor.buildAliasMap(statement, (item: AstTableRef) => {
+            const sourceKey = this.queryRelationKeys.get(item);
+            if (sourceKey !== undefined) {return sourceKey;}
             const tableName = this.getTableName(item);
             if (!tableName) {return null;}
             const schema = item.schema || item.db || undefined;
@@ -552,15 +576,9 @@ export class ReferenceExtractor {
                 || referenceKeys.get(lookupKey(tableName, schema, catalog)) || new Set<string>();
             if (keys.size === 1) {return keys.values().next().value!;}
             if (keys.size > 1) {return null;}
-            // In-scope CTEs intentionally have no physical TableReference. AST
-            // delimiter metadata plus dialect semantics still supplies their key.
-            return getQualifiedKey(this.unquoteIdentifier(tableName), schema, {
-                ...getIdentifierSemantics(this._activeDialect),
-                catalog,
-                nameQuoted: this.isQuotedAstIdentifier(item.table),
-                schemaQuoted: this.isQuotedAstIdentifier(item.schema || item.db),
-                catalogQuoted: this.isQuotedAstIdentifier(item.db),
-            });
+            // Bare AST table strings can have lost their delimiters. Without
+            // captured source metadata, do not guess a different physical/CTE key.
+            return null;
         });
     }
 
@@ -1429,7 +1447,7 @@ export class ReferenceExtractor {
             )
             : null;
 
-        return {
+        const reference: TableReference = {
             tableName,
             alias: typeof item.as === 'string' ? item.as : undefined,
             schema,
@@ -1445,6 +1463,10 @@ export class ReferenceExtractor {
             context,
             statementIndex
         };
+        this.queryRelationKeys.set(item, getQualifiedKey(reference.tableName, reference.schema, {
+            ...reference, ...getIdentifierSemantics(this._activeDialect),
+        }));
+        return reference;
     }
 
     /**
