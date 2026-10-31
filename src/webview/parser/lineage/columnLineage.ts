@@ -1,6 +1,7 @@
 // Column lineage extraction
 
-import { FlowNode, FlowEdge, ColumnLineage } from '../../types';
+import { FlowNode, FlowEdge, ColumnLineage, SqlDialect } from '../../types';
+import { getSetOperationTree, type SetOperationTree } from '../../../shared';
 import { getSelectSourceScope, getIncomingEdgeMap } from './sourceScope';
 
 function getAstString(val: any, depth = 0): string | null {
@@ -29,36 +30,34 @@ function getAstString(val: any, depth = 0): string | null {
     return null;
 }
 
-export function extractColumnLineage(stmt: any, nodes: FlowNode[], edges: FlowEdge[]): ColumnLineage[] {
+export function extractColumnLineage(stmt: any, nodes: FlowNode[], edges: FlowEdge[], dialect: SqlDialect = 'MySQL'): ColumnLineage[] {
     const nodeMap = new Map(nodes.map(node => [node.id, node]));
     const incoming = getIncomingEdgeMap(edges, false);
     const selects = nodes.filter(node => node.type === 'select');
-    let branch = stmt;
-    let index = 0;
-    let lineage: ColumnLineage[] = [];
-    const visited = new Set<any>();
-    while (branch && !visited.has(branch)) {
-        visited.add(branch);
-        const select = selects[index];
-        const scope = select ? [...getSelectSourceScope(select.id, nodeMap, incoming).values()] : [];
-        const branchLineage = extractSelectColumnLineage(branch, scope);
-        if (index === 0) {
-            lineage = branchLineage;
-        } else {
-            // UNION output names come from the first SELECT; aliases in later branches may differ.
-            lineage.forEach((column, ordinal) => {
-                for (const source of branchLineage[ordinal]?.sources || []) {
+    let selectIndex = 0;
+    const extractTreeLineage = (tree: SetOperationTree): ColumnLineage[] => {
+        if ('statement' in tree) {
+            const select = selects[selectIndex++];
+            const scope = select ? [...getSelectSourceScope(select.id, nodeMap, incoming).values()] : [];
+            return extractSelectColumnLineage(tree.statement, scope);
+        }
+        const left = extractTreeLineage(tree.left);
+        // Visit dependency-only branches as well so SELECT indices remain aligned
+        // with the graph's SQL-order traversal, even when they contribute no values.
+        const right = extractTreeLineage(tree.right);
+        if (/^UNION\b/i.test(tree.operator)) {
+            // UNION output names come from the first SELECT; combine sources by ordinal.
+            left.forEach((column, ordinal) => {
+                for (const source of right[ordinal]?.sources || []) {
                     if (!column.sources.some(existing => existing.nodeId === source.nodeId && existing.table === source.table && existing.column === source.column)) {
                         column.sources.push(source);
                     }
                 }
             });
         }
-        if (!/^UNION\b/i.test(branch.set_op || '')) { break; }
-        branch = branch._next;
-        index++;
-    }
-    return lineage;
+        return left;
+    };
+    return extractTreeLineage(getSetOperationTree(stmt, dialect) || { statement: stmt });
 }
 
 function extractSelectColumnLineage(stmt: any, nodes: FlowNode[]): ColumnLineage[] {

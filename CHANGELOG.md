@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Connect CTE references in every compound-query branch and include parenthesized UNION contributors in SQL Flow column lineage.
+- Apply dead-column hint settings consistently to Compare baselines.
 - Apply global set-operation sorting and row limits after the merge, and preserve EXCEPT associativity, dialect precedence and supported parenthesized operands.
 - Preserve schema-qualified and quoted identities in Workspace column lineage and tracing.
 - Include column contributors from every UNION branch in Workspace lineage.

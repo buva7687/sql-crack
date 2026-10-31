@@ -32,6 +32,8 @@ export {
 } from './stringUtils';
 export type { StripSqlCommentsOptions } from './stringUtils';
 export { unwrapIdentifierValue } from './astUtils';
+export { getSetOperationTree } from './setOperations';
+export type { SetOperationTree } from './setOperations';
 export { TextOffsetIndex, buildSegmentStarts, countStartsAtOrBefore } from './textOffsets';
 
 export {

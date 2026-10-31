@@ -1529,6 +1529,7 @@ async function toggleCompareMode(): Promise<void> {
             || currentQueryIndex !== compareQueryIndex || compareToken !== compareRequestId) {
             return;
         }
+        applyQuerySettings(baselineResult);
         const currentTitle = owningBatch.queries.length > 1
             ? `Current • Q${compareQueryIndex + 1}`
             : (window.fileName || 'Current query');

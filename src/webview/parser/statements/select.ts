@@ -152,22 +152,22 @@ function processSelect(
     stmt: any,
     nodes: FlowNode[],
     edges: FlowEdge[],
-    cteNames: Set<string> = new Set()
+    cteNames: Set<string> = new Set(),
+    cteNodeIdsByName: Map<string, string> = new Map()
 ): string {
     const ctx = runtime.context;
     const setTree = getSetOperationTree(stmt, ctx.dialect);
     if (setTree) {
         return processSetOperationTree(runtime, setTree, nodes, edges,
-            branch => processSelect(runtime, branch, nodes, edges, cteNames)).id!;
+            branch => processSelect(runtime, branch, nodes, edges, cteNames, cteNodeIdsByName)).id!;
     }
-    const cteNodeIdsByName = new Map<string, string>();
     const cteReferenceIdsByName = new Map<string, string[]>();
 
     const recordCteReference = (cteName: string, nodeId: string): void => {
         const normalizedName = cteName.toLowerCase();
         const existing = cteReferenceIdsByName.get(normalizedName);
         if (existing) {
-            existing.push(nodeId);
+            if (!existing.includes(nodeId)) { existing.push(nodeId); }
             return;
         }
         cteReferenceIdsByName.set(normalizedName, [nodeId]);
@@ -199,7 +199,7 @@ function processSelect(
             if (cteStmt) {
                 // Phase 1 Feature: CTE Expansion Controls & Breadcrumb Navigation
                 // Recursively parse the CTE's SELECT statement with parentId and depth for breadcrumb navigation
-                parseCteOrSubqueryInternals(runtime, cteStmt, cteChildren, cteChildEdges, cteId, 0);
+                parseCteOrSubqueryInternals(runtime, cteStmt, cteChildren, cteChildEdges, cteId, 0, cteNames);
             }
 
             // Calculate container size based on children
@@ -230,7 +230,10 @@ function processSelect(
     // Connect inter-CTE dependencies: when a CTE's internal body references
     // another CTE (via FROM or JOIN), create a top-level edge between the
     // two CTE container nodes.
-    for (const [, cteId] of cteNodeIdsByName.entries()) {
+    for (const cte of Array.isArray(stmt.with) ? stmt.with : []) {
+        const cteName = cte.name?.value || cte.name || 'CTE';
+        const cteId = cteNodeIdsByName.get(cteName.toLowerCase());
+        if (!cteId) { continue; }
         const cteNode = nodes.find(n => n.id === cteId);
         if (!cteNode?.children) { continue; }
         const connected = new Set<string>();
@@ -869,7 +872,8 @@ function processFromItem(
         // Parse subquery's internal structure
         const subChildren: FlowNode[] = [];
         const subChildEdges: FlowEdge[] = [];
-        parseCteOrSubqueryInternals(runtime, fromItem.expr.ast, subChildren, subChildEdges, subqueryId, 0);
+        parseCteOrSubqueryInternals(runtime, fromItem.expr.ast, subChildren, subChildEdges, subqueryId, 0,
+            cteNames, name => onCteReference?.(name, subqueryId));
 
         // Subqueries as data sources should always be expanded
         // Calculate container size based on children
@@ -985,14 +989,16 @@ function parseCteOrSubqueryInternals(
     nodes: FlowNode[],
     edges: FlowEdge[],
     parentId?: string,
-    depth: number = 0
+    depth: number = 0,
+    cteNames: Set<string> = new Set(),
+    onCteReference?: (cteName: string) => void
 ): string | null {
     const ctx = runtime.context;
     if (!stmt) { return null; }
     const setTree = getSetOperationTree(stmt, ctx.dialect);
     if (setTree) {
         return processSetOperationTree(runtime, setTree, nodes, edges,
-            branch => parseCteOrSubqueryInternals(runtime, branch, nodes, edges, parentId, depth),
+            branch => parseCteOrSubqueryInternals(runtime, branch, nodes, edges, parentId, depth, cteNames, onCteReference),
             { parentId, depth }).id;
     }
 
@@ -1014,7 +1020,7 @@ function parseCteOrSubqueryInternals(
             for (const subquery of subqueries) {
                 // Expression subqueries are side branches, not part of the main
                 // FROM -> clause pipeline for the containing CTE/subquery.
-                parseCteOrSubqueryInternals(runtime, subquery, nodes, edges, parentId, depth + 1);
+                parseCteOrSubqueryInternals(runtime, subquery, nodes, edges, parentId, depth + 1, cteNames, onCteReference);
             }
         }
     };
@@ -1026,7 +1032,7 @@ function parseCteOrSubqueryInternals(
             if (fromItem.expr && fromItem.expr.ast && !fromItem.join) {
                 ctx.stats.subqueries++; // Count nested subqueries
                 // Recursively parse the nested subquery and capture last node for chaining
-                const subqLastId = parseCteOrSubqueryInternals(runtime, fromItem.expr.ast, nodes, edges, parentId, depth + 1);
+                const subqLastId = parseCteOrSubqueryInternals(runtime, fromItem.expr.ast, nodes, edges, parentId, depth + 1, cteNames, onCteReference);
                 if (subqLastId) { previousId = subqLastId; }
             } else if (!fromItem.join) {
                 const tableName = getTableName(fromItem);
@@ -1035,12 +1041,15 @@ function parseCteOrSubqueryInternals(
                     trackTableUsage(runtime, tableName);
                     const tableId = genId(runtime, 'child_table');
                     const tableAlias = getAstString(fromItem.as)?.trim() || undefined;
+                    const isCteReference = cteNames.has(tableName.toLowerCase());
+                    if (isCteReference) { onCteReference?.(tableName.toLowerCase()); }
                     nodes.push({
                         id: tableId,
                         type: 'table',
                         label: tableName,
                         alias: tableAlias,
-                        description: 'Table',
+                        description: isCteReference ? 'CTE reference' : 'Table',
+                        tableCategory: isCteReference ? 'cte_reference' : 'physical',
                         details: tableAlias ? [`Alias: ${tableAlias}`] : undefined,
                         parentId: parentId,
                         depth: depth + 1,
@@ -1061,7 +1070,7 @@ function parseCteOrSubqueryInternals(
                 if (fromItem.expr && fromItem.expr.ast) {
                     ctx.stats.subqueries++; // Count nested subqueries in joins
                     // Recursively parse the nested subquery and capture last node for chaining
-                    const joinSubqLastId = parseCteOrSubqueryInternals(runtime, fromItem.expr.ast, nodes, edges, parentId, depth + 1);
+                    const joinSubqLastId = parseCteOrSubqueryInternals(runtime, fromItem.expr.ast, nodes, edges, parentId, depth + 1, cteNames, onCteReference);
                     if (joinSubqLastId) { previousId = joinSubqLastId; }
                 } else {
                     const joinId = genId(runtime, 'child_join');
@@ -1069,6 +1078,7 @@ function parseCteOrSubqueryInternals(
                     // Track table usage for joined tables in CTEs/subqueries
                     if (joinTable && joinTable !== 'table') {
                         trackTableUsage(runtime, joinTable);
+                        if (cteNames.has(joinTable.toLowerCase())) { onCteReference?.(joinTable.toLowerCase()); }
                     }
                     // Extract join condition details
                     const joinDetails: string[] = [];

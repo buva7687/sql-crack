@@ -96,10 +96,11 @@ describe('webview refresh query state (H11, M15)', () => {
             return result.promise;
         });
         const render = jest.fn();
+        const parseAsync = jest.fn(() => Promise.resolve(makeQuery('baseline')));
 
         jest.doMock('../../../src/webview/parserClient', () => proxyModule({
             parseBatchAsync,
-            parseAsync: jest.fn(() => Promise.resolve(makeQuery('baseline'))),
+            parseAsync,
             isCancelledBatchParseResult: () => false,
         }));
         const renderer = proxyModule({
@@ -182,7 +183,7 @@ describe('webview refresh query state (H11, M15)', () => {
         const saves = () => ((global as any).window.vscodeApi.postMessage as jest.Mock).mock.calls
             .map(([message]) => message)
             .filter(message => message.command === 'persistUiState');
-        return { batchCalls, render, renderer, send, settle, ui, toolbarCallbacks, fireWindowEvent, saves };
+        return { batchCalls, parseAsync, render, renderer, send, settle, ui, toolbarCallbacks, fireWindowEvent, saves };
     };
 
     it('does not write a hydration started before the refreshed result into that result', async () => {
@@ -627,6 +628,39 @@ describe('webview refresh query state (H11, M15)', () => {
         expect(hydratedRendered.hints.filter((h: any) => h.message.includes('dead column'))).toHaveLength(0);
         expect(warnings(hydratedRendered.nodes).filter(w => w.type === 'dead-column')).toHaveLength(0);
 
+    });
+
+    it.each([false, true])('applies showDeadColumnHints=%s consistently to both Compare inputs', async enabled => {
+        const { parseSqlBatch } = jest.requireActual('../../../src/webview/sqlParser');
+        const sql = 'WITH c AS (SELECT id, unused FROM users WHERE LOWER(name) = \'x\') SELECT id FROM c;';
+        const baselineSql = `${sql} -- pinned baseline`;
+        const currentBatch = parseSqlBatch(sql, 'PostgreSQL');
+        const baseline = parseSqlBatch(baselineSql, 'PostgreSQL').queries[0];
+        const warnings = (nodes: any[]): any[] => nodes.flatMap(node => [...(node.warnings || []), ...warnings(node.children || [])]);
+        const baselineOtherWarnings = warnings(baseline.nodes).filter(warning => warning.type !== 'dead-column');
+        const baselineOtherHints = baseline.hints.filter((hint: any) => !hint.message.includes('dead column'));
+        expect(baseline.hints.some((hint: any) => hint.message.includes('dead column'))).toBe(true);
+        expect(baselineOtherHints.length).toBeGreaterThan(0);
+
+        const { batchCalls, parseAsync, send, settle, ui, toolbarCallbacks } = bootWebview();
+        (global as any).window.showDeadColumnHints = enabled;
+        send({ command: 'refresh', sql, options: { dialect: 'PostgreSQL', fileName: 'q.sql' } });
+        await settle();
+        batchCalls[0].result.resolve(currentBatch);
+        await settle();
+        send({ command: 'pinCreated', pinnedTabs: [{ id: 'baseline', name: 'Earlier', sql: baselineSql, dialect: 'PostgreSQL', timestamp: 1 }] });
+        parseAsync.mockResolvedValueOnce(baseline);
+        toolbarCallbacks().onToggleCompareMode();
+        await settle();
+
+        expect(ui.showCompareView).toHaveBeenCalledTimes(1);
+        const { left, right } = ui.showCompareView.mock.calls[0][0];
+        for (const { result } of [left, right]) {
+            expect(result.hints.some((hint: any) => hint.message.includes('dead column'))).toBe(enabled);
+            expect(warnings(result.nodes).some(warning => warning.type === 'dead-column')).toBe(enabled);
+        }
+        expect(warnings(left.result.nodes).filter(warning => warning.type !== 'dead-column')).toEqual(baselineOtherWarnings);
+        expect(left.result.hints.filter((hint: any) => !hint.message.includes('dead column'))).toEqual(baselineOtherHints);
     });
 
 });
