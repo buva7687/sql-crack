@@ -33,6 +33,10 @@ import type {
     AstSelectStatement
 } from './astTypes';
 
+function isWildcardProjection(column: AstColumn): boolean {
+    return column.type === 'star' || (column.expr?.type === 'column_ref' && column.expr.column === '*');
+}
+
 interface TableLineLookup {
     sql: string;
     contextLineByTable: Map<string, Map<number, Map<ReferenceType, Array<{ offset: number; line: number }>>>>;
@@ -357,15 +361,24 @@ export class ReferenceExtractor {
         statement: AstStatement,
         statementIndex: number,
         statementReferences: TableReference[],
-        cteNamesInScope: ReadonlySet<string> = new Set()
+        cteNamesInScope: ReadonlySet<string> = new Set(),
+        compoundOutputNames?: readonly string[]
     ): QueryAnalysis {
         const originalSelect = this.getAnalysisSelectStatement(statement);
         const tree = getSetOperationTree(originalSelect, this._activeDialect);
         const valueStatements = tree ? this.getValueStatements(tree) : [];
         const selectStatement = valueStatements[0] || originalSelect;
-        const hasWildcardProjection = Array.isArray(selectStatement?.columns) && selectStatement.columns.some(column =>
-            column.type === 'star' || (column.expr?.type === 'column_ref' && unwrapIdentifierValue(column.expr.column) === '*')
-        );
+        const targetColumnNames = this.getTargetColumnNames(statement);
+        const destinationNames = compoundOutputNames ?? targetColumnNames;
+        const projections = Array.isArray(selectStatement?.columns) ? selectStatement.columns : [];
+        const firstWildcard = projections.findIndex(isWildcardProjection);
+        // SQL names explicit projections even after a wildcard. Positional
+        // destinations can only use the prefix before an unexpanded wildcard.
+        const positional = compoundOutputNames !== undefined || targetColumnNames.length > 0;
+        const explicitProjections = positional && firstWildcard >= 0
+            ? projections.slice(0, firstWildcard)
+            : projections.filter(column => !isWildcardProjection(column));
+        const projectionStatement = selectStatement && { ...selectStatement, columns: explicitProjections };
         const allInputTables = statementReferences.filter(reference =>
             reference.referenceType !== 'insert'
             && reference.referenceType !== 'update'
@@ -399,12 +412,12 @@ export class ReferenceExtractor {
             ? scopedInputTables
             : allInputTables;
 
-        let outputColumns: ColumnInfo[] = selectStatement && !hasWildcardProjection
-            ? this.columnExtractor.extractSelectColumns(selectStatement, tableAliases)
+        let outputColumns: ColumnInfo[] = projectionStatement
+            ? this.columnExtractor.extractSelectColumns(projectionStatement, tableAliases)
             : [];
-        let transformations: Transformation[] = selectStatement && !hasWildcardProjection
-            ? this.transformExtractor.extractTransformations(selectStatement, tableAliases)
-            : selectStatement ? [] : this.extractUpdateTransformations(
+        let transformations: Transformation[] = projectionStatement
+            ? this.transformExtractor.extractTransformations(projectionStatement, tableAliases)
+            : this.extractUpdateTransformations(
                 statement,
                 // Only alias resolution for SET expressions needs the MySQL
                 // multi-table list; source scoping above must keep subquery
@@ -417,7 +430,11 @@ export class ReferenceExtractor {
         const soleSourceTable = directSourceTableNames.length === 1
             ? directSourceTableNames[0]
             : (sourceTableNames.size === 1 ? [...sourceTableNames][0] : undefined);
+        if (compoundOutputNames !== undefined) {
+            transformations = transformations.slice(0, compoundOutputNames.length);
+        }
         transformations = transformations.map((transformation, index) => {
+            const destinationName = destinationNames[index];
             const inputColumns = transformation.inputColumns.map(column => ({
                 ...column,
                 tableName: column.tableName || soleSourceTable,
@@ -425,13 +442,12 @@ export class ReferenceExtractor {
             }));
             return {
                 ...transformation,
-                ...this.getTargetColumnOverride(statement, index),
+                ...(destinationName ? { outputColumn: destinationName, outputAlias: destinationName } : {}),
                 inputColumns,
                 lineNumber: transformation.lineNumber || queryLineNumber,
             };
         });
 
-        const targetColumnNames = this.getTargetColumnNames(statement);
         if (targetColumnNames.length > 0) {
             outputColumns = targetColumnNames.map((name, index) => {
                 const transformation = transformations[index];
@@ -501,25 +517,17 @@ export class ReferenceExtractor {
         });
 
         const setOperationBranches: QueryAnalysis[] = [];
-        // A wildcard can cover several positions. Until its schema is expanded,
-        // only an explicit destination list establishes output ordinals.
+        // The first arm names compound outputs. Its explicit prefix has known
+        // ordinals even when the wildcard makes the remaining positions unknown.
         const outputNames = targetColumnNames.length > 0
-            ? targetColumnNames : transformations.map(transformation => transformation.outputColumn);
+            ? targetColumnNames
+            : transformations.slice(0, firstWildcard < 0 ? transformations.length : firstWildcard)
+                .map(transformation => transformation.outputColumn);
         const branchStatements = valueStatements.slice(1);
-        const mapOutputs = (analysis: QueryAnalysis): void => {
-            analysis.transformations = analysis.transformations.length === outputNames.length
-                ? analysis.transformations.map((transformation, index) => ({
-                ...transformation,
-                outputColumn: outputNames[index],
-                outputAlias: outputNames[index],
-            })) : [];
-            analysis.setOperationBranches?.forEach(mapOutputs);
-        };
         for (const branch of branchStatements) {
             const analysis = this.buildQueryAnalysis(
-                branch, statementIndex, statementReferences, nestedCteNamesInScope
+                branch, statementIndex, statementReferences, nestedCteNamesInScope, outputNames
             );
-            mapOutputs(analysis);
             setOperationBranches.push(analysis);
         }
 
@@ -628,16 +636,6 @@ export class ReferenceExtractor {
             return type;
         }
         return 'unknown';
-    }
-
-    private getTargetColumnOverride(
-        statement: AstStatement,
-        columnIndex: number
-    ): Pick<Transformation, 'outputColumn' | 'outputAlias'> | Record<string, never> {
-        const targetColumn = this.getTargetColumnNames(statement)[columnIndex];
-        return targetColumn
-            ? { outputColumn: targetColumn, outputAlias: targetColumn }
-            : {};
     }
 
     private getTargetColumnNames(statement: AstStatement): string[] {

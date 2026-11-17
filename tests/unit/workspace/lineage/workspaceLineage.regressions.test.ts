@@ -18,7 +18,7 @@ function analyze(sql: string, dialect: SqlDialect = 'PostgreSQL') {
         definitionMap.set(key, [...(definitionMap.get(key) || []), definition]);
     }
     const index: WorkspaceIndex = {
-        version: 10, lastUpdated: 1, fileCount: 1, files: new Map([[filePath, analysis]]),
+        version: 11, lastUpdated: 1, fileCount: 1, files: new Map([[filePath, analysis]]),
         fileHashes: new Map(), definitionMap, referenceMap: new Map(),
     };
     const graph = new LineageBuilder({ includeExternal: true, includeColumns: true, dialect }).buildFromIndex(index);
@@ -52,6 +52,31 @@ describe('Workspace column lineage identities', () => {
         expect(graph.columnEdges.filter(edge => edge.targetTableId === 'view:u')).toEqual([]);
         expect(graph.edges.filter(edge => edge.targetId === 'view:u').map(edge => edge.sourceId).sort())
             .toEqual(['table:a', 'table:b']);
+    });
+
+    it.each(['a.id AS renamed_id, a.*', 'a.*, a.id AS renamed_id'])('preserves named projections beside a wildcard: %s', projection => {
+        const { graph } = analyze(`CREATE TABLE a (id INT); CREATE VIEW v AS SELECT ${projection} FROM a;`);
+        expect(graph.columnEdges.filter(edge => edge.targetTableId === 'view:v').map(edge => [edge.sourceColumnName, edge.targetColumnName]))
+            .toEqual([['id', 'renamed_id']]);
+    });
+
+    it('maps only known output positions when a compound arm has a wildcard', () => {
+        const { graph } = analyze(`
+            CREATE TABLE a (id INT, a2 INT); CREATE TABLE b (b1 INT, b2 INT, b3 INT);
+            CREATE VIEW v AS SELECT id AS x, a.* FROM a UNION ALL SELECT b1, b2, b3 FROM b;
+        `);
+        expect(graph.columnEdges.filter(edge => edge.targetTableId === 'view:v').map(edge => [edge.sourceTableId, edge.sourceColumnName, edge.targetColumnName]))
+            .toEqual([['table:a', 'id', 'x'], ['table:b', 'b1', 'x']]);
+    });
+
+    it('maps explicit columns before a wildcard to named destinations in both UNION arms', () => {
+        const { graph } = analyze(`
+            CREATE TABLE a (id INT); CREATE TABLE b (other_id INT, extra INT);
+            CREATE VIEW v (x, y, z) AS SELECT a.id, a.*, a.id + 1 FROM a
+                UNION ALL SELECT b.other_id, b.* FROM b;
+        `);
+        expect(graph.columnEdges.filter(edge => edge.targetTableId === 'view:v').map(edge => [edge.sourceTableId, edge.sourceColumnName, edge.targetColumnName]))
+            .toEqual([['table:a', 'id', 'x'], ['table:b', 'other_id', 'x']]);
     });
 
     it.each([

@@ -21,7 +21,7 @@ import { normalizeFileExtensions } from '../shared/fileExtensions';
 import { getQualifiedKey, IdentifierQualification, normalizeIdentifier } from './identifiers';
 import { logger } from '../logger';
 
-const INDEX_VERSION = 10; // Invalidate analyses without canonical CTE keys and correct compound value provenance
+const INDEX_VERSION = 11; // Invalidate analyses that dropped explicit wildcard-adjacent projections
 const DEFAULT_AUTO_INDEX_THRESHOLD = 50;
 const DEFAULT_CACHE_TTL_HOURS = 24;
 const DEFAULT_MAX_CACHE_BYTES = 4 * 1024 * 1024; // 4MB safety limit for workspaceState
