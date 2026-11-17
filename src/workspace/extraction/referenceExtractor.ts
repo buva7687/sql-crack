@@ -143,7 +143,15 @@ export class ReferenceExtractor {
     }
 
     private isRecursiveCte(cte: AstCTE, statement: AstStatement): boolean {
-        return Boolean(cte.recursive || statement.recursive || this._activeDialect === 'TransactSQL');
+        if (cte.recursive || statement.recursive
+            || this._activeDialect === 'TransactSQL' || this._activeDialect === 'Oracle') {
+            return true;
+        }
+        // Snowflake and SQLite make RECURSIVE optional: a compound body that
+        // names its own CTE is recursive.
+        const body = this.getCteStatement(cte) as { _next?: unknown; set_op?: unknown } | null;
+        return (this._activeDialect === 'Snowflake' || this._activeDialect === 'SQLite')
+            && Boolean(body?._next || body?.set_op);
     }
 
     private hasForwardCteReferences(clauses: AstCTE[]): boolean {

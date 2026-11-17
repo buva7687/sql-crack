@@ -687,10 +687,10 @@ function processSelect(
 function getSelectIntoTarget(stmt: any, dialect: SqlDialect): string | null {
     if (dialect !== 'PostgreSQL' && dialect !== 'TransactSQL') { return null; }
     const into = stmt.into;
-    if (into?.type !== 'into' || into.keyword || typeof into.expr !== 'string' || into.expr.startsWith('@')) {
-        return null;
-    }
-    return into.expr;
+    if (into?.type !== 'into' || into.keyword) { return null; }
+    const target = typeof into.expr === 'string' ? into.expr
+        : (into.expr?.type === 'double_quote_string' ? getAstString(into.expr) : null);
+    return target && !target.startsWith('@') ? target : null;
 }
 
 function appendSelectIntoTarget(

@@ -18,6 +18,7 @@ import {
     preprocessRedshiftSyntax,
     preprocessRedshiftTypes,
     preprocessTransactSqlSyntax,
+    normalizeSelectIntoTargets,
     rewriteUnsupportedPostgresWindowFunctionsForCompatibility,
     preprocessSnowflakeSyntax,
     preprocessTeradataSyntax,
@@ -1122,6 +1123,8 @@ function applyParserCompatibilityPreprocessing(
             severity: 'low',
         });
     }
+
+    transformedSql = normalizeSelectIntoTargets(transformedSql, dialect) ?? transformedSql;
 
     const redshiftPreprocessedSql = preprocessRedshiftSyntax(transformedSql, dialect);
     if (redshiftPreprocessedSql !== null) {

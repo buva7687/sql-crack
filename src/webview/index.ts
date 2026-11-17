@@ -1846,7 +1846,7 @@ async function visualize(sql: string): Promise<void> {
         currentQueryIndex = 0;
         updateBatchTabsUI();
         updateErrorBadge(1, [{ queryIndex: 0, message }]);
-        render(buildFallbackQueryErrorResult(sql, message));
+        render(buildFallbackQueryErrorResult(sql, message), { dialect: currentDialect });
         pendingCursorLine = undefined;
         schedulePersistUiState();
         return;

@@ -1,6 +1,8 @@
 import { parseSql, parseSqlBatch } from '../../../src/webview/sqlParser';
 import { formatSql } from '../../../src/webview/sqlFormatter';
 import { preprocessTransactSqlSyntax } from '../../../src/webview/parser/dialects/preprocessing';
+import { computeCompareDiff } from '../../../src/webview/ui/compareView';
+import { ReferenceExtractor } from '../../../src/workspace/extraction';
 import { splitSqlStatementsWithOffsets } from '../../../src/webview/parser/validation/splitting';
 
 describe('SQL Flow parser audit regressions', () => {
@@ -154,5 +156,49 @@ describe('SQL Flow parser audit regressions', () => {
     it('still flags a CTE output that nothing downstream reads', () => {
         const hints = parseSql('WITH c AS (SELECT a, b FROM t) SELECT a FROM c', 'PostgreSQL').hints;
         expect(hints.some(hint => hint.message === '1 dead column detected: b')).toBe(true);
+    });
+
+    it('treats an unquoted case change in a PostgreSQL CTE join as the same relation', () => {
+        const before = 'WITH c AS (SELECT a.id FROM a JOIN Users u ON u.id = a.id) SELECT id FROM c';
+        const diff = computeCompareDiff(parseSql(before, 'PostgreSQL'), parseSql(before.replace('Users', 'users'), 'PostgreSQL'));
+        expect([diff.addedNodeKeys, diff.removedNodeKeys, diff.changedNodeKeys]).toEqual([[], [], []]);
+        const quoted = computeCompareDiff(parseSql(before, 'PostgreSQL'), parseSql(before.replace('Users', '"Users"'), 'PostgreSQL'));
+        expect(quoted.changedNodeKeys).toHaveLength(1);
+    });
+
+    it('formats hash characters as SQL when no dialect is given', () => {
+        expect(formatSql("select a #> '{b}' as x from t where d = 1")).toMatch(/FROM t\s+WHERE d = 1/);
+        expect(formatSql('select id from #orders where id = 1')).toMatch(/FROM #orders\s+WHERE id = 1/);
+    });
+
+    it.each([
+        'WITH orders AS (SELECT id, items FROM raw) SELECT o.id, item FROM orders o CROSS JOIN UNNEST(o.items) AS item',
+        'WITH t AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM t WHERE n < 5) SELECT n FROM t',
+    ])('does not flag table-function arguments or unnamed recursive expressions: %#', (sql) => {
+        expect(parseSql(sql, 'PostgreSQL').hints.filter(hint => hint.message.includes('dead column'))).toEqual([]);
+    });
+
+    it.each([
+        ['PostgreSQL', 'SELECT id INTO myschema.archive FROM orders;', 'myschema.archive'],
+        ['PostgreSQL', 'SELECT id INTO TEMP TABLE archive FROM orders;', 'archive'],
+        ['TransactSQL', 'SELECT a, b INTO dbo.new_t FROM dbo.old_t;', 'dbo.new_t'],
+        ['TransactSQL', 'SELECT a INTO [dbo].[new t] FROM dbo.old_t;', 'dbo.new t'],
+    ] as const)('parses a qualified or temporary %s SELECT INTO target', (dialect, sql, target) => {
+        const result = parseSql(sql, dialect);
+        expect(result.partial).not.toBe(true);
+        expect(result.nodes.find(node => node.accessMode === 'write')?.label).toBe(target);
+    });
+
+    it('leaves INSERT INTO and variable targets alone', () => {
+        const insert = parseSql('INSERT INTO s.target SELECT id FROM s.source;', 'PostgreSQL');
+        expect(insert.partial).not.toBe(true);
+        expect(insert.nodes.some(node => node.label === 's.target')).toBe(false);
+        expect(parseSql('SELECT @v = id FROM dbo.t;', 'TransactSQL').nodes.some(node => node.accessMode === 'write')).toBe(false);
+    });
+
+    it.each(['Snowflake', 'SQLite'] as const)('does not list a keyword-less recursive CTE as a %s workspace reference', (dialect) => {
+        const sql = 'CREATE VIEW v AS WITH t AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM t WHERE n < 5) SELECT n FROM t;';
+        const parsed = new ReferenceExtractor().extractReferencesWithStatus(sql, '/a.sql', dialect);
+        expect(parsed.references.map(reference => reference.tableName)).not.toContain('t');
     });
 });

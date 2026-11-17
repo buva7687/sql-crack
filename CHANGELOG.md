@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Show table writes for parsed PostgreSQL and SQL Server SELECT INTO statements, display Athena UNNEST aliases correctly, and preserve hash comments in formatted MySQL-family SQL.
 - Stop recommending removal of intermediate columns used through qualified stars, later UNION branches, derived-table projections, consecutive JOIN conditions, or scalar subqueries inside a CTE.
 - Keep editor cursor follow working on a stale SQL Flow panel when auto-refresh is off.
+- Parse SELECT INTO with a schema-qualified target, and PostgreSQL TEMP, UNLOGGED, or TABLE modifiers, and show the written table.
+- Stop flagging CTE columns used only as table-function arguments, and unnamed expressions, as dead columns.
+- Treat an unquoted case change of a joined relation inside a PostgreSQL CTE as unchanged in Compare.
+- Format `#` as SQL in the SQL preview unless the dialect uses hash comments.
+- Stop listing a recursive CTE written without the RECURSIVE keyword as an external table in the Workspace graph for Snowflake, SQLite, and Oracle.
 - Avoid repeated prefix scans in dense statement batches and repeated scans during OPENJSON error recovery.
 - Keep edges and minimap markers aligned when changing layouts or moving nodes in SQL Flow. Fit to View restores the full graph after zooming into a node.
 - Keep cursor and column-lineage highlights as offscreen nodes come back into view. Resolve editor cursor motion against the new statement ranges when a refresh finishes.

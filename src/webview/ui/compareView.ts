@@ -62,9 +62,15 @@ function nodeSignature(node: FlowNode): unknown {
     const children = node.children || [];
     const childIndexes = new Map(children.map((child, index) => [child.id, index]));
     const alias = node.relationIdentity?.alias;
-    const details = (node.details || []).map(detail =>
-        alias && node.alias && detail === `Alias: ${node.alias}` ? `Alias: ${alias}` : detail
-    );
+    // A join inside a CTE body repeats the joined relation in its details;
+    // compare it by the same canonical name as the node key.
+    const joinedRelation = /\bJOIN\s+(.+)$/i;
+    const rawJoined = node.type === 'join' ? joinedRelation.exec(node.label)?.[1] : undefined;
+    const canonicalJoined = rawJoined ? joinedRelation.exec(node.relationIdentity?.name ?? '')?.[1] : undefined;
+    const details = (node.details || []).map(detail => {
+        if (alias && node.alias && detail === `Alias: ${node.alias}`) { return `Alias: ${alias}`; }
+        return canonicalJoined && detail === rawJoined ? canonicalJoined : detail;
+    });
     return {
         description: node.description || '',
         details,

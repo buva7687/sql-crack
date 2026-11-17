@@ -380,10 +380,9 @@ function assignScopedLineNumbers(nodes: FlowNode[], sql: string, childScope: boo
         return pick(inClause, predicates, true) ?? pick(inClause, predicates, false);
     }
 
-    function applyRelationIdentity(node: FlowNode, occurrence: TableOccurrence): void {
+    function applyRelationIdentity(node: FlowNode, occurrence: TableOccurrence, name = node.label, namePrefix = ''): void {
         if (dialect !== 'PostgreSQL' || !node.relationIdentity || occurrence.inQuotes) { return; }
         const { qualifiers, alias } = node.relationIdentity;
-        const name = node.label;
         const nameEnd = occurrence.offset + name.length;
         if (commentStripped.slice(occurrence.offset, nameEnd) !== name) { return; }
         // PostgreSQL's FROM AST drops delimiter flags. Recover the spelling
@@ -404,7 +403,7 @@ function assignScopedLineNumbers(nodes: FlowNode[], sql: string, childScope: boo
         const aliasToken = aliasSource.trimStart().replace(/^AS\s+/i, '');
         const unquotedAlias = /^[\p{L}_][\p{L}\p{N}_$]*/u.exec(aliasToken)?.[0];
         node.relationIdentity = {
-            name: occurrence.quoted ? name : name.toLowerCase(),
+            name: namePrefix + (occurrence.quoted ? name : name.toLowerCase()),
             qualifiers: canonicalQualifiers,
             alias: alias && unquotedAlias === alias ? alias.toLowerCase() : alias,
         };
@@ -508,6 +507,13 @@ function assignScopedLineNumbers(nodes: FlowNode[], sql: string, childScope: boo
                     const on = occurrencesOf('ON').find(o =>
                         o.offset > selected.offset && o.offset < (nextJoin?.offset ?? Infinity) && isOuter(o));
                     if (on) { onLineByJoin.set(node.id, on.line); }
+                }
+                // Joins inside a CTE or subquery body carry the joined
+                // relation in their label ("LEFT JOIN users").
+                const joined = /^(.*?\bJOIN\s+)(.+)$/i.exec(node.label);
+                if (joined && dialect === 'PostgreSQL' && node.relationIdentity) {
+                    const occurrence = findTableOccurrence(joined[2], true);
+                    if (occurrence) { applyRelationIdentity(node, occurrence, joined[2], joined[1].toUpperCase()); }
                 }
                 break;
             }

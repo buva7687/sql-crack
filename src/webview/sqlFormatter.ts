@@ -40,8 +40,7 @@ interface HighlightPalette {
 const DEFAULT_OPTIONS: FormatOptions = {
     indent: '    ',
     uppercase: true,
-    lineWidth: 80,
-    dialect: 'MySQL'
+    lineWidth: 80
 };
 
 /**
@@ -55,7 +54,7 @@ export function formatSql(sql: string, options: Partial<FormatOptions> = {}): st
     }
 
     // Extract comments and replace with placeholders to preserve them
-    const { sqlWithoutComments, comments } = extractComments(sql, dialectSupportsHashComments(opts.dialect ?? 'MySQL'));
+    const { sqlWithoutComments, comments } = extractComments(sql, opts.dialect !== undefined && dialectSupportsHashComments(opts.dialect));
     // All formatting passes work on SQL structure only. Quoted values and
     // identifiers may contain whitespace, commas, keywords, or newlines.
     const { sqlWithoutQuotes, quotes } = protectQuotedTokens(sqlWithoutComments);

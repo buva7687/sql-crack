@@ -596,7 +596,9 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
 
         selectNode.columns.forEach(col => {
             const colName = col.name;
-            if (colName === '*') { return; }
+            // '*' is not a column, and 'expr' is the placeholder for an unnamed
+            // expression, which downstream SQL can only reach by position.
+            if (colName === '*' || colName === 'expr') { return; }
             // Build list of all possible column name variations to check
             const colNamesToCheck = new Set<string>();
             colNamesToCheck.add(colName);
@@ -622,6 +624,12 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
                     includeSelectClause: true,
                     qualifiers: downstreamQualifiers
                 });
+            }
+            // A qualified reference anywhere downstream is a use, including
+            // table-function arguments such as UNNEST(o.items).
+            if (!isUsed) {
+                isUsed = downstreamQualifiers.some(qualifier => colNames.some(name =>
+                    new RegExp(`\\b${escapeRegex(qualifier)}\\s*\\.\\s*${escapeRegex(name)}\\b`, 'i').test(downstreamSql)));
             }
 
             // If column is not used in any clause, it's a dead column

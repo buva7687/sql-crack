@@ -230,6 +230,38 @@ function stripOpenJsonWithClauses(sql: string): string | null {
  *
  * Returns the transformed SQL or `null` if no rewriting was needed.
  */
+/**
+ * The parser accepts only a single bare identifier after SELECT ... INTO.
+ * Fold a schema-qualified target, and PostgreSQL's TEMP / UNLOGGED / TABLE
+ * modifiers, into one delimited identifier so the statement still parses and
+ * the written table keeps its full name.
+ */
+export function normalizeSelectIntoTargets(sql: string, dialect: SqlDialect): string | null {
+    if (dialect !== 'PostgreSQL' && dialect !== 'TransactSQL') {
+        return null;
+    }
+    const tsql = dialect === 'TransactSQL';
+    const masked = maskStringsAndComments(sql, { hashComments: false });
+    const part = tsql ? String.raw`(?:\[[^\]\n]+\]|[A-Za-z_#][\w$#]*)` : String.raw`[A-Za-z_][\w$]*`;
+    const modifiers = tsql ? '()' : String.raw`((?:(?:TEMPORARY|TEMP|UNLOGGED)\s+)?(?:TABLE\s+)?)`;
+    const pattern = new RegExp(
+        String.raw`(?<!\b(?:INSERT|MERGE|IGNORE|OVERWRITE)\s+)\bINTO\s+${modifiers}(${part}(?:\s*\.\s*${part})*)(?=\s+FROM\b)`,
+        'gi'
+    );
+    let result = '';
+    let last = 0;
+    for (const match of masked.matchAll(pattern)) {
+        const [, modifier, target] = match;
+        if (!modifier && !target.includes('.')) { continue; }
+        const name = target.split(/\s*\.\s*/).map(piece => piece.replace(/^\[|\]$/g, '')).join('.');
+        const targetStart = match.index + match[0].length - target.length;
+        const modifierStart = targetStart - modifier.length;
+        result += sql.slice(last, modifierStart) + (tsql ? `[${name}]` : `"${name}"`);
+        last = match.index + match[0].length;
+    }
+    return last === 0 ? null : result + sql.slice(last);
+}
+
 export function preprocessTransactSqlSyntax(sql: string, dialect: SqlDialect): string | null {
     if (dialect !== 'TransactSQL') {
         return null;
