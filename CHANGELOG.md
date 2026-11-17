@@ -7,7 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-11-16
+
 ### Fixed
+- Keep explicit column lineage beside wildcard projections and map compound outputs when their positions are known.
 - Preserve quoted CTE bindings and normalized CTE targets throughout Workspace column lineage, invalidating older cached analyses.
 - Keep EXCEPT/INTERSECT filtering inputs as table dependencies without treating them as output value sources, and retain parenthesized UNION DISTINCT arms.
 - Parse compound CREATE VIEW bodies in Workspace analysis and omit uncertain wildcard column mappings instead of inventing output ordinals.
@@ -34,6 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Resolve SQL Flow column sources within each SELECT branch and merge UNION output lineage by column position, preserving distinct aliases and table instances.
 - Distinguish repeated table and operation instances in Compare, so added self-joins and removed instances receive the correct highlights and ghost nodes.
 - Reject obsolete Workspace analysis completions before they change host navigation state, preventing old Lineage details or Impact reports from returning after newer navigation.
+
+### Security and release tooling
+- Update transitive development dependencies to clear npm audit findings in the build and test toolchain.
 
 ## [1.0.0] - 2026-10-22
 
@@ -1721,7 +1727,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/buva7687/sql-crack/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/buva7687/sql-crack/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/buva7687/sql-crack/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/buva7687/sql-crack/compare/v0.9.4...v1.0.0
 [0.9.4]: https://github.com/buva7687/sql-crack/compare/v0.9.3...v0.9.4
 [0.9.3]: https://github.com/buva7687/sql-crack/compare/v0.9.2...v0.9.3
