@@ -59,6 +59,14 @@ describe('export preview wiring', () => {
         expect(exportPreviewSource).toContain('flex-shrink: 0;');
     });
 
+    it('saves only the artifact displayed by the latest successful preview', () => {
+        expect(exportPreviewSource).toContain('displayedAsset = null;');
+        expect(exportPreviewSource).toContain('saveButton.disabled = loading || !displayedAsset;');
+        expect(exportPreviewSource).toContain('displayedAsset = asset;');
+        expect(exportPreviewSource).toContain('displayedAsset.save();');
+        expect(exportFeatureSource).toContain('save: () => saveSvgArtifact(context, artifact)');
+    });
+
     it('wires toolbar and renderer callbacks into the export preview feature', () => {
         expect(indexSource).toContain('onOpenExportPreview: openExportPreview');
         expect(rendererSource).toContain("export function openExportPreview(initialFormat: 'png' | 'svg' | 'pdf' = 'png')");

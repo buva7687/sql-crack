@@ -139,9 +139,8 @@ import {
     centerOnNodeFeature,
     ensureNodeVisibleFeature,
     fitViewFeature,
+    measureGraphBounds,
     getConnectedNodesFeature,
-    getKeyboardNavigationNodesFeature,
-    navigateToAdjacentNodeFeature,
     navigateToConnectedNodeFeature,
     navigateToSiblingNodeFeature,
     zoomToNodeFeature,
@@ -573,7 +572,7 @@ function captureLayoutHistorySnapshot(): LayoutHistorySnapshot {
         focusModeEnabled: state.focusModeEnabled,
         focusMode: state.focusMode,
         layoutType: state.layoutType || 'vertical',
-        nodePositions: currentNodes.map(node => ({ id: node.id, x: node.x, y: node.y })),
+        nodePositions: renderNodes.map(node => ({ id: node.id, x: node.x, y: node.y })),
         cloudOffsets: Array.from(cloudOffsets.entries()).map(([nodeId, offset]) => ({
             nodeId,
             offsetX: offset.offsetX,
@@ -585,7 +584,7 @@ function captureLayoutHistorySnapshot(): LayoutHistorySnapshot {
 function applyNodePositionsToDom(): void {
     if (!mainGroup) { return; }
 
-    currentNodes.forEach(node => {
+    renderNodes.forEach(node => {
         const nodeGroup = renderedNodeElementsById.get(node.id);
         if (!nodeGroup) { return; }
         const rect = renderedNodeRectsById.get(node.id);
@@ -602,7 +601,6 @@ function applyEdgePositionsToDom(): void {
     if (!mainGroup) { return; }
 
     const layoutType = state.layoutType || 'vertical';
-    const currentNodeMap = new Map(currentNodes.map(node => [node.id, node]));
     const edgeElements = renderedEdgeElementsById.size > 0
         ? Array.from(renderedEdgeElementsById.values())
         : Array.from(mainGroup.querySelectorAll('.edge:not(.column-flow-edge)')) as SVGPathElement[];
@@ -611,8 +609,8 @@ function applyEdgePositionsToDom(): void {
         const targetId = edgeEl.getAttribute('data-target');
         if (!sourceId || !targetId) { return; }
 
-        const sourceNode = renderNodeMap.get(sourceId) || currentNodeMap.get(sourceId);
-        const targetNode = renderNodeMap.get(targetId) || currentNodeMap.get(targetId);
+        const sourceNode = renderNodeMap.get(sourceId);
+        const targetNode = renderNodeMap.get(targetId);
         if (!sourceNode || !targetNode) { return; }
 
         edgeEl.setAttribute('d', calculateEdgePath(sourceNode, targetNode, layoutType));
@@ -940,7 +938,7 @@ function restoreLayoutHistorySnapshot(snapshot: LayoutHistorySnapshot): void {
     state.selectedNodeId = snapshot.selectedNodeId;
 
     const positionMap = new Map(snapshot.nodePositions.map(position => [position.id, position]));
-    currentNodes.forEach(node => {
+    renderNodes.forEach(node => {
         const position = positionMap.get(node.id);
         if (!position) { return; }
         node.x = position.x;
@@ -954,8 +952,9 @@ function restoreLayoutHistorySnapshot(snapshot: LayoutHistorySnapshot): void {
 
     applyNodePositionsToDom();
     applyEdgePositionsToDom();
-    currentNodes.forEach(node => updateCloudAndArrow(node));
+    renderNodes.forEach(node => updateCloudAndArrow(node));
     updateTransform();
+    updateMinimap();
     selectNode(snapshot.selectedNodeId, { skipNavigation: true });
 
     if (snapshot.focusModeEnabled && snapshot.selectedNodeId) {
@@ -1260,15 +1259,16 @@ export function initRenderer(container: HTMLElement): void {
             updateNodeEdges,
             updateTransform,
             updateZoomIndicator,
-            recordLayoutHistorySnapshot,
+            recordLayoutHistorySnapshot: () => {
+                recordLayoutHistorySnapshot();
+                updateMinimap();
+            },
             // Wheel zoom, pan, and drags change persisted view state without a
             // layout change; index.ts marks its UI state dirty on this event.
             onViewStateChanged: () => document.dispatchEvent(new CustomEvent('view-state-changed')),
             selectNode,
             clearFocusMode,
             fitView,
-            getKeyboardNavigationNodes,
-            moveKeyboardFocusToNode,
             toggleColumnFlows,
             hideContextMenu,
             clearSearch,
@@ -1470,9 +1470,13 @@ function restoreViewportPresentation(): void {
     if (state.focusModeEnabled && state.selectedNodeId) {
         applyFocusMode(state.selectedNodeId);
     }
+    if (state.showColumnFlows && columnLineageRuntime.selectedColumnLineage) {
+        highlightLineageNodes(columnLineageRuntime.selectedColumnLineage);
+    }
     if (state.searchTerm) {
         refreshSearchHighlightsFeature({ state, mainGroup, selectedNodeId: state.selectedNodeId, highlightColor: EDGE_COLORS.highlight });
     }
+    applyCursorHighlight();
 }
 
 /**
@@ -1524,8 +1528,9 @@ export function isVirtualizationEnabled(): boolean {
  * If cloud is to the left of node, arrow starts from right side of cloud.
  */
 function updateCloudAndArrow(node: FlowNode): void {
+    const rect = renderedNodeRectsById.get(node.id);
     updateCloudAndArrowFeature({
-        node,
+        node: rect ? { ...node, x: Number(rect.getAttribute('x')), y: Number(rect.getAttribute('y')) } : node,
         cloudElements,
         ensureCloudOffset,
         layoutSubflowNodesVertical,
@@ -1680,8 +1685,12 @@ export function render(result: ParseResult, options?: RenderOptions): void {
     if (!mainGroup) { return; }
     stopZeroGravityMode({ silent: true });
     const shouldResetCloudState = result.sql !== currentSql || result.nodes !== currentNodes;
-    const preserveInteractionState = options?.preserveInteractionState === true
-        || (!shouldResetCloudState && currentNodes.length > 0);
+    const preserveInteractionState = !result.error && result.nodes.length > 0
+        && (options?.preserveInteractionState === true || (!shouldResetCloudState && currentNodes.length > 0));
+    const clausePanel = document.getElementById('sql-clause-panel');
+    if (clausePanel) {
+        clausePanel.style.display = 'none';
+    }
     const preservedRenderState = preserveInteractionState ? capturePreservedRenderState() : null;
 
     if (!preserveInteractionState) {
@@ -1807,7 +1816,7 @@ export function render(result: ParseResult, options?: RenderOptions): void {
     // create hundreds of off-screen DOM nodes only to prune them a frame later.
     // Re-rendering the same graph (theme or grid/accent setting changes) keeps
     // its positions, which already carry this layout and any dragged nodes;
-    // switchLayout() lays out currentNodes itself. Rebuilt cluster nodes keep
+    // switchLayout() lays out the projected graph itself. Rebuilt cluster nodes keep
     // their positions too; expanding or collapsing changes the projection
     // and still applies the selected layout.
     const initialLayout = state.layoutType || 'vertical';
@@ -1942,7 +1951,6 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
         updateTooltipPosition,
         hideTooltip,
         selectNode,
-        navigateToAdjacentNode,
         navigateToConnectedNode,
         navigateToSiblingNode,
         announceFocusedNode,
@@ -2292,23 +2300,10 @@ function pulseNodeInCloud(subNodeId: string, parentNodeId: string): void {
  * @param direction - 'upstream' (ArrowUp) or 'downstream' (ArrowDown)
  * @returns true if navigation occurred, false if no connected node found
  */
-function getKeyboardNavigationNodes(): FlowNode[] {
-    return getKeyboardNavigationNodesFeature({
-        nodes: renderNodes,
-        edges: renderEdges,
-        state,
-    });
-}
-
-function focusNodeGroup(nodeId: string): void {
-    const nodeGroup = mainGroup?.querySelector(`[data-id="${nodeId}"]`) as SVGGElement | null;
-    nodeGroup?.focus();
-}
-
 function moveKeyboardFocusToNode(targetNode: FlowNode): void {
     selectNode(targetNode.id, { skipNavigation: true });
     ensureNodeVisible(targetNode);
-    focusNodeGroup(targetNode.id);
+    renderedNodeElementsById.get(targetNode.id)?.focus();
 }
 
 function navigateToConnectedNode(direction: 'upstream' | 'downstream', fromNodeId?: string): boolean {
@@ -2325,23 +2320,6 @@ function navigateToConnectedNode(direction: 'upstream' | 'downstream', fromNodeI
                 : renderEdges.find((edge) => edge.source === sourceNodeId && edge.target === node.id);
             const relationLabel = getEdgeAnnouncementLabel(relationEdge);
             pendingNavigationAnnouncement = `Moved ${direction} via ${relationLabel}`;
-            moveKeyboardFocusToNode(node);
-        },
-    });
-}
-
-/**
- * Navigate to adjacent node in the visual order (for accessibility)
- * Uses Y position primarily, then X position for nodes at same level
- */
-function navigateToAdjacentNode(currentNode: FlowNode, direction: 'next' | 'prev'): void {
-    navigateToAdjacentNodeFeature({
-        currentNode,
-        direction,
-        nodes: renderNodes,
-        edges: renderEdges,
-        state,
-        onMoveToNode: (node) => {
             moveKeyboardFocusToNode(node);
         },
     });
@@ -2504,6 +2482,10 @@ function updateHintsPanel(): void {
 const MINIMAP_FIT_RESERVE = 182;
 
 function fitView(): void {
+    if (state.zoomedNodeId !== null) {
+        clearFocusMode();
+        restoreViewportPresentation();
+    }
     const minimapNodeCount = renderNodes.length > 0 ? renderNodes.length : currentNodes.length;
     fitViewFeature({
         svg,
@@ -2802,7 +2784,7 @@ function getExportFeatureContext() {
         getCurrentNodes: () => currentNodes,
         getCurrentEdges: () => currentEdges,
         isDarkTheme: () => state.isDarkTheme,
-        calculateBounds,
+        calculateBounds: () => calculateBounds(cloudOffsets),
         virtualization: {
             isEnabled: () => virtualizationEnabled && shouldVirtualize(renderNodes.length),
             setEnabled: setVirtualizationEnabled,
@@ -2834,33 +2816,13 @@ export function copyToClipboard(): void {
     copyToClipboardFeature(getExportFeatureContext());
 }
 
-function calculateBounds(): { minX: number; minY: number; width: number; height: number } {
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+function calculateBounds(expandedClouds?: typeof cloudOffsets): { minX: number; minY: number; width: number; height: number } {
     const nodesForBounds = renderNodes.length > 0 ? renderNodes : currentNodes;
-    for (const node of nodesForBounds) {
-        minX = Math.min(minX, node.x);
-        minY = Math.min(minY, node.y);
-        maxX = Math.max(maxX, node.x + node.width);
-        maxY = Math.max(maxY, node.y + node.height);
-    }
-
+    const { minX, minY, maxX, maxY } = measureGraphBounds(nodesForBounds, expandedClouds);
     if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
-        return {
-            minX: 0,
-            minY: 0,
-            width: 400,
-            height: 300,
-        };
+        return { minX: 0, minY: 0, width: 400, height: 300 };
     }
-
-    const width = maxX - minX;
-    const height = maxY - minY;
-    return {
-        minX,
-        minY,
-        width: width > 0 ? width : 400,
-        height: height > 0 ? height : 300,
-    };
+    return { minX, minY, width: maxX - minX || 400, height: maxY - minY || 300 };
 }
 
 // Helper functions
@@ -3055,63 +3017,28 @@ export function switchLayout(
             const bottomUp = window.flowDirection === 'bottom-up';
             switch (layoutType) {
                 case 'horizontal':
-                    layoutGraphHorizontal(currentNodes, currentEdges, bottomUp);
+                    layoutGraphHorizontal(renderNodes, renderEdges, bottomUp);
                     break;
                 case 'compact':
-                    layoutGraphCompact(currentNodes, currentEdges, bottomUp);
+                    layoutGraphCompact(renderNodes, renderEdges, bottomUp);
                     break;
                 case 'force':
-                    layoutGraphForce(currentNodes, currentEdges);
+                    layoutGraphForce(renderNodes, renderEdges);
                     break;
                 case 'radial':
-                    layoutGraphRadial(currentNodes, currentEdges);
+                    layoutGraphRadial(renderNodes, renderEdges);
                     break;
                 case 'vertical':
                 default:
-                    layoutGraph(currentNodes, currentEdges, bottomUp);
+                    layoutGraph(renderNodes, renderEdges, bottomUp);
                     break;
             }
 
-            const currentNodeMap = new Map(currentNodes.map(node => [node.id, node]));
-
-            // Update node positions in DOM
-            currentNodes.forEach(node => {
-                const nodeGroup = renderedNodeElementsById.get(node.id);
-                if (nodeGroup) {
-                    const rect = nodeGroup.querySelector('.node-rect') as SVGRectElement;
-                    if (rect) {
-                        const origX = parseFloat(rect.getAttribute('x') || '0');
-                        const origY = parseFloat(rect.getAttribute('y') || '0');
-                        const deltaX = node.x - origX;
-                        const deltaY = node.y - origY;
-                        nodeGroup.setAttribute('transform', `translate(${deltaX}, ${deltaY})`);
-                    }
-                }
-            });
-
-            // Show all edges first
-            const allEdges = mainGroup!.querySelectorAll('.edge');
-            allEdges.forEach(edgeEl => {
-                (edgeEl as SVGPathElement).style.display = '';
-            });
-
-            // Update edge paths
-            const edgeElements = mainGroup!.querySelectorAll('.edge:not(.column-flow-edge)');
-            edgeElements.forEach(edgeEl => {
-                const sourceId = edgeEl.getAttribute('data-source');
-                const targetId = edgeEl.getAttribute('data-target');
-                if (sourceId && targetId) {
-                    const sourceNode = currentNodeMap.get(sourceId);
-                    const targetNode = currentNodeMap.get(targetId);
-                    if (sourceNode && targetNode) {
-                        const path = calculateEdgePath(sourceNode, targetNode, layoutType);
-                        edgeEl.setAttribute('d', path);
-                        (edgeEl as SVGPathElement).style.display = '';
-                    } else {
-                        (edgeEl as SVGPathElement).style.display = 'none';
-                    }
-                }
-            });
+            applyNodePositionsToDom();
+            applyEdgePositionsToDom();
+            // Expanded clouds are children of their node groups and move with them.
+            restoreViewportPresentation();
+            updateMinimap();
 
             // Update layout selector if present
             const layoutSelect = document.getElementById('layout-select') as HTMLSelectElement;
@@ -3488,14 +3415,10 @@ function applyTheme(dark: boolean): void {
         updateLoadingOverlayTheme(loadingOverlay, dark);
     }
     const clausePanel = document.getElementById('sql-clause-panel');
-    const clauseEdge = currentEdges.find(edge => edge.id === activeEdgeSelectionId);
-    if (clausePanel?.style.display === 'block' && clauseEdge) {
-        const restoreCloseFocus = clausePanel.contains(document.activeElement);
-        showSqlClausePanel(clauseEdge);
-        if (restoreCloseFocus) {
-            clausePanel.querySelector<HTMLButtonElement>('.clause-panel-close-btn')?.focus();
-        }
-    }
+    const clauseEdge = clausePanel?.style.display === 'block'
+        ? currentEdges.find(edge => edge.id === activeEdgeSelectionId)
+        : undefined;
+    const restoreCloseFocus = clausePanel?.contains(document.activeElement);
     ensureHintsPanelScrollbarStyles();
     ensureStatsPanelScrollbarStyles();
     if (columnLineageRuntime.columnLineagePanel) {
@@ -3536,6 +3459,13 @@ function applyTheme(dark: boolean): void {
             },
             { preserveInteractionState: true }
         );
+    }
+    if (clauseEdge) {
+        activeEdgeSelectionId = clauseEdge.id;
+        showSqlClausePanel(clauseEdge);
+        if (restoreCloseFocus) {
+            clausePanel?.querySelector<HTMLButtonElement>('.clause-panel-close-btn')?.focus();
+        }
     }
 }
 
@@ -3938,7 +3868,7 @@ let highlightedLineNodeId: string | null = null;
 export function highlightNodeAtLine(line: number): void {
     // Clear previous highlight
     if (highlightedLineNodeId) {
-        const prevGroup = document.querySelector(`g[data-id="${highlightedLineNodeId}"]`);
+        const prevGroup = renderedNodeElementsById.get(highlightedLineNodeId);
         if (prevGroup) {
             prevGroup.classList.remove('cursor-highlighted');
             const rect = prevGroup.querySelector('.node-rect') as SVGRectElement;
@@ -3957,23 +3887,19 @@ export function highlightNodeAtLine(line: number): void {
         highlightedLineNodeId = null;
     }
 
-    // Find node that contains this line
-    const node = findNodeAtLine(currentNodes, line);
-    if (!node) {return;}
+    highlightedLineNodeId = findNodeAtLine(currentNodes, line)?.id ?? null;
+    applyCursorHighlight();
+}
 
-    // Highlight the node
-    const group = document.querySelector(`g[data-id="${node.id}"]`);
-    if (group) {
-        group.classList.add('cursor-highlighted');
-        const rect = group.querySelector('.node-rect') as SVGRectElement;
-        if (rect) {
-            rect.setAttribute('stroke', EDGE_COLORS.highlight);
-            rect.setAttribute('stroke-width', '3');
-        }
-        highlightedLineNodeId = node.id;
-
-        // Optionally zoom to the node
-        // zoomToNode(node);
+function applyCursorHighlight(): void {
+    if (!highlightedLineNodeId) { return; }
+    const group = renderedNodeElementsById.get(highlightedLineNodeId);
+    if (!group) { return; }
+    group.classList.add('cursor-highlighted');
+    const rect = renderedNodeRectsById.get(highlightedLineNodeId);
+    if (rect) {
+        rect.setAttribute('stroke', EDGE_COLORS.highlight);
+        rect.setAttribute('stroke-width', '3');
     }
 }
 

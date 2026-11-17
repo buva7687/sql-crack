@@ -80,13 +80,10 @@ describe('default layout initialization', () => {
         expect(switchLayoutMatch).not.toBeNull();
         const switchLayoutBody = switchLayoutMatch![0];
 
-        expect(switchLayoutBody).toContain('const currentNodeMap = new Map(currentNodes.map(node => [node.id, node]));');
-        expect(switchLayoutBody).toContain('const nodeGroup = renderedNodeElementsById.get(node.id);');
-        expect(switchLayoutBody).toContain('const sourceNode = currentNodeMap.get(sourceId);');
-        expect(switchLayoutBody).toContain('const targetNode = currentNodeMap.get(targetId);');
-        expect(switchLayoutBody).not.toContain('mainGroup!.querySelector(`.node[data-id="${node.id}"]`)');
-        expect(switchLayoutBody).not.toContain("currentNodes.find(n => n.id === sourceId)");
-        expect(switchLayoutBody).not.toContain("currentNodes.find(n => n.id === targetId)");
+        expect(switchLayoutBody).toContain('layoutGraphHorizontal(renderNodes, renderEdges, bottomUp)');
+        expect(switchLayoutBody).toContain('applyNodePositionsToDom()');
+        expect(switchLayoutBody).toContain('applyEdgePositionsToDom()');
+        expect(switchLayoutBody).toContain('updateMinimap()');
     });
 
     it('cancels an older deferred layout frame when a newer layout wins', () => {

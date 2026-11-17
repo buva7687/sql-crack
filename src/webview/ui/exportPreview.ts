@@ -13,13 +13,12 @@ import type {
     SvgExportOptions,
 } from '../features/export/contracts';
 
+type SaveablePreview = ExportPreviewAsset & { save: () => void };
+
 export interface ExportPreviewCallbacks {
-    buildPngPreview: (options: PngExportOptions) => Promise<ExportPreviewAsset>;
-    buildSvgPreview: (options: SvgExportOptions) => Promise<ExportPreviewAsset>;
-    buildPdfPreview: (options: PdfExportOptions) => Promise<ExportPreviewAsset>;
-    savePng: (options: PngExportOptions) => Promise<void>;
-    saveSvg: (options: SvgExportOptions) => Promise<void>;
-    savePdf: (options: PdfExportOptions) => Promise<void>;
+    buildPngPreview: (options: PngExportOptions) => Promise<SaveablePreview>;
+    buildSvgPreview: (options: SvgExportOptions) => Promise<SaveablePreview>;
+    buildPdfPreview: (options: PdfExportOptions) => Promise<SaveablePreview>;
     isDarkTheme: () => boolean;
 }
 
@@ -52,6 +51,7 @@ export function showExportPreview(options: ExportPreviewOptions): void {
         pdf: { ...options.initialState.pdf },
     };
     let requestVersion = 0;
+    let displayedAsset: SaveablePreview | null = null;
 
     const palette = getComponentUiColors(options.callbacks.isDarkTheme());
     const overlay = document.createElement('div');
@@ -312,7 +312,7 @@ export function showExportPreview(options: ExportPreviewOptions): void {
     const close = (): void => disposeExportPreview();
 
     const setLoading = (loading: boolean): void => {
-        saveButton.disabled = loading;
+        saveButton.disabled = loading || !displayedAsset;
         saveButton.style.pointerEvents = loading ? 'none' : '';
         saveButton.textContent = loading ? 'Rendering…' : getSaveButtonLabel(state.format);
         if (loading) {
@@ -323,6 +323,7 @@ export function showExportPreview(options: ExportPreviewOptions): void {
     const refreshPreview = async (): Promise<void> => {
         requestVersion += 1;
         const currentVersion = requestVersion;
+        displayedAsset = null;
         setLoading(true);
         try {
             const asset = state.format === 'png'
@@ -333,6 +334,7 @@ export function showExportPreview(options: ExportPreviewOptions): void {
             if (currentVersion !== requestVersion) {
                 return;
             }
+            displayedAsset = asset;
             previewImage.src = asset.previewUrl;
             previewMeta.innerHTML = renderMeta(asset, state.format, palette);
         } catch (error) {
@@ -414,15 +416,10 @@ export function showExportPreview(options: ExportPreviewOptions): void {
     }, { signal, capture: true });
     closeButton.addEventListener('click', close, { signal });
     cancelButton.addEventListener('click', close, { signal });
-    saveButton.addEventListener('click', async () => {
+    saveButton.addEventListener('click', () => {
+        if (!displayedAsset) { return; }
         try {
-            if (state.format === 'png') {
-                await options.callbacks.savePng(state.png);
-            } else if (state.format === 'svg') {
-                await options.callbacks.saveSvg(state.svg);
-            } else {
-                await options.callbacks.savePdf(state.pdf);
-            }
+            displayedAsset.save();
             close();
         } catch (error) {
             previewMeta.innerHTML = `<span style="color:${palette.accentSoft};">Save failed: ${escapeHtml(String(error instanceof Error ? error.message : error))}</span>`;

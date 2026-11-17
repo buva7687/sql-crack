@@ -106,6 +106,11 @@ function applyExportBackground(
     background: ExportBackground,
     isDarkTheme: boolean
 ): void {
+    svgClone.style.removeProperty('background');
+    const canvasBackground = svgClone.querySelector('[data-canvas-background]');
+    if (canvasBackground && canvasBackground.getAttribute('fill') !== 'url(#grid-pattern)') {
+        canvasBackground.remove();
+    }
     const fill = getBackgroundFill(background, isDarkTheme);
     if (!fill) {
         return;

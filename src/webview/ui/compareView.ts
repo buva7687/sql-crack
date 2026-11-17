@@ -46,19 +46,28 @@ let activeCleanupHandlers: Array<() => void> = [];
 let activeCompareContext: ActiveCompareContext | null = null;
 
 function normalizeNodeKey(node: Pick<FlowNode, 'type' | 'label' | 'alias'>): string {
-    const normalizedLabel = node.label.trim().toLowerCase().replace(/\s+/g, ' ');
-    const alias = node.alias?.trim().toLowerCase();
+    // Relation labels can be delimited identifiers and the parser may return
+    // only their value. Preserve spelling and whitespace so they stay distinct.
+    const isRelation = node.type === 'table' || node.type === 'cte' || node.type === 'subquery';
+    const normalizedLabel = isRelation ? node.label : node.label.trim().toLowerCase().replace(/\s+/g, ' ');
+    const alias = node.alias;
     return `${node.type}:${encodeURIComponent(normalizedLabel)}${alias ? `:alias:${encodeURIComponent(alias)}` : ''}`;
 }
 
-function nodeSignature(node: FlowNode): string {
-    return JSON.stringify({
+function nodeSignature(node: FlowNode): unknown {
+    const children = node.children || [];
+    const childIndexes = new Map(children.map((child, index) => [child.id, index]));
+    return {
         description: node.description || '',
         details: node.details || [],
         accessMode: node.accessMode || '',
         operationType: node.operationType || '',
         warnings: (node.warnings || []).map(w => `${w.type}:${w.severity}`),
-    });
+        children: children.map(child => [normalizeNodeKey(child), nodeSignature(child)]),
+        edges: (node.childEdges || []).map(edge => [
+            childIndexes.get(edge.source), childIndexes.get(edge.target), edge.label,
+        ]),
+    };
 }
 
 function toNodeMap(nodes: FlowNode[]): Map<string, FlowNode> {
@@ -435,7 +444,7 @@ export function computeCompareDiff(left: ParseResult, right: ParseResult): Compa
             return;
         }
         const leftNode = leftMap.get(key);
-        if (leftNode && nodeSignature(leftNode) !== nodeSignature(rightNode)) {
+        if (leftNode && JSON.stringify(nodeSignature(leftNode)) !== JSON.stringify(nodeSignature(rightNode))) {
             changedNodeKeys.push(key);
         }
     });

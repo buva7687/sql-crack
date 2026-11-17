@@ -6,7 +6,7 @@ import type {
     ViewState,
     ZoomState,
 } from '../types';
-import { getConnectedNodeIds, getCycledNode, getKeyboardNavigableNodes, getSiblingCycleTarget } from './keyboardNavigation';
+import { getConnectedNodeIds, getKeyboardNavigableNodes, getSiblingCycleTarget } from './keyboardNavigation';
 import { isCompactPanelLayout } from '../ui/compactPanelLayout';
 import { FLOATING_PANEL_GAP } from '../ui/panelLayout';
 import { applyNodeZoomVisibilityFeature } from '../features/focusMode';
@@ -173,22 +173,6 @@ export function navigateToConnectedNodeFeature(options: ConnectedNodeOptions): b
     return true;
 }
 
-interface AdjacentNodeOptions extends NodeNavigationShared {
-    currentNode: FlowNode;
-    direction: 'next' | 'prev';
-    onMoveToNode: (node: FlowNode) => void;
-}
-
-export function navigateToAdjacentNodeFeature(options: AdjacentNodeOptions): void {
-    const { currentNode, direction, onMoveToNode } = options;
-    const sortedNodes = getKeyboardNavigationNodesFeature(options);
-    const targetNode = getCycledNode(sortedNodes, currentNode.id, direction);
-    if (!targetNode) {
-        return;
-    }
-    onMoveToNode(targetNode);
-}
-
 interface SiblingNodeOptions extends NodeNavigationShared {
     currentNode: FlowNode;
     direction: 'next' | 'prev';
@@ -314,36 +298,21 @@ interface FitViewOptions {
     layoutSubflowNodesVertical?: (children: FlowNode[], edges: FlowEdge[]) => { width: number; height: number };
 }
 
-export function fitViewFeature(options: FitViewOptions): void {
-    const {
-        svg,
-        renderNodes,
-        currentNodes,
-        cloudOffsets,
-        state,
-        onUpdateTransform,
-        onUpdateZoomIndicator,
-        onSetFitViewScale,
-    } = options;
-    const nodesForFit = renderNodes.length > 0 ? renderNodes : currentNodes;
-    if (!svg || nodesForFit.length === 0) {
-        return;
-    }
-
-    const rect = svg.getBoundingClientRect();
-    const padding = 80;
-
+export function measureGraphBounds(
+    nodes: FlowNode[],
+    cloudOffsets?: ReadonlyMap<string, { offsetX: number; offsetY: number }>,
+): { minX: number; minY: number; maxX: number; maxY: number } {
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
-    for (const node of nodesForFit) {
+    for (const node of nodes) {
         minX = Math.min(minX, node.x);
         minY = Math.min(minY, node.y);
         maxX = Math.max(maxX, node.x + node.width);
         maxY = Math.max(maxY, node.y + node.height);
 
-        if (node.expanded && (node.type === 'cte' || node.type === 'subquery') && node.children && node.children.length > 0) {
+        if (cloudOffsets && node.expanded && (node.type === 'cte' || node.type === 'subquery') && node.children && node.children.length > 0) {
             const cloudPadding = 15;
             const cloudGap = 30;
             const nodeHeight = 60;
@@ -372,6 +341,29 @@ export function fitViewFeature(options: FitViewOptions): void {
         }
     }
 
+    return { minX, minY, maxX, maxY };
+}
+
+export function fitViewFeature(options: FitViewOptions): void {
+    const {
+        svg,
+        renderNodes,
+        currentNodes,
+        cloudOffsets,
+        state,
+        onUpdateTransform,
+        onUpdateZoomIndicator,
+        onSetFitViewScale,
+    } = options;
+    const nodesForFit = renderNodes.length > 0 ? renderNodes : currentNodes;
+    if (!svg || nodesForFit.length === 0) {
+        return;
+    }
+
+    const rect = svg.getBoundingClientRect();
+    const padding = 80;
+
+    const { minX, minY, maxX, maxY } = measureGraphBounds(nodesForFit, cloudOffsets);
     const graphWidth = maxX - minX;
     const graphHeight = maxY - minY;
     if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY) || graphWidth <= 0 || graphHeight <= 0) {
@@ -441,19 +433,6 @@ export function zoomToNodeFeature(options: ZoomToNodeOptions): void {
     }
 
     if (state.zoomedNodeId !== null) {
-        mainGroup.querySelectorAll('.node').forEach((nodeEl) => {
-            (nodeEl as SVGGElement).style.display = '';
-            (nodeEl as SVGGElement).style.opacity = '1';
-        });
-        mainGroup.querySelectorAll('.edge').forEach((edgeEl) => {
-            (edgeEl as SVGPathElement).style.display = '';
-            (edgeEl as SVGPathElement).style.opacity = '1';
-        });
-        mainGroup.querySelectorAll('.cloud-container').forEach((cloudEl) => {
-            (cloudEl as SVGGElement).style.display = '';
-            (cloudEl as SVGGElement).style.opacity = '1';
-        });
-
         onClearFocusMode();
         state.focusModeEnabled = false;
         onFitView();

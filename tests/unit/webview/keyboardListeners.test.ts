@@ -63,8 +63,6 @@ function createCallbacks(overrides: Partial<EventListenerCallbacks> = {}): Event
         selectNode: jest.fn(),
         clearFocusMode: jest.fn(),
         fitView: jest.fn(),
-        getKeyboardNavigationNodes: jest.fn(() => []),
-        moveKeyboardFocusToNode: jest.fn(),
         toggleColumnFlows: jest.fn(),
         hideContextMenu: jest.fn(),
         clearSearch: jest.fn(),
@@ -141,28 +139,16 @@ describe('keyboardListeners', () => {
         global.requestAnimationFrame = originalRequestAnimationFrame;
     });
 
-    it('cycles node focus with Tab on the svg listener', () => {
+    it.each([false, true])('leaves Tab to the browser with shiftKey=%s', (shiftKey) => {
         const svg = createKeyboardTarget();
-        const nodeA: FlowNode = { id: 'a', type: 'table', label: 'a', x: 0, y: 0, width: 10, height: 10 };
-        const nodeB: FlowNode = { id: 'b', type: 'table', label: 'b', x: 20, y: 0, width: 10, height: 10 };
-        const callbacks = createCallbacks({
-            getKeyboardNavigationNodes: jest.fn(() => [nodeA, nodeB]),
-        });
-
-        registerSvgKeyboardListeners(createContext(createState({ selectedNodeId: 'a' }), svg, null), callbacks);
-
+        registerSvgKeyboardListeners(createContext(createState(), svg, null), createCallbacks());
         const preventDefault = jest.fn();
         const stopPropagation = jest.fn();
-        svg.emit('keydown', {
-            key: 'Tab',
-            shiftKey: false,
-            preventDefault,
-            stopPropagation,
-        });
 
-        expect(preventDefault).toHaveBeenCalled();
-        expect(stopPropagation).toHaveBeenCalled();
-        expect(callbacks.moveKeyboardFocusToNode).toHaveBeenCalledWith(nodeB);
+        svg.emit('keydown', { key: 'Tab', shiftKey, preventDefault, stopPropagation });
+
+        expect(preventDefault).not.toHaveBeenCalled();
+        expect(stopPropagation).not.toHaveBeenCalled();
     });
 
     it('handles document escape by clearing state, search, and scheduling a reset', () => {

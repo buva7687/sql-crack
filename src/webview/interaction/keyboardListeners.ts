@@ -1,4 +1,3 @@
-import { getCycledNode } from '../navigation/keyboardNavigation';
 import type { EventListenerCallbacks, EventListenerContext } from './eventListenerTypes';
 
 export function registerSvgKeyboardListeners(
@@ -13,21 +12,6 @@ export function registerSvgKeyboardListeners(
 
     svg.addEventListener('keydown', (e) => {
         if (callbacks.isCompareModeActive?.()) {
-            return;
-        }
-
-        if (e.key === 'Tab') {
-            const orderedNodes = callbacks.getKeyboardNavigationNodes();
-            if (orderedNodes.length > 0) {
-                e.preventDefault();
-                e.stopPropagation();
-                const seedId = state.selectedNodeId
-                    || (e.shiftKey ? orderedNodes[0].id : orderedNodes[orderedNodes.length - 1].id);
-                const target = getCycledNode(orderedNodes, seedId, e.shiftKey ? 'prev' : 'next');
-                if (target) {
-                    callbacks.moveKeyboardFocusToNode(target);
-                }
-            }
             return;
         }
 

@@ -25,7 +25,6 @@ export interface RenderNodeDispatcherOptions {
     updateTooltipPosition: (event: MouseEvent) => void;
     hideTooltip: () => void;
     selectNode: (nodeId: string | null, options?: { skipNavigation?: boolean }) => void;
-    navigateToAdjacentNode: (currentNode: FlowNode, direction: NodeSiblingDirection) => void;
     navigateToConnectedNode: (direction: ConnectedDirection, fromNodeId?: string) => boolean;
     navigateToSiblingNode: (currentNode: FlowNode, direction: NodeSiblingDirection) => boolean;
     announceFocusedNode: (node: FlowNode) => void;
@@ -103,7 +102,6 @@ export function renderNodeFeature(options: RenderNodeDispatcherOptions): void {
         updateTooltipPosition,
         hideTooltip,
         selectNode,
-        navigateToAdjacentNode,
         navigateToConnectedNode,
         navigateToSiblingNode,
         announceFocusedNode,
@@ -265,13 +263,6 @@ export function renderNodeFeature(options: RenderNodeDispatcherOptions): void {
             event.stopPropagation();
             selectNode(node.id, { skipNavigation: true });
             hideTooltip();
-            return;
-        }
-
-        if (key === 'Tab') {
-            event.preventDefault();
-            event.stopPropagation();
-            navigateToAdjacentNode(node, event.shiftKey ? 'prev' : 'next');
             return;
         }
 

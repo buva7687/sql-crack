@@ -194,6 +194,8 @@ let currentQueryIndex = 0;
 let isStale: boolean = false;
 let toolbarCleanup: ToolbarCleanup | null = null;
 let parseRequestId = 0;
+let renderedParseRequestId = 0;
+let pendingCursorLine: number | undefined;
 let queryLoadingToken = 0;
 let queryLoadingVisible = false;
 // Monotonic token guarding async cursor-follow query switches. Rapid cursor
@@ -1184,6 +1186,7 @@ function handleRefresh(
         }
         persistUiStateNow();
         currentQueryIndex = 0;
+        pendingCursorLine = undefined;
     }
     window.documentKey = nextDocumentKey;
     window.fileName = options.fileName;
@@ -1228,6 +1231,11 @@ function findQueryIndexForLine(line: number): number | null {
 
 async function handleCursorPosition(line: number): Promise<void> {
     const token = ++cursorFollowToken;
+    if (renderedParseRequestId !== parseRequestId) {
+        pendingCursorLine = line;
+        return;
+    }
+    pendingCursorLine = undefined;
     const targetIndex = findQueryIndexForLine(line);
     const hasValidTarget = targetIndex !== null &&
         batchResult &&
@@ -1687,6 +1695,7 @@ function createToolbarCallbacks(): ToolbarCallbacks {
 
 async function visualize(sql: string): Promise<void> {
     const requestId = ++parseRequestId;
+    ++cursorFollowToken;
     const documentKeyForParse = window.documentKey ?? window.fileName ?? null;
     const preserveInteractionState = batchResult !== null && renderedDocumentKey === documentKeyForParse;
     // Error and empty results below have a single entry, so they fall back to Q1.
@@ -1722,6 +1731,8 @@ async function visualize(sql: string): Promise<void> {
             }
         };
         renderedDocumentKey = documentKeyForParse;
+        renderedParseRequestId = requestId;
+        pendingCursorLine = undefined;
         currentQueryIndex = 0;
         updateBatchTabsUI();
         renderCurrentQuery();
@@ -1816,6 +1827,7 @@ async function visualize(sql: string): Promise<void> {
     }
     // Stale and cancelled parses returned above, so this result is on screen.
     renderedDocumentKey = documentKeyForParse;
+    renderedParseRequestId = requestId;
 
     batchResult?.queries.forEach(applyQuerySettings);
 
@@ -1833,6 +1845,7 @@ async function visualize(sql: string): Promise<void> {
         updateBatchTabsUI();
         updateErrorBadge(1, [{ queryIndex: 0, message }]);
         render(buildFallbackQueryErrorResult(sql, message));
+        pendingCursorLine = undefined;
         schedulePersistUiState();
         return;
     }
@@ -1854,6 +1867,9 @@ async function visualize(sql: string): Promise<void> {
     updateBatchTabsUI();
     renderCurrentQuery(preserveInteractionState);
     await applyInitialUiStateIfAvailable();
+    if (requestId === parseRequestId && pendingCursorLine !== undefined) {
+        await handleCursorPosition(pendingCursorLine);
+    }
     schedulePersistUiState();
 }
 

@@ -2,8 +2,10 @@ import type { FlowEdge, FlowNode } from '../types';
 import type {
     ExportContext,
     ExportPreviewFormat,
+    PdfExportArtifact,
+    PngExportArtifact,
+    SvgExportArtifact,
     PngExportOptions,
-    PdfExportOptions,
     SvgExportOptions,
 } from './export/index';
 import {
@@ -76,7 +78,8 @@ export function exportToPng(context: ExportContext, options: PngExportOptions = 
     }
 
     try {
-        void savePngArtifact(context, options).catch((error) => {
+        void buildPngExportArtifact(context, options)
+            .then(artifact => savePngArtifact(context, artifact)).catch((error) => {
             if (typeof window !== 'undefined' && Boolean((window as any).debugLogging)) {
                 console.debug('[renderer] PNG export failed:', error);
             }
@@ -97,11 +100,7 @@ export function exportToSvg(context: ExportContext, options: SvgExportOptions = 
     }
 
     try {
-        void saveSvgArtifact(context, options).catch((error) => {
-            if (typeof window !== 'undefined' && Boolean((window as any).debugLogging)) {
-                console.debug('[renderer] SVG export failed:', error);
-            }
-        });
+        saveSvgArtifact(context, buildSvgExportArtifact(context, options));
     } catch (e) {
         if (typeof window !== 'undefined' && Boolean((window as any).debugLogging)) {
             console.debug('[renderer] SVG export failed:', e);
@@ -273,19 +272,24 @@ export function openExportPreview(
             pdf: { ...DEFAULT_PDF_EXPORT_OPTIONS },
         },
         callbacks: {
-            buildPngPreview: (options) => buildPngExportArtifact(context, options),
-            buildSvgPreview: async (options) => buildSvgExportArtifact(context, options),
-            buildPdfPreview: (options) => buildPdfExportArtifact(context, options),
-            savePng: (options) => savePngArtifact(context, options),
-            saveSvg: async (options) => saveSvgArtifact(context, options),
-            savePdf: async (options) => savePdfArtifact(context, options),
+            buildPngPreview: async (options) => {
+                const artifact = await buildPngExportArtifact(context, options);
+                return { ...artifact, save: () => savePngArtifact(context, artifact) };
+            },
+            buildSvgPreview: async (options) => {
+                const artifact = buildSvgExportArtifact(context, options);
+                return { ...artifact, save: () => saveSvgArtifact(context, artifact) };
+            },
+            buildPdfPreview: async (options) => {
+                const artifact = await buildPdfExportArtifact(context, options);
+                return { ...artifact, save: () => savePdfArtifact(context, artifact) };
+            },
             isDarkTheme: context.isDarkTheme,
         },
     });
 }
 
-async function savePngArtifact(context: ExportContext, options: PngExportOptions): Promise<void> {
-    const artifact = await buildPngExportArtifact(context, options);
+function savePngArtifact(context: ExportContext, artifact: PngExportArtifact): void {
     const vscodeApi = (window as any).vscodeApi;
     if (vscodeApi?.postMessage) {
         vscodeApi.postMessage({
@@ -304,8 +308,7 @@ async function savePngArtifact(context: ExportContext, options: PngExportOptions
     showExportToast('PNG downloaded', context.isDarkTheme());
 }
 
-async function saveSvgArtifact(context: ExportContext, options: SvgExportOptions): Promise<void> {
-    const artifact = buildSvgExportArtifact(context, options);
+function saveSvgArtifact(context: ExportContext, artifact: SvgExportArtifact): void {
     const vscodeApi = (window as any).vscodeApi;
     if (vscodeApi?.postMessage) {
         vscodeApi.postMessage({
@@ -326,8 +329,7 @@ async function saveSvgArtifact(context: ExportContext, options: SvgExportOptions
     URL.revokeObjectURL(url);
 }
 
-async function savePdfArtifact(context: ExportContext, options: PdfExportOptions): Promise<void> {
-    const artifact = await buildPdfExportArtifact(context, options);
+function savePdfArtifact(context: ExportContext, artifact: PdfExportArtifact): void {
     const vscodeApi = (window as any).vscodeApi;
     if (vscodeApi?.postMessage) {
         vscodeApi.postMessage({

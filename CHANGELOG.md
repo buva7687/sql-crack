@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Keep edges and minimap markers aligned when changing layouts or moving nodes in SQL Flow. Fit to View restores the full graph after zooming into a node.
+- Keep cursor and column-lineage highlights as offscreen nodes come back into view. Resolve editor cursor motion against the new statement ranges when a refresh finishes.
+- Clear stale clause and lineage overlays when SQL Flow changes queries or encounters an error. Clear SQL Preview when its source is empty.
+- Detect nested graph changes and distinguish quoted relation names in Compare. Allow Tab and Shift+Tab to leave the graph.
+- Save the displayed export preview, preserve transparent backgrounds, and include expanded CTE and subquery diagrams in export bounds.
 - Run SQL Flow parsing in its background worker again. The worker never started inside VS Code, so every parse ran on the panel's own thread, where a slow query froze the panel and the parse timeout could not stop it.
 - Keep saving a pinned SQL Flow tab's layout, zoom and toggles after you refresh it.
 - Jump to the correct source line when you click a node in a pinned tab made from a later statement in a file or from a selection. Pins created before this version still jump relative to the top of the file.

@@ -1,8 +1,8 @@
 import {
     fitViewFeature,
+    measureGraphBounds,
     zoomToNodeFeature,
     navigateToConnectedNodeFeature,
-    navigateToAdjacentNodeFeature,
     navigateToSiblingNodeFeature,
     isNodeInViewportFeature,
     ensureNodeVisibleFeature,
@@ -233,44 +233,6 @@ describe('nodeNavigation', () => {
             });
 
             expect(result).toBe(true);
-        });
-    });
-
-    describe('navigateToAdjacentNodeFeature', () => {
-        it('calls onMoveToNode with next node', () => {
-            const nodeA = createNode('a', 0, 0);
-            const nodeB = createNode('b', 200, 0);
-            const state = createState();
-            const onMoveToNode = jest.fn();
-
-            navigateToAdjacentNodeFeature({
-                currentNode: nodeA,
-                direction: 'next',
-                nodes: [nodeA, nodeB],
-                edges: [],
-                state,
-                onMoveToNode,
-            });
-
-            expect(onMoveToNode).toHaveBeenCalled();
-        });
-
-        it('calls onMoveToNode with prev node', () => {
-            const nodeA = createNode('a', 0, 0);
-            const nodeB = createNode('b', 200, 0);
-            const state = createState();
-            const onMoveToNode = jest.fn();
-
-            navigateToAdjacentNodeFeature({
-                currentNode: nodeB,
-                direction: 'prev',
-                nodes: [nodeA, nodeB],
-                edges: [],
-                state,
-                onMoveToNode,
-            });
-
-            expect(onMoveToNode).toHaveBeenCalled();
         });
     });
 
@@ -548,6 +510,18 @@ describe('nodeNavigation', () => {
             expect(state.offsetY).toBeDefined();
             expect(onUpdateTransform).toHaveBeenCalled();
         });
+    });
+
+    it('measures the full bounds of a displaced expanded CTE cloud', () => {
+        const node = createNode('cte', 100, 200, {
+            type: 'cte',
+            expanded: true,
+            children: [createNode('child', 10, 20)],
+        });
+        const offsets = new Map([['cte', { offsetX: -250, offsetY: -75 }]]);
+        expect(measureGraphBounds([node], offsets)).toEqual({ minX: -150, minY: 125, maxX: 220, maxY: 285 });
+        node.expanded = false;
+        expect(measureGraphBounds([node], offsets)).toEqual({ minX: 100, minY: 200, maxX: 220, maxY: 250 });
     });
 
     describe('fitViewFeature', () => {
