@@ -13,9 +13,6 @@ export function getDirectionButtonsScriptFragment(): string {
                     const direction = btn.getAttribute('data-direction');
                     const nodeId = btn.getAttribute('data-node-id');
                     if (direction && nodeId) {
-                        if (lineageContent) {
-                            lineageContent.innerHTML = '<div style="display: flex; align-items: center; justify-content: center; height: 300px;"><div class="skeleton-loader" style="width: 200px;"><div class="skeleton-line"></div><div class="skeleton-line"></div><div class="skeleton-line"></div></div></div>';
-                        }
                         lineageCurrentDirection = direction;
                         postWorkspaceMessage({
                             command: 'getLineageGraph',

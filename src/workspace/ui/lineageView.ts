@@ -482,7 +482,7 @@ export class LineageView {
             <button class="lineage-table-item connection-${this.getConnectionStrength(total)}"
                     data-action="select-node"
                     data-node-id="${this.escapeHtml(node.id)}"
-                    data-name="${this.escapeHtml(node.name.toLowerCase())}"
+                    data-name="${this.escapeHtml(node.name)}"
                     data-type="${node.type}"
                     data-total="${total}">
                 <span class="table-item-icon">${this.getNodeIcon(node.type)}</span>

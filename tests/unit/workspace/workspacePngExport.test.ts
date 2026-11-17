@@ -24,6 +24,7 @@ describe('workspace PNG export (CSP-safe clipboard)', () => {
         clipboardWrite?: jest.Mock;
         clipboardItemError?: Error;
         blobResult?: Blob | null;
+        svgFills?: string[];
     }
 
     function createPngHarness(options: PngHarnessOptions = {}) {
@@ -43,18 +44,22 @@ describe('workspace PNG export (CSP-safe clipboard)', () => {
                     : options.blobResult);
             }),
         };
+        const sourceElements = (options.svgFills || []).map(fill => ({ fill }));
+        const cloneElements = sourceElements.map(() => ({ style: { setProperty: jest.fn() } }));
         const svgClone = {
             firstChild: null,
             setAttribute: jest.fn(),
             getElementById: jest.fn(() => ({ setAttribute: jest.fn() })),
             insertBefore: jest.fn(),
+            querySelectorAll: () => cloneElements,
         };
+        const serialize = jest.fn((_svg: unknown) => '<svg></svg>');
         const documentMock = {
             documentElement: {},
             body: { appendChild: jest.fn() },
             getElementById: jest.fn((id: string) => {
                 if (id === 'graph-svg') {
-                    return { cloneNode: jest.fn(() => svgClone) };
+                    return { cloneNode: () => svgClone, querySelectorAll: () => sourceElements };
                 }
                 return null;
             }),
@@ -86,8 +91,8 @@ describe('workspace PNG export (CSP-safe clipboard)', () => {
         }
 
         class MockXmlSerializer {
-            serializeToString(): string {
-                return '<svg></svg>';
+            serializeToString(svg: unknown): string {
+                return serialize(svg);
             }
         }
 
@@ -122,7 +127,9 @@ describe('workspace PNG export (CSP-safe clipboard)', () => {
             documentMock,
             { postMessage },
             { getBBox: () => ({ x: 0, y: 0, width: 100, height: 100 }) },
-            () => ({ getPropertyValue: () => '#ffffff' }),
+            (element: { fill?: string }) => ({
+                getPropertyValue: (property: string) => property === 'fill' ? element.fill || '' : '#ffffff',
+            }),
             MockXmlSerializer,
             Blob,
             urlMock,
@@ -133,7 +140,7 @@ describe('workspace PNG export (CSP-safe clipboard)', () => {
             (callback: () => void) => callback()
         );
 
-        return { exportToPng, postMessage, clipboardWrite, canvas };
+        return { exportToPng, postMessage, clipboardWrite, canvas, svgClone, cloneElements, serialize };
     }
 
     it('uses canvas.toBlob() for both save and clipboard paths', () => {
@@ -145,6 +152,23 @@ describe('workspace PNG export (CSP-safe clipboard)', () => {
     it('writes the blob to the clipboard via ClipboardItem', () => {
         expect(script).toContain("new ClipboardItem({ 'image/png': blob })");
         expect(script).toContain('navigator.clipboard.write');
+    });
+
+    it.each([false, true])('inlines node and label fills before rasterizing (copy=%s)', copy => {
+        const fills = ['rgb(17, 17, 17)', 'rgb(241, 245, 249)'];
+        const { exportToPng, svgClone, cloneElements, serialize } = createPngHarness({ svgFills: fills });
+
+        let stylesAtSerialization: unknown[][][] = [];
+        serialize.mockImplementation(() => {
+            stylesAtSerialization = cloneElements.map(element => [...element.style.setProperty.mock.calls]);
+            return '<svg></svg>';
+        });
+        exportToPng(copy);
+
+        expect(serialize).toHaveBeenCalledWith(svgClone);
+        fills.forEach((fill, index) => {
+            expect(stylesAtSerialization[index]).toContainEqual(['fill', fill]);
+        });
     });
 
     it('retains a save-dialog fallback when clipboard copy fails or is unavailable', () => {

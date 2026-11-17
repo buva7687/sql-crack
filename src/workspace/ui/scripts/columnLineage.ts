@@ -245,7 +245,7 @@ export function getColumnLineageScriptFragment(): string {
             const transform = nodeElement.getAttribute('transform');
             if (!transform) return null;
 
-            const match = transform.match(/translate\\\\(([-\\\\d.]+),\\\\s*([-\\\\d.]+)\\\\)/);
+            const match = transform.match(/translate\\(([-\\d.]+),\\s*([-\\d.]+)\\)/);
             if (!match) return null;
 
             const nodeX = parseFloat(match[1]);
@@ -290,6 +290,11 @@ export function getColumnLineageScriptFragment(): string {
             path.setAttribute('marker-end', 'url(#column-arrowhead-' + type + ')');
 
             container.appendChild(path);
+        }
+
+        function dismissColumnTrace() {
+            invalidateWorkspaceRequestScope('column-lineage');
+            clearColumnHighlighting();
         }
 
         function clearColumnHighlighting() {
@@ -390,11 +395,11 @@ export function getColumnLineageScriptFragment(): string {
 
             const closeBtn = infoPanel.querySelector('.info-close');
             if (closeBtn) {
-                closeBtn.addEventListener('click', () => clearColumnHighlighting());
+                closeBtn.addEventListener('click', dismissColumnTrace);
             }
             const clearBtn = infoPanel.querySelector('.info-clear-btn');
             if (clearBtn) {
-                clearBtn.addEventListener('click', () => clearColumnHighlighting());
+                clearBtn.addEventListener('click', dismissColumnTrace);
             }
             infoPanel.style.display = 'block';
         }
@@ -406,6 +411,6 @@ export function getColumnLineageScriptFragment(): string {
             }
         }
 
-        window.clearWorkspaceColumnTrace = clearColumnHighlighting;
+        window.clearWorkspaceColumnTrace = dismissColumnTrace;
     `;
 }

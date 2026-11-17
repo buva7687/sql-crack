@@ -11,8 +11,6 @@ describe('workspace lineage minimap script', () => {
         });
 
         expect(script).toContain('setupLineageGraphInteractions();');
-        // Direction buttons are wired inside setupLineageGraphInteractions, not separately
-        expect(script).not.toContain('setupDirectionButtons();');
         expect(script).toContain('setupMinimap();');
         expect(script).toContain('if (!minimap || !minimapSvg || !minimapViewport || !minimapContent || !container)');
     });

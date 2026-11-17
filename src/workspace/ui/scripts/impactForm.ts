@@ -4,7 +4,25 @@
 export function getImpactFormScriptFragment(): string {
     return `
         // ========== Impact Form Setup ==========
+        let impactTypeaheadDebounceTimer = null;
+
+        function closeTypeaheadResults() {
+            const results = document.getElementById('impact-typeahead-results');
+            if (results) {
+                results.style.display = 'none';
+            }
+            document.getElementById('impact-table-input')?.setAttribute('aria-expanded', 'false');
+        }
+
+        document.addEventListener('click', (event) => {
+            if (!event.target?.closest?.('.impact-typeahead')) {
+                closeTypeaheadResults();
+            }
+        });
+
         function setupImpactForm() {
+            clearTimeout(impactTypeaheadDebounceTimer);
+            impactTypeaheadDebounceTimer = null;
             const tableInput = document.getElementById('impact-table-input');
             const tableIdInput = document.getElementById('impact-table-id');
             const typeaheadResults = document.getElementById('impact-typeahead-results');
@@ -15,7 +33,6 @@ export function getImpactFormScriptFragment(): string {
             const analyzeBtn = document.getElementById('impact-analyze-btn');
             const changeTypeButtons = document.querySelectorAll('.change-type-btn');
             const savedDraft = typeof getPersistedImpactDraft === 'function' ? getPersistedImpactDraft() : null;
-            let impactTypeaheadDebounceTimer = null;
             const impactTypeaheadDebounceMs = 180;
 
             function getActiveChangeType() {
@@ -52,13 +69,6 @@ export function getImpactFormScriptFragment(): string {
                         analyzeHint.classList.toggle('hidden', hasValue);
                     }
                 }
-            }
-
-            function closeTypeaheadResults() {
-                if (typeaheadResults) {
-                    typeaheadResults.style.display = 'none';
-                }
-                tableInput?.setAttribute('aria-expanded', 'false');
             }
 
             function openTypeaheadResults() {
@@ -153,7 +163,9 @@ export function getImpactFormScriptFragment(): string {
                 }
                 impactTypeaheadDebounceTimer = setTimeout(() => {
                     impactTypeaheadDebounceTimer = null;
-                    filterTypeaheadResults();
+                    if (document.getElementById('impact-table-input') === tableInput) {
+                        filterTypeaheadResults();
+                    }
                 }, impactTypeaheadDebounceMs);
             }
 
@@ -171,7 +183,8 @@ export function getImpactFormScriptFragment(): string {
                     return;
                 }
 
-                if (event.key === 'Enter') {
+                if (event.key === 'Enter' && tableInput.value.trim()) {
+                    scheduleTypeaheadFilter(true);
                     const firstVisible = resultItems.find(item => item.style.display !== 'none');
                     if (firstVisible) {
                         event.preventDefault();
@@ -196,13 +209,6 @@ export function getImpactFormScriptFragment(): string {
                 item.addEventListener('click', () => {
                     selectTypeaheadItem(item);
                 });
-            });
-
-            document.addEventListener('click', (event) => {
-                if (event.target.closest('.impact-typeahead')) {
-                    return;
-                }
-                closeTypeaheadResults();
             });
 
             if (analyzeBtn && tableIdInput) {

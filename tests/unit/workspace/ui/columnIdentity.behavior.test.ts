@@ -1,4 +1,7 @@
 import { getColumnLineageScriptFragment } from '../../../../src/workspace/ui/scripts/columnLineage';
+import { getMessageHandlingScriptFragment } from '../../../../src/workspace/ui/scripts/messageHandling';
+import { getWorkspaceRequestStateScriptFragment } from '../../../../src/workspace/ui/scripts/requestState';
+import { createFakeElement } from '../../../helpers/fakeDom';
 
 function namedFunction(script: string, name: string): string {
     const start = script.indexOf(`function ${name}(`);
@@ -28,8 +31,8 @@ function row(name: string) {
 describe('Workspace canonical column highlighting', () => {
     const script = getColumnLineageScriptFragment();
     const runtime = new Function(`
-        ${['normalizeColumnName', 'findColumnRow', 'applyColumnPathState'].map(name => namedFunction(script, name)).join('\n')}
-        return {findColumnRow, applyColumnPathState};
+        ${['normalizeColumnName', 'findColumnRow', 'applyColumnPathState', 'getColumnPosition'].map(name => namedFunction(script, name)).join('\n')}
+        return {findColumnRow, applyColumnPathState, getColumnPosition};
     `)();
 
     it('selects exact case-distinct column rows and rejects an unmatched quoted name', () => {
@@ -51,5 +54,50 @@ describe('Workspace canonical column highlighting', () => {
         expect(upper.classes.has('in-path')).toBe(true);
         expect(lower.classes.has('in-path')).toBe(false);
         expect(lower.classes.has('dimmed')).toBe(true);
+    });
+
+    it('anchors arrows to a column row within a translated SVG node', () => {
+        const node = createFakeElement('g');
+        const column = createFakeElement('g');
+        node.setAttribute('transform', 'translate(150, 80)');
+        column.setAttribute('class', 'column-row');
+        node.appendChild(column);
+
+        expect(runtime.getColumnPosition(node, column)).toEqual({
+            left: { x: 150, y: 144 },
+            right: { x: 350, y: 144 },
+            center: { x: 250, y: 144 },
+        });
+    });
+
+    it('ignores an in-flight column response after clearing the trace', () => {
+        const window = Object.assign(createFakeElement('window'), {
+            clearWorkspaceColumnTrace: () => {},
+            __workspaceColumnTraceActive: false,
+            __workspaceSelectedColumnLabel: '',
+        });
+        const registerRequest = new Function('document', 'window', `
+            const currentViewMode = 'lineage';
+            function dismissColumnTraceHint() {}
+            ${script}
+            ${getWorkspaceRequestStateScriptFragment()}
+            ${getMessageHandlingScriptFragment()}
+            return () => registerWorkspaceRequest('selectColumn');
+        `)(createFakeElement('document'), window);
+        const respond = (requestId: number, columnName: string) => window.dispatchEvent({
+            type: 'message',
+            data: { command: 'columnLineageResult', data: { requestId, tableId: 'table:orders', columnName } },
+        });
+
+        respond(registerRequest(), 'before');
+        expect(window.__workspaceSelectedColumnLabel).toBe('before');
+        const pending = registerRequest();
+        window.clearWorkspaceColumnTrace();
+        respond(pending, 'after');
+        expect(window.__workspaceColumnTraceActive).toBe(false);
+        expect(window.__workspaceSelectedColumnLabel).toBe('');
+
+        respond(registerRequest(), 'current');
+        expect(window.__workspaceSelectedColumnLabel).toBe('current');
     });
 });

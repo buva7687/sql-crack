@@ -12,7 +12,6 @@ export function getWorkspaceRequestStateScriptFragment(): string {
             getColumnLineage: 'column-lineage',
             getUpstream: 'view-content',
             getDownstream: 'view-content',
-            searchLineageTables: 'lineage-search',
             getLineageGraph: 'view-content',
             selectColumn: 'column-lineage'
         };
@@ -25,11 +24,14 @@ export function getWorkspaceRequestStateScriptFragment(): string {
             columnLineageResult: 'column-lineage',
             upstreamResult: 'view-content',
             downstreamResult: 'view-content',
-            lineageSearchResults: 'lineage-search',
             lineageGraphResult: 'view-content'
         };
         let workspaceRequestSequence = 0;
         const latestWorkspaceRequestIds = {};
+
+        function invalidateWorkspaceRequestScope(scope) {
+            delete latestWorkspaceRequestIds[scope];
+        }
 
         function invalidateWorkspaceRequests() {
             Object.keys(latestWorkspaceRequestIds).forEach(scope => delete latestWorkspaceRequestIds[scope]);

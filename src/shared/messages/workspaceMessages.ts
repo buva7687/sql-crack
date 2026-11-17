@@ -38,13 +38,6 @@ export interface ImpactReportResult {
     suggestions: string[];
 }
 
-export interface SearchResultEntry {
-    id: string;
-    name: string;
-    type: string;
-    filePath?: string;
-}
-
 export type WorkspaceUxMetricValue = string | number | boolean | null;
 export type WorkspaceUxMetricMetadata = Record<string, WorkspaceUxMetricValue>;
 
@@ -79,7 +72,6 @@ export type WorkspaceWebviewMessage =
     | { command: 'getUpstream'; nodeId?: string; depth?: number; nodeType?: string; filePath?: string; requestId?: WorkspaceRequestId }
     | { command: 'getDownstream'; nodeId?: string; depth?: number; nodeType?: string; filePath?: string; requestId?: WorkspaceRequestId }
     // Visual lineage graph
-    | { command: 'searchLineageTables'; query: string; typeFilter?: string; requestId?: WorkspaceRequestId }
     | { command: 'getLineageGraph'; nodeId: string; nodeLabel?: string; nodeType?: string; depth?: number; direction?: 'both' | 'upstream' | 'downstream'; expandedNodes?: string[]; requestId?: WorkspaceRequestId }
     | { command: 'expandNodeColumns'; nodeId: string }
     | { command: 'setLineageDirection'; nodeId: string; direction: 'both' | 'upstream' | 'downstream' }
@@ -109,7 +101,6 @@ export type WorkspaceHostMessage =
     | { command: 'upstreamResult'; data: { nodeId: string | undefined; nodes: LineageNodeResult[]; depth: number; requestId?: WorkspaceRequestId } }
     | { command: 'downstreamResult'; data: { nodeId: string | undefined; nodes: LineageNodeResult[]; depth: number; requestId?: WorkspaceRequestId } }
     // Visual lineage graph
-    | { command: 'lineageSearchResults'; data: { results: SearchResultEntry[]; requestId?: WorkspaceRequestId } }
     | { command: 'lineageGraphResult'; data: { html?: string; nodeId?: string; direction?: string; expandedNodes?: string[]; error?: string; reason?: WorkspaceRecoveryReason; requestId?: WorkspaceRequestId } }
     | { command: 'nodeColumnsResult'; data: { nodeId: string } }
     | { command: 'nodeCollapsedResult'; data: { nodeId: string } }

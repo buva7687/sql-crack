@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { MessageHandler } from '../../../../src/workspace/handlers/messageHandler';
+import { getQualifiedKey } from '../../../../src/workspace/identifiers';
 
 function createLineageGraph() {
     return {
@@ -222,6 +223,36 @@ describe('MessageHandler depth and column lineage routing', () => {
         }));
     });
 
+    it.each([
+        ['getUpstream', 'upstreamResult', 'view'],
+        ['getDownstream', 'downstreamResult', 'table'],
+    ] as const)('resolves the Graph selection for %s using its qualified identity', async (command, response, type) => {
+        const definition = { name: 'Order Items', schema: 'sales', nameQuoted: true, type };
+        const key = getQualifiedKey(definition.name, definition.schema, definition);
+        const graphId = `graph:${type}:${encodeURIComponent(key)}`;
+        const lineageId = `${type}:${key}`;
+        const lineageGraph = createLineageGraph();
+        lineageGraph.nodes.set(lineageId, { id: lineageId, name: definition.name, type });
+        const related = { id: 'table:sales.orders', name: 'sales.orders', type: 'table' };
+        const analyzeDirection = jest.fn((id: string) => ({
+            nodes: id === lineageId ? [related] : [],
+            depth: id === lineageId ? 1 : 0,
+        }));
+        const { context, postMessage } = createContext({
+            getCurrentGraph: () => ({ nodes: [{ id: graphId, type, definitions: [definition] }] }),
+            getLineageGraph: () => lineageGraph,
+            getFlowAnalyzer: () => ({ [command]: analyzeDirection }),
+        });
+
+        await new MessageHandler(context).handleMessage({ command, nodeId: graphId, nodeType: type, depth: 4 });
+
+        expect(analyzeDirection).toHaveBeenCalledWith(lineageId, { maxDepth: 4, excludeExternal: true });
+        expect(postMessage).toHaveBeenCalledWith(expect.objectContaining({
+            command: response,
+            data: expect.objectContaining({ nodeId: graphId, nodes: [expect.objectContaining(related)], depth: 1 }),
+        }));
+    });
+
     it('persists lineage detail state for webview rebuild restoration', async () => {
         const { context } = createContext();
         const handler = new MessageHandler(context);
@@ -383,42 +414,6 @@ describe('MessageHandler depth and column lineage routing', () => {
                 warning: expect.stringContaining('not available in the lineage index yet'),
             }),
         }));
-    });
-
-    it('filters external nodes out of lineage table search results', async () => {
-        const { context, postMessage } = createContext({
-            getLineageGraph: jest.fn(() => ({
-                nodes: new Map([
-                    ['table:customers', { id: 'table:customers', type: 'table', name: 'customers', metadata: {} }],
-                    ['external:customers_raw', { id: 'external:customers_raw', type: 'external', name: 'customers_raw', metadata: {} }],
-                    ['column:customers.id', { id: 'column:customers.id', type: 'column', name: 'id', metadata: {} }],
-                ]),
-                edges: [],
-                columnEdges: [],
-                getUpstream: jest.fn(),
-                getDownstream: jest.fn(),
-                getColumnLineage: jest.fn(),
-            })),
-        });
-        const handler = new MessageHandler(context);
-
-        await handler.handleMessage({
-            command: 'searchLineageTables',
-            query: 'customer',
-            typeFilter: 'all',
-        });
-
-        expect(postMessage).toHaveBeenCalledWith({
-            command: 'lineageSearchResults',
-            data: {
-                results: [{
-                    id: 'table:customers',
-                    name: 'customers',
-                    type: 'table',
-                    filePath: undefined,
-                }]
-            }
-        });
     });
 
     it('routes lineage legend visibility changes to panel state setter', async () => {

@@ -1721,6 +1721,11 @@ export function getGraphInteractionsScriptFragment(): string {
         updateGraphEmptyState();
         refreshSearchNavigation(searchInput ? searchInput.value.trim() : '');
         applySearchHighlight();
+        // Selecting an object writes UI state. Capture saved path endpoints
+        // first so selection restore cannot overwrite them.
+        const persistedGraphUiState = typeof getPersistedGraphUiState === 'function'
+            ? getPersistedGraphUiState()
+            : null;
         if (initialSearchQuery && !selectedNodeId) {
             jumpToSearchMatch(0, { track: false });
         } else if (!selectedNodeId) {
@@ -1738,9 +1743,6 @@ export function getGraphInteractionsScriptFragment(): string {
             }
         }
 
-        const persistedGraphUiState = typeof getPersistedGraphUiState === 'function'
-            ? getPersistedGraphUiState()
-            : null;
         if (persistedGraphUiState && typeof persistedGraphUiState === 'object') {
             const graphHasNode = nodeId => !!nodeId && Array.from(document.querySelectorAll('.node[data-id]'))
                 .some(node => node.getAttribute('data-id') === nodeId);
@@ -1750,20 +1752,20 @@ export function getGraphInteractionsScriptFragment(): string {
             if (graphHasNode(persistedGraphUiState.pathEndNodeId)) {
                 pathEndNodeId = persistedGraphUiState.pathEndNodeId;
             }
-            if ((persistedGraphUiState.pathStartNodeId && !pathStartNodeId)
-                || (persistedGraphUiState.pathEndNodeId && !pathEndNodeId)) {
-                persistActiveGraphUiState();
-            }
             if (persistedGraphUiState.focusModeEnabled && selectedNodeId) {
                 setFocusMode(true);
             } else if (persistedGraphUiState.traceMode === 'upstream' || persistedGraphUiState.traceMode === 'downstream') {
                 if (selectedNodeId) {
                     setTraceMode(persistedGraphUiState.traceMode);
                 }
-            } else if (pathStartNodeId || pathEndNodeId) {
+            }
+            if (pathStartNodeId || pathEndNodeId) {
                 updatePathBuilderUi();
                 updateGraphActionButtons();
                 syncGraphContextUi();
+            }
+            if (persistedGraphUiState.pathStartNodeId || persistedGraphUiState.pathEndNodeId) {
+                persistActiveGraphUiState();
             }
         }
 

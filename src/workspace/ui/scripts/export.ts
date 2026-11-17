@@ -73,6 +73,26 @@ export function getExportToPngScript(): string {
             return Math.min(1, Math.sqrt(MAX_RASTER_PIXELS) / Math.max(safeWidth, safeHeight));
         }
 
+        function inlineWorkspaceGraphStyles(source, clone) {
+            const selector = '.node, .node rect, .node text, .edge, .edge path, .edge text, marker polygon';
+            const sourceElements = source.querySelectorAll(selector);
+            const cloneElements = clone.querySelectorAll(selector);
+            const properties = [
+                'fill', 'fill-opacity', 'stroke', 'stroke-width', 'stroke-opacity',
+                'stroke-dasharray', 'opacity', 'color', 'font-family', 'font-size', 'font-weight'
+            ];
+            sourceElements.forEach((element, index) => {
+                const computed = getComputedStyle(element);
+                const target = cloneElements[index];
+                properties.forEach(property => {
+                    const value = computed.getPropertyValue(property);
+                    if (value) {
+                        target.style.setProperty(property, value);
+                    }
+                });
+            });
+        }
+
         function exportToPng(copyToClipboard = false) {
             const svgElement = document.getElementById('graph-svg');
             if (!svgElement) {
@@ -83,6 +103,7 @@ export function getExportToPngScript(): string {
             try {
                 // Clone SVG to avoid modifying the original
                 const svgClone = svgElement.cloneNode(true);
+                inlineWorkspaceGraphStyles(svgElement, svgClone);
                 
                 // Get computed styles and dimensions
                 const bbox = mainGroup ? mainGroup.getBBox() : { x: 0, y: 0, width: 1200, height: 800 };

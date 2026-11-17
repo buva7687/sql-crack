@@ -123,7 +123,7 @@ function buildFileGraph(
 ): void {
     // Create file nodes
     for (const [filePath, analysis] of index.files.entries()) {
-        const nodeId = `file_${nodes.length}`;
+        const nodeId = `file:${encodeURIComponent(filePath)}`;
         nodeIdMap.set(filePath, nodeId);
 
         nodes.push({
@@ -214,7 +214,7 @@ function buildTableGraph(
     for (const [key, defs] of index.definitionMap.entries()) {
         const def = defs[0];
         if (!def) {continue;}
-        const nodeId = `table_${nodes.length}`;
+        const nodeId = `graph:${def.type}:${encodeURIComponent(key)}`;
         nodeIdMap.set(key, nodeId);
 
         nodes.push({
@@ -239,23 +239,23 @@ function buildTableGraph(
             continue;
         }
 
-            const nodeId = `external_${nodes.length}`;
-            nodeIdMap.set(key, nodeId);
-            const displayName = refs[0]
-                ? getReferenceDisplayName(refs[0])
-                : getDisplayName(parsed.name, parsed.schema, parsed.catalog);
+        const nodeId = `graph:external:${encodeURIComponent(key)}`;
+        nodeIdMap.set(key, nodeId);
+        const displayName = refs[0]
+            ? getReferenceDisplayName(refs[0])
+            : getDisplayName(parsed.name, parsed.schema, parsed.catalog);
 
-            nodes.push({
-                id: nodeId,
-                type: 'external',
-                label: displayName,
-                references: refs,
-                referenceCount: refs.length,
-                x: 0,
-                y: 0,
-                width: 160,
-                height: 60
-            });
+        nodes.push({
+            id: nodeId,
+            type: 'external',
+            label: displayName,
+            references: refs,
+            referenceCount: refs.length,
+            x: 0,
+            y: 0,
+            width: 160,
+            height: 60
+        });
     }
 
     const edgeMap = new Map<string, { count: number; types: Set<string>; tables: Set<string>; references: WorkspaceEdgeReference[] }>();

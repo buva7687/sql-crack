@@ -17,7 +17,6 @@ export type {
     LineageNodeResult,
     ImpactEntry,
     ImpactReportResult,
-    SearchResultEntry,
     WorkspaceUxMetricMetadata,
     WorkspaceUxMetricValue,
 } from './workspaceMessages';
