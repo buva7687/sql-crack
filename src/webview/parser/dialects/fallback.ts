@@ -145,6 +145,32 @@ function collectDeclaredVariables(sql: string): Set<string> {
     return names;
 }
 
+const FUNCTION_FROM_KEYWORDS = new Set(['EXTRACT', 'SUBSTRING', 'TRIM', 'POSITION', 'OVERLAY']);
+
+/** Locate FROM tokens used as function delimiters without rescanning prefixes. */
+function findFunctionFromDelimiters(sql: string): Set<number> {
+    const delimiters = new Set<number>();
+    const functionScopes: boolean[] = [];
+    let previousWord = '';
+    let previousWordEnd = 0;
+    for (const token of sql.matchAll(/[a-z_][\w$]*|[()]/gi)) {
+        const [text] = token;
+        if (text === '(') {
+            functionScopes.push(FUNCTION_FROM_KEYWORDS.has(previousWord)
+                && !sql.slice(previousWordEnd, token.index).trim());
+        } else if (text === ')') {
+            functionScopes.pop();
+        } else {
+            previousWord = text.toUpperCase();
+            previousWordEnd = token.index + text.length;
+            if (previousWord === 'FROM' && functionScopes.at(-1)) {
+                delimiters.add(token.index);
+            }
+        }
+    }
+    return delimiters;
+}
+
 export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResult {
     const nodes: FlowNode[] = [];
     const edges: FlowEdge[] = [];
@@ -161,7 +187,6 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
         preserveHashTempIdentifiers: dialect === 'TransactSQL',
         hashComments: dialectSupportsHashComments(dialect),
     });
-    const structureMasked = maskStringsAndComments(commentStripped);
     // Comments are already gone (dialect-aware), so blank only quoted tokens:
     // table patterns must not match keywords inside text such as
     // 'Copied from staging_backup' or "Copied from ghost_table". Offsets stay
@@ -202,27 +227,7 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
             x: 0, y: 0, width: 220, height: 80});
     }
 
-    const functionFromKeywords = new Set(['EXTRACT', 'SUBSTRING', 'TRIM', 'POSITION', 'OVERLAY']);
-    const isFunctionFromDelimiter = (text: string, fromIndex: number): boolean => {
-        let nestedDepth = 0;
-        for (let index = fromIndex - 1; index >= 0; index--) {
-            if (text[index] === ')') {
-                nestedDepth++;
-                continue;
-            }
-            if (text[index] !== '(') {
-                continue;
-            }
-            if (nestedDepth > 0) {
-                nestedDepth--;
-                continue;
-            }
-
-            const functionMatch = text.slice(0, index).match(/([A-Z_][\w$]*)\s*$/i);
-            return functionFromKeywords.has((functionMatch?.[1] || '').toUpperCase());
-        }
-        return false;
-    };
+    const functionFromDelimiters = findFunctionFromDelimiters(quotedMasked);
 
     const firstCtePattern = new RegExp(`\\bWITH\\s+(${identifier})\\s+AS\\s*\\(`, 'giu');
     const cteMatch = firstCtePattern.exec(commentStripped);
@@ -295,7 +300,7 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
             if (isInsideQuotedToken(match.index)) {
                 continue;
             }
-            if (/^FROM\b/i.test(match[0]) && isFunctionFromDelimiter(structureMasked, match.index)) {
+            if (/^FROM\b/i.test(match[0]) && functionFromDelimiters.has(match.index)) {
                 continue;
             }
             const tableName = normalizeObjectName(match[1]);
@@ -334,7 +339,7 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
         if (isInsideQuotedToken(refMatch.index)) {
             continue;
         }
-        if (keyword === 'FROM' && isFunctionFromDelimiter(structureMasked, refMatch.index)) {
+        if (keyword === 'FROM' && functionFromDelimiters.has(refMatch.index)) {
             continue;
         }
         const table = normalizeObjectName(refMatch[2]);
@@ -365,10 +370,10 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
 
     for (const [cteName, body] of cteBodies) {
         const bodyRefPattern = new RegExp(`\\b(?:FROM|JOIN)\\s+(${qualifiedIdentifier})`, 'giu');
-        const maskedBody = maskStringsAndComments(body);
+        const bodyFunctionFromDelimiters = findFunctionFromDelimiters(maskStringsAndComments(body));
         let bodyRef;
         while ((bodyRef = bodyRefPattern.exec(body)) !== null) {
-            if (/^FROM\b/i.test(bodyRef[0]) && isFunctionFromDelimiter(maskedBody, bodyRef.index)) {
+            if (/^FROM\b/i.test(bodyRef[0]) && bodyFunctionFromDelimiters.has(bodyRef.index)) {
                 continue;
             }
             const srcTable = normalizeObjectName(bodyRef[1]);

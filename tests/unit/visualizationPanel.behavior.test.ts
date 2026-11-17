@@ -189,12 +189,12 @@ describe('VisualizationPanel behavior', () => {
         expect(escaped).not.toContain('</script>');
     });
 
-    it('refreshes a pinned snapshot in the panel that requested it', () => {
+    it.each([undefined, vscode.Uri.file('/w/source.sql')])('preserves the document key when refreshing a pinned snapshot (%s)', documentUri => {
         const postMessage = jest.fn();
         const panel = {
             _isPinned: true,
             _currentSql: 'SELECT * FROM pinned_snapshot',
-            _currentOptions: { dialect: 'PostgreSQL', fileName: 'snapshot.sql' },
+            _currentOptions: { dialect: 'PostgreSQL', fileName: 'snapshot.sql', documentUri },
             _postMessage: postMessage,
         };
 
@@ -204,7 +204,7 @@ describe('VisualizationPanel behavior', () => {
             command: 'refresh',
             sql: 'SELECT * FROM pinned_snapshot',
             options: { dialect: 'PostgreSQL', fileName: 'snapshot.sql' },
-            documentKey: 'snapshot.sql',
+            documentKey: documentUri?.toString() ?? 'snapshot.sql',
         });
         expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith('sql-crack.refresh');
     });

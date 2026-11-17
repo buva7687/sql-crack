@@ -464,7 +464,7 @@ describe('visualizationPanel stale state', () => {
     const source = readFileSync(join(__dirname, '../../src/visualizationPanel.ts'), 'utf8');
 
     it('marks panel as stale', () => {
-        expect(source).toContain('public static markAsStale()');
+        expect(source).toContain('public static markAsStale(refreshPending = true)');
     });
 
     it('posts markStale message to webview', () => {

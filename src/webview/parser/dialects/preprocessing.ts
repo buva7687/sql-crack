@@ -183,42 +183,34 @@ export function preprocessPostgresSyntax(sql: string, dialect: SqlDialect): stri
  * a plain `OPENJSON(...)` call which the parser handles as a normal table-valued function.
  */
 function stripOpenJsonWithClauses(sql: string): string | null {
-    const masked = maskStringsAndComments(sql);
+    const masked = maskStringsAndComments(sql, { hashComments: false, bracketIdentifiers: true });
     const openjsonRegex = /\bOPENJSON\s*\(/gi;
+    const firstCall = openjsonRegex.exec(masked);
+    if (!firstCall) { return null; }
+
+    const closingParens = new Map<number, number>();
+    const openParens: number[] = [];
+    for (let i = firstCall.index; i < masked.length; i++) {
+        if (masked[i] === '(') {
+            openParens.push(i);
+        } else if (masked[i] === ')' && openParens.length > 0) {
+            closingParens.set(openParens.pop()!, i);
+        }
+    }
+
+    const withClause = /\s*WITH\s*\(/iy;
     const removals: Array<{ start: number; end: number }> = [];
-    let match: RegExpExecArray | null;
-
-    while ((match = openjsonRegex.exec(masked)) !== null) {
-        // Find position of the opening paren of OPENJSON(...)
-        const openParenPos = match.index + match[0].length - 1;
-        const closeParenPos = findMatchingParen(sql, openParenPos);
-        if (closeParenPos === -1) {
-            continue;
+    for (let match: RegExpExecArray | null = firstCall; match; match = openjsonRegex.exec(masked)) {
+        const close = closingParens.get(match.index + match[0].length - 1);
+        if (close === undefined) { continue; }
+        withClause.lastIndex = close + 1;
+        const clause = withClause.exec(masked);
+        if (!clause) { continue; }
+        const start = clause.index + clause[0].search(/\S/);
+        const end = closingParens.get(withClause.lastIndex - 1);
+        if (end !== undefined) {
+            removals.push({ start, end: end + 1 });
         }
-
-        // Skip whitespace after the closing paren
-        let pos = closeParenPos + 1;
-        while (pos < masked.length && /\s/.test(masked[pos])) {
-            pos++;
-        }
-
-        // Check if the next token is WITH followed by (
-        if (!/^WITH\s*\(/i.test(masked.slice(pos))) {
-            continue;
-        }
-
-        const withStart = pos;
-        pos += masked.slice(pos).match(/^WITH\s*/i)![0].length;
-        if (pos >= masked.length || masked[pos] !== '(') {
-            continue;
-        }
-
-        const withCloseParenPos = findMatchingParen(sql, pos);
-        if (withCloseParenPos === -1) {
-            continue;
-        }
-
-        removals.push({ start: withStart, end: withCloseParenPos + 1 });
     }
 
     if (removals.length === 0) {
@@ -1509,7 +1501,7 @@ export function withSqlDialectLexing<T>(dialect: SqlDialect, fn: () => T): T {
  */
 export function maskStringsAndComments(
     sql: string,
-    options: { hashComments?: boolean } = {}
+    options: { hashComments?: boolean; bracketIdentifiers?: boolean } = {}
 ): string {
     const hashComments = options.hashComments ?? defaultHashComments;
     const chars = sql.split('');
@@ -1593,17 +1585,16 @@ export function maskStringsAndComments(
             }
             continue;
         }
-        if (chars[i] === '"') {
-            chars[i] = ' ';
-            i++;
+        if (chars[i] === '"' || (options.bracketIdentifiers && chars[i] === '[')) {
+            const quote = chars[i] === '[' ? ']' : '"';
+            chars[i++] = ' ';
             while (i < chars.length) {
-                if (chars[i] === '"') {
-                    chars[i] = ' ';
-                    i++;
-                    break;
+                const atClosingQuote = chars[i] === quote;
+                chars[i++] = ' ';
+                if (atClosingQuote) {
+                    if (chars[i] !== quote) { break; }
+                    chars[i++] = ' ';
                 }
-                chars[i] = ' ';
-                i++;
             }
             continue;
         }

@@ -28,13 +28,12 @@ describe('parser worker wiring prep', () => {
         expect(panelSource).toContain("worker-src ${webview.cspSource} blob:;");
     });
 
-    it('adds a parser worker entry wrapper around parseSql / parseSqlBatch / validateSql', () => {
+    it('routes single and batch parse messages through the worker', () => {
         expect(workerSource).toContain("type: 'parse'");
         expect(workerSource).toContain("type: 'parseBatch'");
-        expect(workerSource).toContain("type: 'validate'");
+        expect(workerSource).not.toContain("type: 'validate'");
         expect(workerSource).toContain('parseSql(');
         expect(workerSource).toContain('parseSqlBatch(');
-        expect(workerSource).toContain('validateSql(');
     });
 
     it('injects parser worker URI via asWebviewUri (window.parserWorkerUri)', () => {

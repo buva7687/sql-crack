@@ -350,6 +350,56 @@ describe('webview refresh query state (H11, M15)', () => {
         expect(lastIndex).toBe(0);
     });
 
+    it.each([false, true])('maps cursor moves against the refreshed ranges (during debounce: %s)', async duringDebounce => {
+        const { batchCalls, render, renderer, send, settle } = bootWebview();
+        const refresh = (sql: string) => send({
+            command: 'refresh', sql, options: { dialect: 'MySQL', fileName: 'q.sql' }, documentKey: 'file:///q.sql',
+        });
+        refresh('SELECT a0 FROM t;\nSELECT a1 FROM t;\nSELECT a2 FROM t;');
+        await settle();
+        batchCalls[0].result.resolve(makeBatch('a', 3));
+        await settle();
+
+        const revisedSql = 'SELECT\n  a0\nFROM t;\nSELECT a1 FROM t;\nSELECT a2 FROM t;';
+        const revised = makeBatch('a', 3);
+        revised.queries[0] = makeQuery('SELECT\n  a0\nFROM t;');
+        revised.queryLineRanges = [{ startLine: 1, endLine: 3 }, { startLine: 4, endLine: 4 }, { startLine: 5, endLine: 5 }];
+        send({ command: 'markStale' });
+        if (!duringDebounce) {
+            refresh(revisedSql);
+            await settle();
+        }
+        send({ command: 'cursorPosition', line: 3 });
+        await settle();
+        expect(render.mock.lastCall?.[0].sql).toBe('SELECT a0 FROM t;');
+        if (duringDebounce) {
+            refresh(revisedSql);
+            await settle();
+        }
+        batchCalls[1].result.resolve(revised);
+        await settle();
+        expect(render.mock.lastCall?.[0].sql).toBe(revised.queries[0].sql);
+        expect(renderer.highlightNodeAtLine).toHaveBeenLastCalledWith(3);
+    });
+
+    it('keeps following the cursor on a stale panel when no refresh is coming', async () => {
+        const { batchCalls, render, send, settle } = bootWebview();
+        send({
+            command: 'refresh', sql: 'SELECT a0 FROM t;\nSELECT a1 FROM t;\nSELECT a2 FROM t;',
+            options: { dialect: 'MySQL', fileName: 'q.sql' }, documentKey: 'file:///q.sql',
+        });
+        await settle();
+        const batch = makeBatch('a', 3);
+        batch.queryLineRanges = [{ startLine: 1, endLine: 1 }, { startLine: 2, endLine: 2 }, { startLine: 3, endLine: 3 }];
+        batchCalls[0].result.resolve(batch);
+        await settle();
+
+        send({ command: 'markStale', refreshPending: false });
+        send({ command: 'cursorPosition', line: 3 });
+        await settle();
+        expect(render.mock.lastCall?.[0].sql).toBe(batch.queries[2].sql);
+    });
+
     it('opens Compare against the hydrated query, not its loading placeholder (S5)', async () => {
         const { batchCalls, send, settle, ui, toolbarCallbacks } = bootWebview();
         send({ command: 'refresh', sql: 'A', options: { dialect: 'MySQL', fileName: 'big.sql' }, documentKey: 'file:///big.sql' });
@@ -519,10 +569,12 @@ describe('webview refresh query state (H11, M15)', () => {
         batchCalls[0].result.resolve(makeBatch('a', 3));
         await settle();
         await new Promise(resolve => setTimeout(resolve, 200));
-        expect(saves().pop()).toEqual(expect.objectContaining({
+        const saved = saves().pop();
+        expect(saved).toEqual(expect.objectContaining({
             documentKey: 'file:///a.sql',
             state: expect.objectContaining({ currentQueryIndex: 2 }),
         }));
+        expect(saved.state).not.toHaveProperty('activeTabId');
     });
 
     it('does not save defaults while the restored query is hydrating', async () => {

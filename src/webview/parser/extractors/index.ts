@@ -9,6 +9,8 @@ export {
 } from './functions';
 export {
     getTableName,
+    getCteNameKey,
+    getFromItemIdentity,
     getNormalizedFromAlias,
     getFromItemDisplayName,
     getFromItemLookupKey,

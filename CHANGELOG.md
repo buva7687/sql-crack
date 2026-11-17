@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Keep qualified physical relations separate from same-named CTEs and respect declaration order in nonrecursive WITH clauses. Recursive CTEs written without the RECURSIVE keyword still resolve their self-reference in Snowflake, SQLite, SQL Server, and Oracle.
+- Expand known CTE wildcard projections before mapping UNION outputs. Preserve explicit lineage where column positions are known.
+- Show table writes for parsed PostgreSQL and SQL Server SELECT INTO statements, display Athena UNNEST aliases correctly, and preserve hash comments in formatted MySQL-family SQL.
+- Stop recommending removal of intermediate columns used through qualified stars, later UNION branches, derived-table projections, consecutive JOIN conditions, or scalar subqueries inside a CTE.
+- Keep editor cursor follow working on a stale SQL Flow panel when auto-refresh is off.
+- Avoid repeated prefix scans in dense statement batches and repeated scans during OPENJSON error recovery.
 - Keep edges and minimap markers aligned when changing layouts or moving nodes in SQL Flow. Fit to View restores the full graph after zooming into a node.
 - Keep cursor and column-lineage highlights as offscreen nodes come back into view. Resolve editor cursor motion against the new statement ranges when a refresh finishes.
 - Clear stale clause and lineage overlays when SQL Flow changes queries or encounters an error. Clear SQL Preview when its source is empty.

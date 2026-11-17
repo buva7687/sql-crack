@@ -7,8 +7,8 @@ import { setCustomFunctions } from '../dialects';
  * while preserving the existing macrotask yield and stale-request cancellation.
  */
 
-import { ParseResult, BatchParseResult, QueryStats, SqlDialect, ValidationError, ValidationLimits } from './types';
-import { parseSql, parseSqlBatch, validateSql, setParseTimeout, DEFAULT_VALIDATION_LIMITS, ParseOptions, BatchParseOptions } from './sqlParser';
+import { ParseResult, BatchParseResult, QueryStats, SqlDialect, ValidationLimits } from './types';
+import { parseSql, parseSqlBatch, setParseTimeout, DEFAULT_VALIDATION_LIMITS, ParseOptions, BatchParseOptions } from './sqlParser';
 
 type WorkerBackedResponse = ParseResult | BatchParseResult;
 export type ParseRequestMode = 'latest' | 'independent';
@@ -44,7 +44,6 @@ type ParserWorkerResponse =
     | { type: 'started'; requestId: number }
     | { type: 'parse'; requestId: number; result: ParseResult }
     | { type: 'parseBatch'; requestId: number; result: BatchParseResult }
-    | { type: 'validate'; requestId: number; result: ValidationError | null }
     | { type: 'error'; requestId: number; error: string };
 
 interface PendingWorkerRequest {
@@ -120,7 +119,6 @@ function yieldToMainLoop(): Promise<void> {
 let nextParseRequestId = 0;
 let latestParseRequestId = 0;
 let cancelledParseRequestId = 0;
-let pendingParseRequests = 0;
 let parserWorker: Worker | null = null;
 const pendingWorkerRequests = new Map<number, PendingWorkerRequest>();
 
@@ -462,16 +460,11 @@ function startWorkerRequestTimeout(
 
 function beginParseRequest(mode: ParseRequestMode = 'latest'): number {
     const requestId = ++nextParseRequestId;
-    pendingParseRequests++;
     if (mode === 'latest') {
         latestParseRequestId = requestId;
         cancelSupersededWorkerRequests(requestId);
     }
     return requestId;
-}
-
-function finishParseRequest(): void {
-    pendingParseRequests = Math.max(0, pendingParseRequests - 1);
 }
 
 function isParseRequestStale(requestId: number, mode: ParseRequestMode = 'latest'): boolean {
@@ -504,50 +497,46 @@ export async function parseAsync(
     requestMode: ParseRequestMode = 'latest'
 ): Promise<ParseResult> {
     const requestId = beginParseRequest(requestMode);
-    try {
-        await yieldToMainLoop();
-        if (isParseRequestStale(requestId, requestMode)) {
-            return createCancelledParseResult(sql);
-        }
-
-        // Awaits only while the worker script is first being fetched.
-        const workerReady = isWorkerSupported() && (isWorkerScriptReady() || await prepareWorkerScript());
-        if (isParseRequestStale(requestId, requestMode)) {
-            return createCancelledParseResult(sql);
-        }
-
-        if (workerReady) {
-            try {
-                return await queueWorkerRequest<ParseResult>(requestId, 'parse', sql, {
-                    type: 'parse',
-                    requestId,
-                    payload: { sql, dialect, options, parseTimeoutMs, customAggregateFunctions, customWindowFunctions },
-                });
-            } catch (error) {
-                if (!(error instanceof ParserWorkerTimeoutError)
-                    && !(error instanceof ParserWorkerReportedError)) {
-                    destroyWorker();
-                }
-                if (isParseRequestStale(requestId, requestMode)) {
-                    return createCancelledParseResult(sql);
-                }
-                // A worker timeout means the parse is genuinely heavy — running it
-                // synchronously here would re-freeze the webview thread. Return a
-                // lightweight result instead. (The worker was already destroyed, so
-                // the next request spins up a fresh one.)
-                if (error instanceof ParserWorkerTimeoutError) {
-                    return createTimedOutParseResult(sql);
-                }
-                // Request-local parser errors fall back synchronously while the
-                // healthy worker continues processing its queued requests. Worker
-                // crashes are already destroyed by handleWorkerError().
-            }
-        }
-
-        return parseSql(sql, dialect, options);
-    } finally {
-        finishParseRequest();
+    await yieldToMainLoop();
+    if (isParseRequestStale(requestId, requestMode)) {
+        return createCancelledParseResult(sql);
     }
+
+    // Awaits only while the worker script is first being fetched.
+    const workerReady = isWorkerSupported() && (isWorkerScriptReady() || await prepareWorkerScript());
+    if (isParseRequestStale(requestId, requestMode)) {
+        return createCancelledParseResult(sql);
+    }
+
+    if (workerReady) {
+        try {
+            return await queueWorkerRequest<ParseResult>(requestId, 'parse', sql, {
+                type: 'parse',
+                requestId,
+                payload: { sql, dialect, options, parseTimeoutMs, customAggregateFunctions, customWindowFunctions },
+            });
+        } catch (error) {
+            if (!(error instanceof ParserWorkerTimeoutError)
+                && !(error instanceof ParserWorkerReportedError)) {
+                destroyWorker();
+            }
+            if (isParseRequestStale(requestId, requestMode)) {
+                return createCancelledParseResult(sql);
+            }
+            // A worker timeout means the parse is genuinely heavy — running it
+            // synchronously here would re-freeze the webview thread. Return a
+            // lightweight result instead. (The worker was already destroyed, so
+            // the next request spins up a fresh one.)
+            if (error instanceof ParserWorkerTimeoutError) {
+                return createTimedOutParseResult(sql);
+            }
+            // Request-local parser errors fall back synchronously while the
+            // healthy worker continues processing its queued requests. Worker
+            // crashes are already destroyed by handleWorkerError().
+        }
+    }
+
+    return parseSql(sql, dialect, options);
 }
 
 /**
@@ -566,72 +555,46 @@ export async function parseBatchAsync(
 ): Promise<BatchParseResult> {
     const appliedLimits = limits ?? DEFAULT_VALIDATION_LIMITS;
     const requestId = beginParseRequest(requestMode);
-    try {
-        await yieldToMainLoop();
-        if (isParseRequestStale(requestId, requestMode)) {
-            return createCancelledBatchParseResult(sql);
-        }
-
-        // Awaits only while the worker script is first being fetched.
-        const workerReady = isWorkerSupported() && (isWorkerScriptReady() || await prepareWorkerScript());
-        if (isParseRequestStale(requestId, requestMode)) {
-            return createCancelledBatchParseResult(sql);
-        }
-
-        if (workerReady) {
-            try {
-                return await queueWorkerRequest<BatchParseResult>(requestId, 'parseBatch', sql, {
-                    type: 'parseBatch',
-                    requestId,
-                    payload: { sql, dialect, limits: appliedLimits, options, parseTimeoutMs, customAggregateFunctions, customWindowFunctions },
-                });
-            } catch (error) {
-                if (!(error instanceof ParserWorkerTimeoutError)
-                    && !(error instanceof ParserWorkerReportedError)) {
-                    destroyWorker();
-                }
-                if (isParseRequestStale(requestId, requestMode)) {
-                    return createCancelledBatchParseResult(sql);
-                }
-                // A worker timeout means the parse is genuinely heavy — running it
-                // synchronously here would re-freeze the webview thread. Return a
-                // lightweight result instead. (The worker was already destroyed, so
-                // the next request spins up a fresh one.)
-                if (error instanceof ParserWorkerTimeoutError) {
-                    return createTimedOutBatchParseResult(sql);
-                }
-                // Request-local parser errors fall back synchronously while the
-                // healthy worker continues processing its queued requests. Worker
-                // crashes are already destroyed by handleWorkerError().
-            }
-        }
-
-        return parseSqlBatch(sql, dialect, appliedLimits, options);
-    } finally {
-        finishParseRequest();
-    }
-}
-
-/**
- * Validate SQL asynchronously
- *
- * @param sql - SQL string to validate
- * @param maxSizeBytes - Maximum size in bytes
- * @param maxQueryCount - Maximum number of queries
- * @returns Promise resolving to validation error or null
- */
-export async function validateAsync(
-    sql: string,
-    maxSizeBytes?: number,
-    maxQueryCount?: number
-): Promise<ValidationError | null> {
-    const limits = {
-        maxSqlSizeBytes: maxSizeBytes ?? DEFAULT_VALIDATION_LIMITS.maxSqlSizeBytes,
-        maxQueryCount: maxQueryCount ?? DEFAULT_VALIDATION_LIMITS.maxQueryCount
-    };
-
     await yieldToMainLoop();
-    return validateSql(sql, limits);
+    if (isParseRequestStale(requestId, requestMode)) {
+        return createCancelledBatchParseResult(sql);
+    }
+
+    // Awaits only while the worker script is first being fetched.
+    const workerReady = isWorkerSupported() && (isWorkerScriptReady() || await prepareWorkerScript());
+    if (isParseRequestStale(requestId, requestMode)) {
+        return createCancelledBatchParseResult(sql);
+    }
+
+    if (workerReady) {
+        try {
+            return await queueWorkerRequest<BatchParseResult>(requestId, 'parseBatch', sql, {
+                type: 'parseBatch',
+                requestId,
+                payload: { sql, dialect, limits: appliedLimits, options, parseTimeoutMs, customAggregateFunctions, customWindowFunctions },
+            });
+        } catch (error) {
+            if (!(error instanceof ParserWorkerTimeoutError)
+                && !(error instanceof ParserWorkerReportedError)) {
+                destroyWorker();
+            }
+            if (isParseRequestStale(requestId, requestMode)) {
+                return createCancelledBatchParseResult(sql);
+            }
+            // A worker timeout means the parse is genuinely heavy — running it
+            // synchronously here would re-freeze the webview thread. Return a
+            // lightweight result instead. (The worker was already destroyed, so
+            // the next request spins up a fresh one.)
+            if (error instanceof ParserWorkerTimeoutError) {
+                return createTimedOutBatchParseResult(sql);
+            }
+            // Request-local parser errors fall back synchronously while the
+            // healthy worker continues processing its queued requests. Worker
+            // crashes are already destroyed by handleWorkerError().
+        }
+    }
+
+    return parseSqlBatch(sql, dialect, appliedLimits, options);
 }
 
 /**
@@ -653,36 +616,6 @@ export function terminateWorker(): void {
 }
 
 /**
- * Parse with automatic fallback
- *
- * @param sql - SQL string to parse
- * @param dialect - SQL dialect to use
- * @param useWorker - Whether to attempt using the parser worker when supported
- * @returns Promise resolving to parse result
- */
-export async function parseWithFallback(
-    sql: string,
-    dialect: SqlDialect = 'MySQL',
-    useWorker: boolean = true,
-    options: ParseOptions = {}
-): Promise<ParseResult> {
-    if (!useWorker) {
-        const requestId = beginParseRequest();
-        try {
-            await yieldToMainLoop();
-            if (isParseRequestStale(requestId)) {
-                return createCancelledParseResult(sql);
-            }
-            return parseSql(sql, dialect, options);
-        } finally {
-            finishParseRequest();
-        }
-    }
-
-    return parseAsync(sql, dialect, options);
-}
-
-/**
  * Cancel any pending parse operations
  */
 export function cancelPendingParse(): void {
@@ -690,21 +623,4 @@ export function cancelPendingParse(): void {
     for (const [requestId, pendingRequest] of pendingWorkerRequests) {
         resolveCancelledWorkerRequest(requestId, pendingRequest);
     }
-}
-
-/**
- * Get worker status for debugging
- */
-export function getWorkerStatus(): {
-    supported: boolean;
-    active: boolean;
-    pendingRequests: number;
-    implementation: 'deferred' | 'worker';
-} {
-    return {
-        supported: isWorkerSupported(),
-        active: parserWorker !== null,
-        pendingRequests: pendingParseRequests,
-        implementation: isWorkerSupported() ? 'worker' : 'deferred'
-    };
 }

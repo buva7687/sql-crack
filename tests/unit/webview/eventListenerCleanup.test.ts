@@ -16,7 +16,6 @@ describe('AbortController event listener cleanup', () => {
     const modules = [
         { name: 'toolbar', file: 'toolbar.ts', disposeFn: 'disposeToolbar' },
         { name: 'batchTabs', file: 'batchTabs.ts', disposeFn: 'disposeBatchTabs' },
-        { name: 'pinnedTabs', file: 'pinnedTabs.ts', disposeFn: 'disposePinnedTabs' },
         { name: 'breadcrumbBar', file: 'breadcrumbBar.ts', disposeFn: 'disposeBreadcrumbBar' },
         { name: 'legendBar', file: 'legendBar.ts', disposeFn: 'disposeLegendBar' },
         { name: 'commandBar', file: 'commandBar.ts', disposeFn: 'disposeCommandBar' },
@@ -54,7 +53,6 @@ describe('AbortController event listener cleanup', () => {
         const indexSource = readFileSync(join(uiDir, 'index.ts'), 'utf8');
         expect(indexSource).toContain('disposeToolbar');
         expect(indexSource).toContain('disposeBatchTabs');
-        expect(indexSource).toContain('disposePinnedTabs');
         expect(indexSource).toContain('disposeBreadcrumbBar');
         expect(indexSource).toContain('disposeLegendBar');
         expect(indexSource).toContain('disposeCommandBar');

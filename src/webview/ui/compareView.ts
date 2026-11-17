@@ -45,21 +45,29 @@ let activeOverlay: HTMLDivElement | null = null;
 let activeCleanupHandlers: Array<() => void> = [];
 let activeCompareContext: ActiveCompareContext | null = null;
 
-function normalizeNodeKey(node: Pick<FlowNode, 'type' | 'label' | 'alias'>): string {
+function normalizeNodeKey(node: Pick<FlowNode, 'type' | 'label' | 'alias' | 'relationIdentity'>): string {
     // Relation labels can be delimited identifiers and the parser may return
     // only their value. Preserve spelling and whitespace so they stay distinct.
-    const isRelation = node.type === 'table' || node.type === 'cte' || node.type === 'subquery';
-    const normalizedLabel = isRelation ? node.label : node.label.trim().toLowerCase().replace(/\s+/g, ' ');
-    const alias = node.alias;
-    return `${node.type}:${encodeURIComponent(normalizedLabel)}${alias ? `:alias:${encodeURIComponent(alias)}` : ''}`;
+    const isRelation = node.relationIdentity !== undefined || node.type === 'table' || node.type === 'cte' || node.type === 'subquery';
+    const normalizedLabel = isRelation
+        ? (node.relationIdentity?.name ?? node.label)
+        : node.label.trim().toLowerCase().replace(/\s+/g, ' ');
+    const qualifiers = node.relationIdentity?.qualifiers.map(encodeURIComponent);
+    const qualifierKey = qualifiers?.length ? `:qualified:${qualifiers.join(':')}` : '';
+    const alias = node.relationIdentity?.alias ?? node.alias;
+    return `${node.type}:${encodeURIComponent(normalizedLabel)}${qualifierKey}${alias ? `:alias:${encodeURIComponent(alias)}` : ''}`;
 }
 
 function nodeSignature(node: FlowNode): unknown {
     const children = node.children || [];
     const childIndexes = new Map(children.map((child, index) => [child.id, index]));
+    const alias = node.relationIdentity?.alias;
+    const details = (node.details || []).map(detail =>
+        alias && node.alias && detail === `Alias: ${node.alias}` ? `Alias: ${alias}` : detail
+    );
     return {
         description: node.description || '',
-        details: node.details || [],
+        details,
         accessMode: node.accessMode || '',
         operationType: node.operationType || '',
         warnings: (node.warnings || []).map(w => `${w.type}:${w.severity}`),

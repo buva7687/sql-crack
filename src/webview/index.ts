@@ -2,7 +2,7 @@
 import process from 'process/browser';
 (window as unknown as { process: typeof process }).process = process;
 
-import { configureCustomFunctions, configureParseTimeout, isCancelledBatchParseResult, parseAsync, parseBatchAsync } from './parserClient';
+import { configureCustomFunctions, configureParseTimeout, isCancelledBatchParseResult, parseAsync, parseBatchAsync, terminateWorker } from './parserClient';
 import { setMinimapMode, MinimapMode } from './minimapVisibility';
 import { detectDialect } from './sqlParser';
 import { getComponentUiColors, setHighContrastMode } from './constants';
@@ -10,6 +10,7 @@ import { installCompactPanelLayout } from './ui/compactPanelLayout';
 import { BatchParseResult, LayoutType, ParseError, ParseResult, QueryLineRange, SqlDialect } from './types';
 import {
     initRenderer,
+    cleanupRenderer,
     render,
     zoomIn,
     zoomOut,
@@ -90,7 +91,6 @@ import {
     createBatchTabs,
     updateBatchTabs,
     getScopedAdjacentQueryIndex,
-    getActiveTabId,
     showFirstRunOverlay,
     showCompareView,
     hideCompareView,
@@ -192,6 +192,7 @@ let currentDialect: SqlDialect =
 let batchResult: BatchParseResult | null = null;
 let currentQueryIndex = 0;
 let isStale: boolean = false;
+let staleRefreshPending = false;
 let toolbarCleanup: ToolbarCleanup | null = null;
 let parseRequestId = 0;
 let renderedParseRequestId = 0;
@@ -271,7 +272,6 @@ interface PersistedWebviewState {
     currentQueryIndex: number;
     userExplicitlySetDialect: boolean;
     compareModeActive: boolean;
-    activeTabId: string | null;
     queryViewStates: Array<{ queryIndex: number; viewState: TabViewState }>;
     renderer: PersistedRendererUiState;
 }
@@ -640,7 +640,6 @@ function capturePersistedState(): PersistedWebviewState {
         currentQueryIndex,
         userExplicitlySetDialect,
         compareModeActive,
-        activeTabId: getActiveTabId(),
         queryViewStates: Array.from(persistedQueryViewStates.entries()).map(([queryIndex, viewState]) => ({ queryIndex, viewState })),
         renderer: {
             viewState: getViewState(),
@@ -694,10 +693,6 @@ function schedulePersistUiState(delayMs = 150): void {
             persistStateDirty = false;
         }
     }, delayMs);
-}
-
-export function markPersistDirty(): void {
-    persistStateDirty = true;
 }
 
 function parseInitialUiState(raw: unknown): PersistedWebviewState | null {
@@ -1143,7 +1138,7 @@ function setupVSCodeMessageListener(): void {
                     applyRuntimeConfigUpdate(message.config);
                     break;
                 case 'markStale':
-                    markAsStale();
+                    markAsStale(message.refreshPending !== false);
                     break;
                 case 'setEditorActivity':
                     isInactiveEditor = message.isSqlLikeActiveEditor !== true;
@@ -1231,7 +1226,7 @@ function findQueryIndexForLine(line: number): number | null {
 
 async function handleCursorPosition(line: number): Promise<void> {
     const token = ++cursorFollowToken;
-    if (renderedParseRequestId !== parseRequestId) {
+    if ((isStale && staleRefreshPending) || renderedParseRequestId !== parseRequestId) {
         pendingCursorLine = line;
         return;
     }
@@ -1278,13 +1273,18 @@ function handleSwitchToQuery(queryIndex: number): void {
     }
 }
 
-function markAsStale(): void {
+function markAsStale(refreshPending = true): void {
+    ++cursorFollowToken;
     isStale = true;
+    // With auto-refresh off no new ranges are coming, so cursor follow keeps
+    // using the rendered ones instead of waiting for a refresh.
+    staleRefreshPending = refreshPending;
     syncRefreshButtonState();
 }
 
 function clearStaleIndicator(): void {
     isStale = false;
+    staleRefreshPending = false;
     syncRefreshButtonState();
 }
 
@@ -1432,6 +1432,8 @@ function init(): void {
         persistUiStateNow();
         toolbarCleanup?.();
         toolbarCleanup = null;
+        terminateWorker();
+        cleanupRenderer();
     });
 
     // Show first-run onboarding overlay
@@ -1899,7 +1901,10 @@ function renderCurrentQuery(preserveInteractionState = false): void {
         }
     }
 
-    render(query, { preserveInteractionState: preserveInteractionState && renderedQueryIndex === currentQueryIndex });
+    render(query, {
+        preserveInteractionState: preserveInteractionState && renderedQueryIndex === currentQueryIndex,
+        dialect: currentDialect,
+    });
     renderedQueryIndex = currentQueryIndex;
     schedulePersistUiState();
 }

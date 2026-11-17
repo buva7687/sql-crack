@@ -36,7 +36,7 @@ export type SqlFlowHostMessage =
     | { command: 'refresh'; sql: string; options: { dialect: string; fileName: string }; documentKey?: string | null }
     | { command: 'cursorPosition'; line: number }
     | { command: 'switchToQuery'; queryIndex: number }
-    | { command: 'markStale' }
+    | { command: 'markStale'; refreshPending?: boolean }
     | {
         command: 'runtimeConfig';
         trigger: 'theme' | 'config';

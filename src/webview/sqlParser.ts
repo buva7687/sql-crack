@@ -1514,7 +1514,7 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
         layoutGraph(nodes, edges);
 
         // Assign line numbers to nodes for editor sync
-        assignLineNumbers(nodes, originalSql, edges);
+        assignLineNumbers(nodes, originalSql, edges, context.dialect);
 
         // Extract column lineage
         const columnLineage = extractColumnLineage(innerSelectStmt, nodes, edges, context.dialect);
@@ -1547,7 +1547,10 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
         // This helps users quickly identify when they need to switch SQL dialects
         const syntaxSql = maskStringsAndComments(originalSql).toUpperCase();
         const hasIntervalQuoted = /INTERVAL\s*'[^']+'/i.test(originalSql);
-        const hasParenthesizedUnion = /\(\s*SELECT[\s\S]+\)\s*(UNION|INTERSECT|EXCEPT)/i.test(originalSql);
+        const selectInParens = /\(\s*SELECT\b/.exec(syntaxSql);
+        const setOperatorAfterClose = /\)\s*(?:UNION|INTERSECT|EXCEPT)\b/g;
+        setOperatorAfterClose.lastIndex = selectInParens ? selectInParens.index + selectInParens[0].length : 0;
+        const hasParenthesizedUnion = !!selectInParens && setOperatorAfterClose.test(syntaxSql);
 
         // Extract specific syntax issue from error message
         // Parser errors are typically: "Expected X but "Y" found" or "Unexpected token Y"

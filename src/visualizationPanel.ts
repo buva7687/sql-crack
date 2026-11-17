@@ -391,10 +391,11 @@ export class VisualizationPanel {
         }
     }
 
-    public static markAsStale() {
+    public static markAsStale(refreshPending = true) {
         if (VisualizationPanel.currentPanel) {
             VisualizationPanel.currentPanel._postMessage({
-                command: 'markStale'
+                command: 'markStale',
+                refreshPending
             });
         }
     }

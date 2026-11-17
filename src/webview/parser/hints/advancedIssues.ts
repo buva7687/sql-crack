@@ -73,7 +73,7 @@ function extractCteBodyScope(fullNormalizedSql: string, maskedSql: string, cteNa
 
     return {
         bodySql: normalizedSql,
-        downstreamSql: `${fullNormalizedSql.substring(0, bodyStart)} ${fullNormalizedSql.substring(bodyEnd + 1)}`.trim()
+        downstreamSql: maskedSql.slice(bodyEnd + 1).trim()
     };
 }
 
@@ -122,7 +122,7 @@ function selectClauseHasStar(selectClause: string, qualifiers?: string[]): boole
     }
 
     return Boolean(qualifiers?.some(qualifier => {
-        const qualifiedStarPattern = new RegExp(`\\b${escapeRegex(qualifier)}\\s*\\.\\s*\\*\\b`, 'i');
+        const qualifiedStarPattern = new RegExp(`\\b${escapeRegex(qualifier)}\\s*\\.\\s*\\*`, 'i');
         return qualifiedStarPattern.test(selectClause);
     }));
 }
@@ -136,12 +136,9 @@ function isColumnUsedInSql(sql: string, columnNames: string[], options: { includ
 
     for (const nameToCheck of columnNames) {
         if (options.includeSelectClause) {
-            const selectClauseMatch = sqlLower.match(/\bselect\b\s+(.+?)\s+\bfrom\b/i);
-            if (selectClauseMatch) {
-                if (selectClauseHasStar(selectClauseMatch[1], options.qualifiers)) {
-                    return true;
-                }
-                if (containsColumnReference(selectClauseMatch[1], nameToCheck, options.qualifiers)) {
+            for (const select of sqlLower.matchAll(/\bselect\b\s+(.+?)\s+\bfrom\b/g)) {
+                if (selectClauseHasStar(select[1], options.qualifiers)
+                    || containsColumnReference(select[1], nameToCheck, options.qualifiers)) {
                     return true;
                 }
             }
@@ -173,7 +170,8 @@ function isColumnUsedInSql(sql: string, columnNames: string[], options: { includ
 
         // Check JOIN ON clauses: find all "JOIN table ON condition" patterns
         // and check if column appears in the ON condition
-        const joinOnPattern = /\bjoin\b\s+\w+(?:\s+\w+)?\s+\bon\b\s+(.+?)(?:\s+(?:join|where|group|having|order|limit)|\s*;|\s*$)/gi;
+        // The terminator is a lookahead so the next JOIN starts its own match.
+        const joinOnPattern = /\bjoin\b\s+[\w.$]+(?:\s+(?:as\s+)?\w+)?\s+\bon\b\s+(.+?)(?=\s+(?:join|where|group|having|order|limit)\b|\s*;|\s*$)/gi;
         let joinMatch: RegExpExecArray | null;
         while ((joinMatch = joinOnPattern.exec(sqlLower)) !== null) {
             if (containsColumnReference(joinMatch[1], nameToCheck, options.qualifiers)) {
@@ -533,29 +531,22 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
             return;
         }
 
-        // Scope SQL to the relevant CTE/subquery body, but keep downstream
-        // query text so CTE output columns selected later are not treated as dead.
-        let normalizedSql = fullNormalizedSql;
-        let downstreamSql = '';
-        let downstreamQualifiers: string[] | undefined;
-        if (selectNode.parentId) {
-            const parentNode = findNodeById(nodes, selectNode.parentId);
-            if (parentNode?.type === 'cte' && parentNode.label) {
-                const cteName = extractCteName(parentNode.label);
-                if (cteName) {
-                    maskedNormalizedSql ??= maskStringsAndComments(fullNormalizedSql);
-                    const cteScope = extractCteBodyScope(fullNormalizedSql, maskedNormalizedSql, cteName);
-                    if (cteScope) {
-                        normalizedSql = cteScope.bodySql;
-                        const cteQualifiers = collectCteReferenceQualifiers(cteScope.downstreamSql, cteName);
-                        if (cteQualifiers.length > 0) {
-                            downstreamSql = cteScope.downstreamSql;
-                            downstreamQualifiers = cteQualifiers;
-                        }
-                    }
-                }
-            }
-        }
+        // Without a known relation binding, an intermediate projection could
+        // be used by the surrounding query. Only diagnose scoped CTE outputs.
+        const parentNode = findNodeById(nodes, selectNode.parentId);
+        if (parentNode?.type !== 'cte' || !parentNode.label) { return; }
+        // Deeper SELECTs are scalar or nested subqueries inside the CTE body;
+        // their columns are consumed by the body, not exported by the CTE.
+        if (selectNode.depth !== undefined && selectNode.depth > (parentNode.depth ?? 0) + 1) { return; }
+
+        const cteName = extractCteName(parentNode.label);
+        maskedNormalizedSql ??= maskStringsAndComments(fullNormalizedSql);
+        const cteScope = extractCteBodyScope(fullNormalizedSql, maskedNormalizedSql, cteName);
+        if (!cteScope) { return; }
+        const normalizedSql = cteScope.bodySql;
+        const downstreamSql = cteScope.downstreamSql;
+        const downstreamQualifiers = collectCteReferenceQualifiers(downstreamSql, cteName);
+        if (downstreamQualifiers.length === 0) { return; }
 
         // Extract column names directly from SQL SELECT clause as fallback
         // This ensures we have the actual column names as they appear in SQL,
@@ -605,6 +596,7 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
 
         selectNode.columns.forEach(col => {
             const colName = col.name;
+            if (colName === '*') { return; }
             // Build list of all possible column name variations to check
             const colNamesToCheck = new Set<string>();
             colNamesToCheck.add(colName);

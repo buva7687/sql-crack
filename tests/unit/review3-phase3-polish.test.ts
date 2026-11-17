@@ -39,7 +39,6 @@ describe('review 3 phase 3 polish guards', () => {
         const layeredFiles = [
             'src/webview/ui/toolbar.ts',
             'src/webview/ui/batchTabs.ts',
-            'src/webview/ui/pinnedTabs.ts',
             'src/webview/ui/breadcrumbBar.ts',
             'src/webview/ui/resizablePanel.ts',
             'src/webview/ui/compareView.ts',

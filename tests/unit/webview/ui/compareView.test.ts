@@ -152,6 +152,32 @@ describe('compareView', () => {
         }
     );
 
+    it.each([
+        ['"Ledger".orders', '"ledger".orders'],
+        ['orders AS " o"', 'orders AS "o "'],
+        ['Ledger', '"Ledger"'],
+        ['Ledger.orders', '"Ledger".orders'],
+        ['orders AS Ledger', 'orders AS "Ledger"'],
+    ])('distinguishes PostgreSQL relation identities in %s and %s', (left, right) => {
+        const compare = (a: string, b: string) =>
+            computeCompareDiff(parseSql(a, 'PostgreSQL'), parseSql(b, 'PostgreSQL'));
+
+        const diff = compare(`SELECT id FROM ${left}`, `SELECT id FROM ${right}`);
+        expect(diff.removedNodeKeys).toEqual([expect.stringMatching(/^table:/)]);
+        expect(diff.addedNodeKeys).toEqual([expect.stringMatching(/^table:/)]);
+
+        const nested = (relation: string) => `WITH scope AS (SELECT id FROM ${relation}) SELECT id FROM scope`;
+        expect(compare(nested(left), nested(right)).changedNodeKeys).toEqual([expect.stringMatching(/^cte:/)]);
+    });
+
+    it('treats PostgreSQL unquoted case changes as the same relation', () => {
+        const diff = computeCompareDiff(
+            parseSql('SELECT id FROM Billing.Ledger AS LedgerRow', 'PostgreSQL'),
+            parseSql('SELECT id FROM billing.ledger AS ledgerrow', 'PostgreSQL'),
+        );
+        expect(diff).toMatchObject({ addedNodeKeys: [], removedNodeKeys: [], changedNodeKeys: [] });
+    });
+
     it('processes large node sets with stable diff output', () => {
         const total = 900;
         const labels = Array.from({ length: total }, (_, i) => `table_${i}`);

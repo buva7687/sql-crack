@@ -55,6 +55,8 @@ export interface FlowNode {
     joinType?: string;
     // Table category for visual distinction
     tableCategory?: 'physical' | 'derived' | 'cte_reference' | 'table_function' | 'subquery_source';
+    // Parsed relation identity kept independently of the display label and alias.
+    relationIdentity?: { name?: string; qualifiers: readonly string[]; alias?: string };
     // Access mode for read/write differentiation
     accessMode?: 'read' | 'write' | 'derived';
     // Operation type for write operations

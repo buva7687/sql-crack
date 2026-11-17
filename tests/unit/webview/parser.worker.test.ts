@@ -11,7 +11,6 @@ describe('parser.worker', () => {
     let addEventListenerMock: jest.Mock;
     let parseSqlMock: jest.Mock;
     let parseSqlBatchMock: jest.Mock;
-    let validateSqlMock: jest.Mock;
     let setParseTimeoutMock: jest.Mock;
 
     function loadWorkerModule(): void {
@@ -19,7 +18,6 @@ describe('parser.worker', () => {
 
         parseSqlMock = jest.fn();
         parseSqlBatchMock = jest.fn();
-        validateSqlMock = jest.fn();
         setParseTimeoutMock = jest.fn();
 
         postMessageMock = jest.fn();
@@ -35,7 +33,6 @@ describe('parser.worker', () => {
         jest.doMock('../../../src/webview/sqlParser', () => ({
             parseSql: parseSqlMock,
             parseSqlBatch: parseSqlBatchMock,
-            validateSql: validateSqlMock,
             setParseTimeout: setParseTimeoutMock,
             DEFAULT_VALIDATION_LIMITS,
         }));
@@ -137,49 +134,14 @@ describe('parser.worker', () => {
         });
     });
 
-    it('dispatches validate requests to validateSql with explicit limits', () => {
+    it('ignores obsolete standalone validation requests', () => {
         loadWorkerModule();
-        const validationResult = { type: 'size_limit', message: 'too large', details: { actual: 999 } };
-        validateSqlMock.mockReturnValue(validationResult);
+        dispatchMessage({ type: 'validate', requestId: 13, payload: { sql: 'SELECT 1;' } });
 
-        dispatchMessage({
-            type: 'validate',
-            requestId: 13,
-            payload: {
-                sql: 'SELECT * FROM large_table',
-                maxSizeBytes: 2048,
-                maxQueryCount: 4,
-            },
-        });
-
-        expect(validateSqlMock).toHaveBeenCalledWith('SELECT * FROM large_table', {
-            maxSqlSizeBytes: 2048,
-            maxQueryCount: 4,
-        });
+        expect(parseSqlMock).not.toHaveBeenCalled();
+        expect(parseSqlBatchMock).not.toHaveBeenCalled();
         expect(postMessageMock).toHaveBeenCalledWith({
-            type: 'validate',
-            requestId: 13,
-            result: validationResult,
-        });
-    });
-
-    it('uses default validation limits when validate payload omits them', () => {
-        loadWorkerModule();
-        validateSqlMock.mockReturnValue(null);
-
-        dispatchMessage({
-            type: 'validate',
-            requestId: 14,
-            payload: {
-                sql: 'SELECT 1',
-            },
-        });
-
-        expect(validateSqlMock).toHaveBeenCalledWith('SELECT 1', DEFAULT_VALIDATION_LIMITS);
-        expect(postMessageMock).toHaveBeenCalledWith({
-            type: 'validate',
-            requestId: 14,
-            result: null,
+            type: 'error', requestId: 13, error: 'Unsupported parser worker message type: validate',
         });
     });
 

@@ -11,6 +11,7 @@ import {
     CloudViewState,
     FocusMode,
     LayoutType,
+    SqlDialect,
 } from './types';
 
 // Import color utilities
@@ -1588,7 +1589,10 @@ function applyClustering(nodes: FlowNode[], edges: FlowEdge[]): { nodes: FlowNod
     });
 }
 
+let currentSqlDialect: SqlDialect | undefined;
+
 interface RenderOptions {
+    dialect?: SqlDialect;
     preserveInteractionState?: boolean;
 }
 
@@ -1722,6 +1726,7 @@ export function render(result: ParseResult, options?: RenderOptions): void {
     currentHints = result.hints;
     hintsShowAll = false;
     currentSql = result.sql;
+    currentSqlDialect = options?.dialect ?? currentSqlDialect;
     currentColumnLineage = result.columnLineage || [];
     currentTableUsage = result.tableUsage || new Map();
 
@@ -3163,7 +3168,7 @@ export function toggleSqlPreview(show?: boolean): void {
         panel: sqlPreviewPanel,
         currentSql,
         isDarkTheme: state.isDarkTheme,
-        formatSql,
+        formatSql: getFormattedSql,
         highlightSql,
         onToggleVisible: (nextShow) => {
             toggleSqlPreview(nextShow);
@@ -3191,7 +3196,7 @@ function updateSqlPreview(): void {
         panel: sqlPreviewPanel,
         currentSql,
         isDarkTheme: state.isDarkTheme,
-        formatSql,
+        formatSql: getFormattedSql,
         highlightSql,
         onToggleVisible: (nextShow) => {
             toggleSqlPreview(nextShow);
@@ -3253,7 +3258,7 @@ export function toggleExpandAll(): void {
 }
 
 export function getFormattedSql(): string {
-    return formatSql(currentSql);
+    return formatSql(currentSql, { dialect: currentSqlDialect });
 }
 
 // ============================================================

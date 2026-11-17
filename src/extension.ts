@@ -583,7 +583,7 @@ export function activate(context: vscode.ExtensionContext) {
             VisualizationPanel.applySourceDocumentChanges(e.document, e.contentChanges);
 
             // Always mark as stale immediately for visual feedback
-            VisualizationPanel.markAsStale();
+            VisualizationPanel.markAsStale(autoRefreshEnabled);
 
             if (autoRefreshEnabled) {
                 // Clear any existing timer (debounce)

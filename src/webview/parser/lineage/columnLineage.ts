@@ -4,63 +4,47 @@ import { FlowNode, FlowEdge, ColumnLineage, SqlDialect } from '../../types';
 import { getSetOperationTree, type SetOperationTree } from '../../../shared';
 import { getSelectSourceScope, getIncomingEdgeMap } from './sourceScope';
 
-function getAstString(val: any, depth = 0): string | null {
-    if (depth > 6 || val === null || val === undefined) { return null; }
-    if (typeof val === 'string') { return val; }
-    if (typeof val === 'number' || typeof val === 'boolean') { return String(val); }
-
-    if (Array.isArray(val)) {
-        for (const item of val) {
-            const extracted = getAstString(item, depth + 1);
-            if (extracted) { return extracted; }
-        }
-        return null;
-    }
-
-    if (typeof val === 'object') {
-        const candidateKeys = ['value', 'name', 'column', 'table', 'expr'];
-        for (const key of candidateKeys) {
-            if (Object.prototype.hasOwnProperty.call(val, key)) {
-                const extracted = getAstString(val[key], depth + 1);
-                if (extracted) { return extracted; }
-            }
-        }
-    }
-
-    return null;
-}
+import { getAstString, getNormalizedFromAlias, getTableName } from '../extractors';
+import { collectCteColumnShapes, getSelectProjection } from '../extractors/selectProjection';
 
 export function extractColumnLineage(stmt: any, nodes: FlowNode[], edges: FlowEdge[], dialect: SqlDialect = 'MySQL'): ColumnLineage[] {
     const nodeMap = new Map(nodes.map(node => [node.id, node]));
     const incoming = getIncomingEdgeMap(edges, false);
     const selects = nodes.filter(node => node.type === 'select');
     let selectIndex = 0;
+    const cteShapes = collectCteColumnShapes(stmt, dialect);
     const extractTreeLineage = (tree: SetOperationTree): ColumnLineage[] => {
         if ('statement' in tree) {
             const select = selects[selectIndex++];
             const scope = select ? [...getSelectSourceScope(select.id, nodeMap, incoming).values()] : [];
-            return extractSelectColumnLineage(tree.statement, scope);
+            const branch = tree.statement;
+            const columns = getSelectProjection(branch, collectCteColumnShapes(branch, dialect, cteShapes), dialect);
+            return extractSelectColumnLineage(branch, columns, scope);
         }
         const left = extractTreeLineage(tree.left);
         // Visit dependency-only branches as well so SELECT indices remain aligned
         // with the graph's SQL-order traversal, even when they contribute no values.
         const right = extractTreeLineage(tree.right);
         if (/^UNION\b/i.test(tree.operator)) {
-            // UNION output names come from the first SELECT; combine sources by ordinal.
-            left.forEach((column, ordinal) => {
-                for (const source of right[ordinal]?.sources || []) {
+            // UNION output names come from the first SELECT. Past an
+            // unresolved star, a projection's ordinal cannot be determined.
+            for (let ordinal = 0; ordinal < left.length && ordinal < right.length; ordinal++) {
+                const column = left[ordinal];
+                const contributor = right[ordinal];
+                if (column.outputColumn === '*' || contributor.outputColumn === '*') { break; }
+                for (const source of contributor.sources) {
                     if (!column.sources.some(existing => existing.nodeId === source.nodeId && existing.table === source.table && existing.column === source.column)) {
                         column.sources.push(source);
                     }
                 }
-            });
+            }
         }
         return left;
     };
     return extractTreeLineage(getSetOperationTree(stmt, dialect) || { statement: stmt });
 }
 
-function extractSelectColumnLineage(stmt: any, nodes: FlowNode[]): ColumnLineage[] {
+function extractSelectColumnLineage(stmt: any, columns: any[], nodes: FlowNode[]): ColumnLineage[] {
     const lineage: ColumnLineage[] = [];
 
     if (!stmt || stmt.type?.toLowerCase() !== 'select' || !stmt.columns) {
@@ -71,10 +55,8 @@ function extractSelectColumnLineage(stmt: any, nodes: FlowNode[]): ColumnLineage
     const tableAliasMap = new Map<string, string>();
     if (stmt.from && Array.isArray(stmt.from)) {
         for (const fromItem of stmt.from) {
-            const rawTable = fromItem.table || fromItem.name;
-            const tableName = typeof rawTable === 'string' ? rawTable : (rawTable?.table || rawTable?.name || '');
-            const rawAlias = fromItem.as || tableName;
-            const alias = typeof rawAlias === 'string' ? rawAlias : (rawAlias?.table || rawAlias?.name || tableName);
+            const tableName = getTableName(fromItem);
+            const alias = getNormalizedFromAlias(fromItem) || tableName;
             if (tableName && alias) {
                 tableAliasMap.set(alias.toLowerCase(), tableName);
             }
@@ -85,7 +67,6 @@ function extractSelectColumnLineage(stmt: any, nodes: FlowNode[]): ColumnLineage
     const tableNodes = nodes.filter(n => n.type === 'table');
 
     // Process each column
-    const columns = Array.isArray(stmt.columns) ? stmt.columns : [];
     for (const col of columns) {
         if (col === '*') {
             lineage.push({
