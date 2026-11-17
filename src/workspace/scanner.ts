@@ -11,6 +11,8 @@ import {
     SqlDialect,
 } from './extraction';
 
+export const DEFAULT_WORKSPACE_SQL_FILE_SIZE = 10 * 1024 * 1024;
+
 /**
  * Scans workspace for SQL files and analyzes them
  */
@@ -21,7 +23,7 @@ export class WorkspaceScanner {
     private scopeUri: vscode.Uri | undefined;
     private readonly maxConcurrentAnalyses = 4;
 
-    constructor(dialect: SqlDialect = 'MySQL', maxFileSize: number = 10 * 1024 * 1024, scopeUri?: vscode.Uri) {
+    constructor(dialect: SqlDialect = 'MySQL', maxFileSize = DEFAULT_WORKSPACE_SQL_FILE_SIZE, scopeUri?: vscode.Uri) {
         this.dialect = dialect;
         this.maxFileSize = maxFileSize; // Default 10MB
         this.scopeUri = scopeUri;

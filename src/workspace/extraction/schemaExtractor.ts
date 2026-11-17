@@ -1,6 +1,7 @@
 // Schema Extractor - Parse CREATE TABLE/VIEW statements
 
 import { Parser } from 'node-sql-parser';
+import { readColumnIdentifier } from './astIdentifiers';
 import {
     SchemaDefinition,
     ColumnInfo,
@@ -206,9 +207,16 @@ export class SchemaExtractor {
         }
 
         const identifierSemantics = getIdentifierSemantics(dialect);
+        const columnHeaders = new Map<SchemaDefinition['type'], RegExp>();
         for (const definition of definitions) {
             Object.assign(definition, identifierSemantics);
-            const quoteFlags = this.getDeclaredColumnQuoteFlags(definition);
+            if (definition.columns.length === 0) {continue;}
+            let header = columnHeaders.get(definition.type);
+            if (!header) {
+                header = this.createHeaderRegex(definition.type);
+                columnHeaders.set(definition.type, header);
+            }
+            const quoteFlags = this.getDeclaredColumnQuoteFlags(definition, header);
             for (const column of definition.columns) {
                 column.name = this.unquoteIdentifier(column.name);
                 const exactFlag = quoteFlags.get(column.name);
@@ -230,7 +238,7 @@ export class SchemaExtractor {
     }
 
     /** Recover delimiter metadata that node-sql-parser omits from column ASTs. */
-    private getDeclaredColumnQuoteFlags(definition: SchemaDefinition): Map<string, boolean> {
+    private getDeclaredColumnQuoteFlags(definition: SchemaDefinition, headerRegex: RegExp): Map<string, boolean> {
         const result = new Map<string, boolean>();
         if (!definition.sql || definition.columns.length === 0) {return result;}
 
@@ -240,7 +248,8 @@ export class SchemaExtractor {
             dollarQuotes: this.dollarQuotes,
             nestedBlockComments: this.nestedBlockComments,
         });
-        const header = this.createHeaderRegex(definition.type).exec(searchableSql);
+        headerRegex.lastIndex = 0;
+        const header = headerRegex.exec(searchableSql);
         if (!header) {return result;}
         const openingIndex = searchableSql.indexOf('(', header.index + header[0].length);
         if (openingIndex < 0) {return result;}
@@ -496,27 +505,21 @@ export class SchemaExtractor {
      * Extract columns from CREATE VIEW statement
      */
     private extractViewColumns(stmt: any): ColumnInfo[] {
-        const columns: ColumnInfo[] = [];
+        const select = stmt.select?.ast || stmt.select || stmt.query_expr;
+        const projections = Array.isArray(select?.columns) ? select.columns : [];
+        const names = Array.isArray(stmt.columns) && stmt.columns.length > 0
+            ? stmt.columns.map((column: unknown) => readColumnIdentifier(column))
+            : projections.map((column: any) => readColumnIdentifier(column.as)
+                ?? (column.expr?.type === 'column_ref' ? readColumnIdentifier(column.expr) : undefined));
 
-        // Views may have explicit column list
-        if (stmt.columns && Array.isArray(stmt.columns)) {
-            for (const col of stmt.columns) {
-                const colName = unwrapIdentifierValue(col)
-                    || unwrapIdentifierValue(col?.column)
-                    || unwrapIdentifierValue(col?.name);
-                if (colName) {
-                    columns.push({
-                        name: colName,
-                        dataType: 'derived',
-                        nullable: true,
-                        primaryKey: false,
-                        isComputed: true  // View columns are derived
-                    });
-                }
-            }
-        }
-
-        return columns;
+        return names.flatMap((identifier: ReturnType<typeof readColumnIdentifier>) =>
+            identifier && identifier.name !== '*' ? [{
+                ...identifier,
+                dataType: 'derived',
+                nullable: true,
+                primaryKey: false,
+                isComputed: true,
+            }] : []);
     }
 
     /**

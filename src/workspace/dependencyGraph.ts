@@ -1,6 +1,7 @@
 // Dependency Graph Builder - Create visualization graph from index
 
 import * as path from 'path';
+import { getStatementRelations } from './statementRelations';
 import {
     WorkspaceIndex,
     WorkspaceDependencyGraph,
@@ -259,7 +260,9 @@ function buildTableGraph(
     }
 
     const edgeMap = new Map<string, { count: number; types: Set<string>; tables: Set<string>; references: WorkspaceEdgeReference[] }>();
-    const pushEdge = (sourceId: string, targetId: string, ref: TableReference): void => {
+    const pushEdge = (
+        sourceId: string, targetId: string, ref: TableReference, type = ref.referenceType
+    ): void => {
         if (!sourceId || !targetId || sourceId === targetId) {
             return;
         }
@@ -269,7 +272,7 @@ function buildTableGraph(
         }
         const edgeData = edgeMap.get(key)!;
         edgeData.count += 1;
-        edgeData.types.add(ref.referenceType);
+        edgeData.types.add(type);
         edgeData.tables.add(getReferenceDisplayName(ref));
         appendEdgeReference(edgeData.references, ref);
     };
@@ -335,6 +338,31 @@ function buildTableGraph(
         }
     }
 
+    // DML writers may be declared in a different file from the statement.
+    const relationNodeIds = (key: string, reference: TableReference): string[] => {
+        const definitions = getDefinitionCandidates(index, definitionNameIndex, reference);
+        const ids = definitions.length > 0
+            ? definitions.map(definition => nodeIdMap.get(getDefinitionKey(definition)))
+            : [nodeIdMap.get(key)];
+        return [...new Set(ids.filter((id): id is string => id !== undefined))];
+    };
+    for (const analysis of index.files.values()) {
+        for (const { inputs, outputs } of getStatementRelations(analysis.references).values()) {
+            for (const [writerKey, writer] of outputs) {
+                const writerIds = relationNodeIds(writerKey, writer);
+                for (const [readerKey, reader] of inputs) {
+                    if (writerKey === readerKey) {continue;}
+                    const readerIds = relationNodeIds(readerKey, reader);
+                    for (const writerId of writerIds) {
+                        for (const readerId of readerIds) {
+                            pushEdge(writerId, readerId, reader, writer.referenceType);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     for (const [key, data] of edgeMap.entries()) {
         const [source, target] = key.split('->');
         edges.push({
@@ -384,22 +412,6 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
         }
     }
 
-    // Collect CTE names from structured query analyses (when available) as a
-    // defensive check. CTEs are query-scoped aliases and should never be flagged
-    // as missing table definitions.
-    const knownCteNames = new Set<string>();
-    for (const analysis of index.files.values()) {
-        if (!analysis.queries) {continue;}
-        for (const query of analysis.queries) {
-            if (query.ctes) {
-                for (const cte of query.ctes) {
-                    const cteName = normalizeIdentifier(cte.name);
-                    if (cteName) {knownCteNames.add(cteName);}
-                }
-            }
-        }
-    }
-
     // Count tables and views
     for (const [key, defs] of index.definitionMap.entries()) {
         for (const def of defs) {
@@ -423,11 +435,10 @@ function calculateStats(index: WorkspaceIndex): WorkspaceStats {
     for (const [key, refs] of index.referenceMap.entries()) {
         totalReferences += refs.length;
 
-        // Skip CTE names — they are query-scoped aliases, not external tables.
-        const refName = getReferenceNameKey(refs[0]);
-        if (refName && knownCteNames.has(refName)) {continue;}
-
-        const hasSchema = refs.some(ref => !!ref.schema || !!ref.catalog);
+        const physical = refs.filter(ref => ref.referenceType !== 'cte');
+        if (physical.length === 0) {continue;}
+        const refName = getReferenceNameKey(physical[0]);
+        const hasSchema = physical.some(ref => !!ref.schema || !!ref.catalog);
         if (hasSchema) {
             if (!index.definitionMap.has(key)) {
                 const defs = refName ? (definitionsByName.get(refName) || []) : [];

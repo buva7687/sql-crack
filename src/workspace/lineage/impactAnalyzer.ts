@@ -26,6 +26,7 @@ export interface ImpactReport {
 
     // Transitive impacts (dependents of dependents)
     transitiveImpacts: ImpactItem[];
+    affectedFiles?: string[];
 
     // Summary
     summary: {
@@ -274,7 +275,7 @@ export class ImpactAnalyzer {
         }
 
         // Calculate summary
-        const summary = this.calculateSummary(directImpacts, transitiveImpacts, nodeId);
+        const { summary, affectedFiles } = this.calculateSummary(directImpacts, transitiveImpacts, nodeId);
 
         // Calculate overall severity
         const severity = this.calculateSeverity({
@@ -296,6 +297,7 @@ export class ImpactAnalyzer {
             },
             directImpacts,
             transitiveImpacts,
+            affectedFiles,
             summary,
             severity,
             suggestions
@@ -353,7 +355,7 @@ export class ImpactAnalyzer {
             }
         }
 
-        const summary = this.calculateSummary(directImpacts, transitiveImpacts, columnId);
+        const { summary, affectedFiles } = this.calculateSummary(directImpacts, transitiveImpacts, columnId);
         const severity = this.calculateSeverity({
             directImpacts,
             transitiveImpacts,
@@ -370,6 +372,7 @@ export class ImpactAnalyzer {
             },
             directImpacts,
             transitiveImpacts,
+            affectedFiles,
             summary,
             severity,
             suggestions
@@ -441,7 +444,7 @@ export class ImpactAnalyzer {
         directImpacts: ImpactItem[],
         transitiveImpacts: ImpactItem[],
         targetNodeId: string
-    ): ImpactReport['summary'] {
+    ): { summary: ImpactReport['summary']; affectedFiles: string[] } {
         const allImpacts = [...directImpacts, ...transitiveImpacts];
 
         const tables = new Set<string>();
@@ -454,7 +457,7 @@ export class ImpactAnalyzer {
         for (const impact of allImpacts) {
             if (impact.node.type === 'table') {tables.add(impact.node.name);}
             if (impact.node.type === 'view') {views.add(impact.node.name);}
-            if (impact.filePath) {files.add(impact.filePath);}
+            if (impact.filePath && impact.filePath !== 'Unknown') {files.add(impact.filePath);}
         }
 
         // Query statements are not graph nodes. Count only statements that are
@@ -464,19 +467,26 @@ export class ImpactAnalyzer {
             if (!pathNodeIds.has(edge.sourceId) || !affectedNodeIds.has(edge.targetId)) {
                 continue;
             }
-            const filePath = edge.metadata?.filePath;
-            const statementIndex = edge.metadata?.statementIndex;
-            if (typeof filePath === 'string' && filePath.length > 0 && Number.isInteger(statementIndex)) {
-                affectedStatements.add(`${filePath}\u0000${statementIndex}`);
+            const statements = edge.statements ?? [{
+                filePath: edge.metadata?.filePath, statementIndex: edge.metadata?.statementIndex,
+            }];
+            for (const { filePath, statementIndex } of statements) {
+                if (typeof filePath === 'string' && filePath.length > 0 && Number.isInteger(statementIndex)) {
+                    affectedStatements.add(`${filePath}\u0000${statementIndex}`);
+                    files.add(filePath);
+                }
             }
         }
 
         return {
-            totalAffected: allImpacts.length,
-            tablesAffected: tables.size,
-            viewsAffected: views.size,
-            queriesAffected: affectedStatements.size,
-            filesAffected: files.size
+            affectedFiles: [...files],
+            summary: {
+                totalAffected: allImpacts.length,
+                tablesAffected: tables.size,
+                viewsAffected: views.size,
+                queriesAffected: affectedStatements.size,
+                filesAffected: files.size,
+            },
         };
     }
 

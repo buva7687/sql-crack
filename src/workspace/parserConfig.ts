@@ -9,7 +9,8 @@ export type SqlDialect = WebviewSqlDialect;
  * Keeps workspace extraction decoupled from webview parser internals.
  */
 export function preprocessSqlForWorkspaceParsing(sql: string, dialect: SqlDialect): { sql: string; hadJinja: boolean } {
-    return preprocessForParsing(sql, dialect);
+    // Lineage depends on each CTE's original lexical scope.
+    return preprocessForParsing(sql, dialect, { hoistNestedCtes: false });
 }
 
 /** Parse compound view bodies separately when the parser's CREATE VIEW grammar rejects them. */

@@ -27,6 +27,7 @@ export interface LineageEdge {
     targetId: string;          // Target node (downstream)
     type: 'direct' | 'transform' | 'aggregate' | 'filter' | 'join';
     transformation?: string;   // Expression if transformed
+    statements?: Array<{ filePath: string; statementIndex: number }>;
     metadata: Record<string, any>;
 }
 

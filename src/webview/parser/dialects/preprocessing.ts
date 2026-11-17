@@ -2726,16 +2726,22 @@ function findStatementTerminatorAtDepth0(masked: string, pos: number): number {
     return masked.length;
 }
 
-export function preprocessForParsing(sql: string, dialect: SqlDialect): { sql: string; hadJinja: boolean } {
-    return withSqlDialectLexing(dialect, () => preprocessForParsingForDialect(sql, dialect));
+export function preprocessForParsing(
+    sql: string, dialect: SqlDialect, options: { hoistNestedCtes?: boolean } = {}
+): { sql: string; hadJinja: boolean } {
+    return withSqlDialectLexing(dialect, () => preprocessForParsingForDialect(sql, dialect, options.hoistNestedCtes !== false));
 }
 
-function preprocessForParsingForDialect(sql: string, dialect: SqlDialect): { sql: string; hadJinja: boolean } {
+function preprocessForParsingForDialect(
+    sql: string, dialect: SqlDialect, hoistCtes: boolean
+): { sql: string; hadJinja: boolean } {
     const { rewritten, hadJinja } = preprocessJinjaTemplates(sql);
     let result = rewritten;
 
-    const hoisted = hoistNestedCtes(result);
-    if (hoisted !== null) { result = hoisted; }
+    if (hoistCtes) {
+        const hoisted = hoistNestedCtes(result);
+        if (hoisted !== null) { result = hoisted; }
+    }
 
     const postgres = preprocessPostgresSyntax(result, dialect);
     if (postgres !== null) { result = postgres; }

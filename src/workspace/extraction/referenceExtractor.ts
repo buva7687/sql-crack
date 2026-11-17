@@ -15,6 +15,7 @@ import {
     StatementType,
     Transformation
 } from './types';
+import { ColumnIdentifier, readColumnIdentifier } from './astIdentifiers';
 import { ColumnExtractor } from './columnExtractor';
 import { TransformExtractor } from './transformExtractor';
 import { countStartsAtOrBefore, dialectSupportsBackslashEscapes, dialectSupportsHashComments, escapeRegex, getDollarQuoteDelimiterAt, getSetOperationTree, maskSqlCommentsPreservingPositions, quotedStringAllowsBackslashEscapes, TextOffsetIndex, unwrapIdentifierValue } from '../../shared';
@@ -50,6 +51,14 @@ interface TableReferenceLocation {
     nameQuoted: boolean;
     schemaQuoted: boolean;
     catalogQuoted: boolean;
+}
+
+interface QueryScope {
+    cteNames?: ReadonlySet<string>;
+    compoundOutputNames?: readonly ColumnIdentifier[];
+    declaredCteColumns?: readonly ColumnIdentifier[];
+    depth?: number;
+    outerAliases?: ReadonlyMap<string, string>;
 }
 
 interface ParsedStatement {
@@ -129,10 +138,17 @@ export class ReferenceExtractor {
     }
 
     private getWithClauses(stmt: AstStatement): AstCTE[] {
-        if (!stmt?.with) {
-            return [];
-        }
-        return Array.isArray(stmt.with) ? stmt.with : [stmt.with];
+        const clauses = stmt?.with || (stmt?.type?.toLowerCase() === 'with' ? stmt.ctes : undefined);
+        return clauses ? (Array.isArray(clauses) ? clauses : [clauses]) : [];
+    }
+
+    private isRecursiveCte(cte: AstCTE, statement: AstStatement): boolean {
+        return Boolean(cte.recursive || statement.recursive || this._activeDialect === 'TransactSQL');
+    }
+
+    private hasForwardCteReferences(clauses: AstCTE[]): boolean {
+        return (this._activeDialect === 'PostgreSQL' || this._activeDialect === 'BigQuery')
+            && clauses.some(cte => cte.recursive);
     }
 
     private getCteStatement(cte: AstCTE): AstStatement | null {
@@ -288,7 +304,6 @@ export class ReferenceExtractor {
                 for (const stmt of statements) {
                     parsedStatements.push({ statement: stmt, statementIndex: stmtIndex });
                     const aliasMap = this.createAliasMap();
-                    this.collectCTENames(stmt, aliasMap.cteNames);
                     this.extractFromStatement(stmt, filePath, normalizedSql, references, aliasMap, 0, stmtIndex);
                 }
             } catch (error) {
@@ -361,38 +376,69 @@ export class ReferenceExtractor {
         statement: AstStatement,
         statementIndex: number,
         statementReferences: TableReference[],
-        cteNamesInScope: ReadonlySet<string> = new Set(),
-        compoundOutputNames?: readonly string[]
+        scope: QueryScope = {}
     ): QueryAnalysis {
+        const { cteNames, compoundOutputNames, declaredCteColumns, depth = 0, outerAliases } = scope;
         const originalSelect = this.getAnalysisSelectStatement(statement);
         const tree = getSetOperationTree(originalSelect, this._activeDialect);
         const valueStatements = tree ? this.getValueStatements(tree) : [];
         const selectStatement = valueStatements[0] || originalSelect;
+        const cteSource = originalSelect?.with ? originalSelect : statement;
+        const withClauses = this.getWithClauses(cteSource);
+        const nestedCteNamesInScope = new Set(cteNames);
+        if (this.hasForwardCteReferences(withClauses)) {
+            withClauses.forEach(cte => this.addCTEName(nestedCteNamesInScope, cte.name));
+        }
+        const ctes = depth >= this.options.maxSubqueryDepth ? [] : withClauses.flatMap(cte => {
+            const cteStatement = this.getCteStatement(cte);
+            if (!cteStatement) {return [];}
+            const isRecursive = this.isRecursiveCte(cte, cteSource);
+            const cteScope = new Set(nestedCteNamesInScope);
+            if (isRecursive) {this.addCTEName(cteScope, cte.name);}
+            const columns = cte.columns?.map(readColumnIdentifier);
+            const declaredColumns = columns?.every((column): column is ColumnIdentifier => column !== undefined)
+                ? columns : undefined;
+            const query = this.buildQueryAnalysis(cteStatement, statementIndex, statementReferences, {
+                cteNames: cteScope, declaredCteColumns: declaredColumns, depth: depth + 1,
+            });
+            this.addCTEName(nestedCteNamesInScope, cte.name);
+            return [{
+                name: this.getCTENameString(cte.name) || 'cte',
+                nameQuoted: this.isQuotedAstIdentifier(cte.name),
+                canonicalKey: this.getCTEIdentity(cte.name),
+                ...(declaredColumns ? { columns: declaredColumns.map(column => column.name) } : {}),
+                query,
+                isRecursive,
+                lineNumber: query.lineNumber,
+            }];
+        });
         const targetColumnNames = this.getTargetColumnNames(statement);
-        const destinationNames = compoundOutputNames ?? targetColumnNames;
+        const destinationNames = compoundOutputNames ?? declaredCteColumns ?? targetColumnNames;
+        const implicitInsert = statement.type?.toLowerCase() === 'insert' && targetColumnNames.length === 0;
         const projections = Array.isArray(selectStatement?.columns) ? selectStatement.columns : [];
         const firstWildcard = projections.findIndex(isWildcardProjection);
         // SQL names explicit projections even after a wildcard. Positional
         // destinations can only use the prefix before an unexpanded wildcard.
-        const positional = compoundOutputNames !== undefined || targetColumnNames.length > 0;
+        const positional = compoundOutputNames !== undefined || destinationNames.length > 0 || implicitInsert;
         const explicitProjections = positional && firstWildcard >= 0
             ? projections.slice(0, firstWildcard)
             : projections.filter(column => !isWildcardProjection(column));
         const projectionStatement = selectStatement && { ...selectStatement, columns: explicitProjections };
         const allInputTables = statementReferences.filter(reference =>
-            reference.referenceType !== 'insert'
+            reference.alsoRead || (reference.referenceType !== 'insert'
             && reference.referenceType !== 'update'
             && reference.referenceType !== 'delete'
-            && reference.referenceType !== 'merge'
+            && reference.referenceType !== 'merge')
         );
         const lineNumber = statementReferences.reduce(
             (earliest, reference) => Math.min(earliest, reference.lineNumber || earliest),
             Number.MAX_SAFE_INTEGER
         );
         const queryLineNumber = lineNumber === Number.MAX_SAFE_INTEGER ? 1 : lineNumber;
-        const tableAliases = this.buildQueryAliasMap(selectStatement || statement, statementReferences);
+        const localAliases = this.buildQueryAliasMap(selectStatement || statement, statementReferences);
+        const tableAliases = outerAliases ? new Map([...outerAliases, ...localAliases]) : localAliases;
         const directSourceTableNames = [...new Set(
-            [...tableAliases.values()]
+            [...localAliases.values()]
                 .filter((name): name is string => typeof name === 'string' && name.length > 0)
         )];
         const directSourceNames = new Set(directSourceTableNames);
@@ -405,7 +451,7 @@ export class ReferenceExtractor {
         // failure. Widen to the whole statement only when a source cannot be
         // accounted for as either a reference or a CTE.
         const unresolvedDirectSources = directSourceTableNames.filter(name =>
-            !cteNamesInScope.has(name)
+            !nestedCteNamesInScope.has(name)
             && !inputTableNames.has(name)
         );
         const inputTables = scopedInputTables.length > 0 || unresolvedDirectSources.length === 0
@@ -433,26 +479,75 @@ export class ReferenceExtractor {
         if (compoundOutputNames !== undefined) {
             transformations = transformations.slice(0, compoundOutputNames.length);
         }
+        const subqueries: QueryAnalysis[] = [];
+        const derivedAliases = new Map<string, number>();
+        const from = selectStatement?.from;
+        const fromItems = Array.isArray(from) ? from : from ? [from] : [];
+        const addSubquery = (subquery: AstStatement, inheritedAliases?: ReadonlyMap<string, string>): number | undefined => {
+            if (depth >= this.options.maxSubqueryDepth) {return undefined;}
+            const analyzed = this.buildQueryAnalysis(
+                subquery, statementIndex, statementReferences, {
+                    cteNames: nestedCteNamesInScope, depth: depth + 1, outerAliases: inheritedAliases,
+                }
+            );
+            subqueries.push(analyzed);
+            return subqueries.length - 1;
+        };
+        for (const item of fromItems) {
+            const subquery = this.getNestedSelect(item?.expr);
+            const alias = unwrapIdentifierValue(item?.as);
+            if (!subquery || !alias) {continue;}
+            const index = addSubquery(subquery);
+            if (index !== undefined) {
+                derivedAliases.set(this.getIdentifierIdentity(alias, this.isQuotedAstIdentifier(item.as)), index);
+            }
+        }
+        const soleDerivedSource = fromItems.length === 1 && derivedAliases.size === 1
+            ? derivedAliases.values().next().value : undefined;
         transformations = transformations.map((transformation, index) => {
             const destinationName = destinationNames[index];
-            const inputColumns = transformation.inputColumns.map(column => ({
-                ...column,
-                tableName: column.tableName || soleSourceTable,
-                lineNumber: column.lineNumber || queryLineNumber,
-            }));
+            const inputColumns: ColumnReference[] = transformation.inputColumns.map(column => {
+                const alias = unwrapIdentifierValue(column.tableAlias);
+                const derivedIndex = alias
+                    ? derivedAliases.get(this.getIdentifierIdentity(alias, this.isQuotedAstIdentifier(column.tableAlias)))
+                    : soleDerivedSource;
+                return {
+                    ...column,
+                    ...(derivedIndex === undefined
+                        ? { tableName: column.tableName || soleSourceTable }
+                        : { tableName: undefined, subqueryIndex: derivedIndex }),
+                    lineNumber: column.lineNumber || queryLineNumber,
+                };
+            });
+            for (const scalar of this.findScalarSubqueries(explicitProjections[index]?.expr)) {
+                const subqueryIndex = addSubquery(scalar, tableAliases);
+                if (subqueryIndex === undefined) {continue;}
+                inputColumns.push({
+                    columnName: subqueries[subqueryIndex].transformations[0]?.outputColumn || '',
+                    subqueryIndex,
+                    subqueryProjection: 0,
+                    usedIn: 'select',
+                    lineNumber: queryLineNumber,
+                });
+            }
             return {
                 ...transformation,
-                ...(destinationName ? { outputColumn: destinationName, outputAlias: destinationName } : {}),
+                ...(destinationName ? {
+                    outputColumn: destinationName.name,
+                    outputAlias: destinationName.name,
+                    outputNameQuoted: destinationName.nameQuoted,
+                } : {}),
+                ...(projectionStatement && (firstWildcard < 0 || index < firstWildcard) ? { projectionOrdinal: index } : {}),
                 inputColumns,
                 lineNumber: transformation.lineNumber || queryLineNumber,
             };
         });
 
-        if (targetColumnNames.length > 0) {
-            outputColumns = targetColumnNames.map((name, index) => {
+        if (destinationNames.length > 0) {
+            const namedColumns = destinationNames.map((identifier, index) => {
                 const transformation = transformations[index];
                 return {
-                    name,
+                    ...identifier,
                     dataType: 'unknown',
                     nullable: true,
                     primaryKey: false,
@@ -463,6 +558,9 @@ export class ReferenceExtractor {
                     } : {}),
                 };
             });
+            outputColumns = declaredCteColumns
+                ? [...namedColumns, ...outputColumns.slice(namedColumns.length)]
+                : namedColumns;
         } else if (outputColumns.length === 0 && transformations.length > 0) {
             outputColumns = transformations.map(transformation => ({
                 name: transformation.outputColumn,
@@ -482,51 +580,20 @@ export class ReferenceExtractor {
             queryLineNumber
         );
 
-        const cteSource = selectStatement || statement;
-        const withClauses = this.getWithClauses(cteSource);
-        const nestedCteNamesInScope = new Set(cteNamesInScope);
-        for (const cte of withClauses) {
-            const siblingName = this.getCTENameString(cte.name);
-            if (siblingName) {
-                nestedCteNamesInScope.add(this.getCTEIdentity(cte.name) || siblingName);
-            }
-        }
-        const ctes = withClauses.flatMap(cte => {
-            const cteStatement = this.getCteStatement(cte);
-            if (!cteStatement) {
-                return [];
-            }
-            const name = this.getCTENameString(cte.name) || 'cte';
-            const columns = Array.isArray(cte.columns)
-                ? cte.columns.map(column => unwrapIdentifierValue(column)).filter((column): column is string => Boolean(column))
-                : undefined;
-            return [{
-                name,
-                nameQuoted: this.isQuotedAstIdentifier(cte.name),
-                canonicalKey: this.getCTEIdentity(cte.name),
-                ...(columns && columns.length > 0 ? { columns } : {}),
-                query: this.buildQueryAnalysis(
-                    cteStatement,
-                    statementIndex,
-                    statementReferences,
-                    nestedCteNamesInScope
-                ),
-                isRecursive: Boolean((cte as any).recursive || (cteSource as any).recursive),
-                lineNumber: queryLineNumber,
-            }];
-        });
-
         const setOperationBranches: QueryAnalysis[] = [];
         // The first arm names compound outputs. Its explicit prefix has known
         // ordinals even when the wildcard makes the remaining positions unknown.
-        const outputNames = targetColumnNames.length > 0
-            ? targetColumnNames
-            : transformations.slice(0, firstWildcard < 0 ? transformations.length : firstWildcard)
-                .map(transformation => transformation.outputColumn);
+        const knownNames = transformations.filter(transform => transform.projectionOrdinal !== undefined)
+            .map(transform => ({ name: transform.outputColumn, nameQuoted: transform.outputNameQuoted }));
+        const outputNames = destinationNames.length > 0 && (!declaredCteColumns || destinationNames.length >= knownNames.length)
+            ? destinationNames : knownNames;
         const branchStatements = valueStatements.slice(1);
         for (const branch of branchStatements) {
             const analysis = this.buildQueryAnalysis(
-                branch, statementIndex, statementReferences, nestedCteNamesInScope, outputNames
+                branch, statementIndex, statementReferences, {
+                    cteNames: nestedCteNamesInScope, compoundOutputNames: implicitInsert ? undefined : outputNames,
+                    depth, outerAliases,
+                }
             );
             setOperationBranches.push(analysis);
         }
@@ -535,14 +602,38 @@ export class ReferenceExtractor {
             statementType: this.getQueryStatementType(statement),
             statementIndex,
             outputColumns,
+            ...(implicitInsert ? { implicitInsertTargetColumns: true } : {}),
             inputTables,
             inputColumns,
             transformations,
             ctes,
-            subqueries: [],
+            subqueries,
             ...(setOperationBranches.length > 0 ? { setOperationBranches } : {}),
             lineNumber: queryLineNumber,
         };
+    }
+
+    private getNestedSelect(expression: AstTableRef['expr']): AstStatement | undefined {
+        const candidate = expression?.ast || expression;
+        return candidate?.type?.toLowerCase() === 'select' ? candidate as AstStatement : undefined;
+    }
+
+    private findScalarSubqueries(expression: AstExpression | undefined): AstStatement[] {
+        const subqueries: AstStatement[] = [];
+        const pending: unknown[] = [expression];
+        const visited = new Set<object>();
+        while (pending.length > 0) {
+            const value = pending.pop();
+            if (!value || typeof value !== 'object' || visited.has(value)) {continue;}
+            visited.add(value);
+            const subquery = this.getNestedSelect(value as AstExpression);
+            if (subquery) {
+                subqueries.push(subquery);
+                continue;
+            }
+            pending.push(...Object.values(value));
+        }
+        return subqueries;
     }
 
     private getValueStatements(tree: SetOperationTree): AstSelectStatement[] {
@@ -638,7 +729,7 @@ export class ReferenceExtractor {
         return 'unknown';
     }
 
-    private getTargetColumnNames(statement: AstStatement): string[] {
+    private getTargetColumnNames(statement: AstStatement): ColumnIdentifier[] {
         const statementType = statement?.type?.toLowerCase();
         const isInsert = statementType === 'insert';
         const isCreateView = statementType === 'create'
@@ -646,9 +737,8 @@ export class ReferenceExtractor {
         if ((!isInsert && !isCreateView) || !Array.isArray(statement.columns)) {
             return [];
         }
-        return statement.columns
-            .map(column => unwrapIdentifierValue(column))
-            .filter((column): column is string => Boolean(column));
+        return statement.columns.map(readColumnIdentifier)
+            .filter((column): column is ColumnIdentifier => column !== undefined);
     }
 
     /**
@@ -678,6 +768,7 @@ export class ReferenceExtractor {
             if (!outputColumn || !expression) {continue;}
             transformations.push({
                 outputColumn,
+                outputTable: this.getUpdateAssignmentTarget(assignment.table, statement, tableAliases),
                 inputColumns: this.transformExtractor.parseExpression(expression, tableAliases),
                 operation: this.transformExtractor.classifyTransformation(expression),
                 expression: this.expressionToSql(expression),
@@ -685,6 +776,14 @@ export class ReferenceExtractor {
             });
         }
         return transformations;
+    }
+
+    private getUpdateAssignmentTarget(
+        qualifier: unknown, statement: AstStatement, aliases: Map<string, string>
+    ): string | undefined {
+        if (statement.from || !Array.isArray(statement.table) || statement.table.length < 2) {return undefined;}
+        const name = unwrapIdentifierValue(qualifier);
+        return name ? aliases.get(name) || aliases.get(name.toLowerCase()) : undefined;
     }
 
     private expressionToSql(expression: AstExpression): string {
@@ -732,74 +831,6 @@ export class ReferenceExtractor {
     /**
      * Recursively collect all CTE names from a statement tree
      */
-    private collectCTENames(stmt: AstStatement, cteNames: Set<string>): void {
-        if (!stmt || typeof stmt !== 'object') {return;}
-
-        // Check for WITH clause
-        if (stmt.with) {
-            const withClause = Array.isArray(stmt.with) ? stmt.with : [stmt.with];
-            for (const cte of withClause) {
-                const cteName = this.getCTENameString(cte.name);
-                if (cteName && typeof cteName === 'string') {
-                    this.addCTEName(cteNames, cte.name);
-                }
-            }
-        }
-
-        // Check if statement is a WITH statement
-        if (stmt.type && stmt.type.toLowerCase() === 'with') {
-            if (stmt.ctes) {
-                const ctes = Array.isArray(stmt.ctes) ? stmt.ctes : [stmt.ctes];
-                for (const cte of ctes) {
-                    const cteName = this.getCTENameString(cte.name);
-                    if (cteName && typeof cteName === 'string') {
-                        this.addCTEName(cteNames, cte.name);
-                    }
-                }
-            }
-        }
-
-        // Recursively check nested statements and all possible AST structures
-        if (stmt.statement) {
-            this.collectCTENames(stmt.statement, cteNames);
-        }
-        if (stmt.query) {
-            this.collectCTENames(stmt.query, cteNames);
-        }
-        if (stmt.select) {
-            this.collectCTENames(stmt.select, cteNames);
-        }
-        if (stmt.insert) {
-            this.collectCTENames(stmt.insert, cteNames);
-        }
-        if (stmt.update) {
-            this.collectCTENames(stmt.update, cteNames);
-        }
-        if (stmt.delete) {
-            this.collectCTENames(stmt.delete, cteNames);
-        }
-        // Check all array properties that might contain statements
-        if (Array.isArray(stmt)) {
-            for (const item of stmt) {
-                this.collectCTENames(item, cteNames);
-            }
-        }
-        // Check all object properties recursively (but limit depth to avoid infinite loops)
-        if (typeof stmt === 'object' && stmt !== null) {
-            for (const key in stmt) {
-                if (key !== 'with' && key !== 'ctes' && typeof stmt[key] === 'object' && stmt[key] !== null) {
-                    // Only recurse into likely statement-like structures
-                    if (key === 'statement' || key === 'query' || key === 'select' || 
-                        key === 'insert' || key === 'update' || key === 'delete' ||
-                        key === 'ast' || key === 'stmt' || key === 'definition' ||
-                        Array.isArray(stmt[key])) {
-                        this.collectCTENames(stmt[key], cteNames);
-                    }
-                }
-            }
-        }
-    }
-
     /**
      * Create empty alias tracking map
      */
@@ -811,20 +842,12 @@ export class ReferenceExtractor {
         };
     }
 
-    /**
-     * Create a child scope for traversing a CTE body while allowing the current
-     * CTE name to still resolve to an external relation inside that definition.
-     */
-    private createCteDefinitionAliasMap(aliasMap: AliasMap, cteName?: AstCTE['name']): AliasMap {
-        const childAliasMap = this.createAliasMap();
-        childAliasMap.tables = new Map(aliasMap.tables);
-        childAliasMap.columns = new Map(aliasMap.columns);
-        childAliasMap.cteNames = new Set(aliasMap.cteNames);
-        if (cteName) {
-            const identity = this.getCTEIdentity(cteName);
-            if (identity) {childAliasMap.cteNames.delete(identity);}
-        }
-        return childAliasMap;
+    private cloneAliasMap(aliasMap: AliasMap): AliasMap {
+        return {
+            tables: new Map(aliasMap.tables),
+            columns: new Map(aliasMap.columns),
+            cteNames: new Set(aliasMap.cteNames),
+        };
     }
 
     private findMatchingParen(sql: string, openParenIndex: number): number {
@@ -904,72 +927,27 @@ export class ReferenceExtractor {
         if (!stmt) {return;}
         if (depth > this.options.maxSubqueryDepth) {return;}
 
-        // Check for WITH clause at the top level (before statement type)
-        // Some parsers structure WITH clauses separately from the main statement
-        if (stmt.with) {
-            for (const cte of this.getWithClauses(stmt)) {
-                const cteName = this.getCTENameString(cte.name);
-                if (cteName) {
-                    this.addCTEName(aliasMap.cteNames, cte.name);
+        const withClauses = this.getWithClauses(stmt);
+        if (withClauses.length > 0) {
+            aliasMap = this.cloneAliasMap(aliasMap);
+            const forwardReferences = this.hasForwardCteReferences(withClauses);
+            if (forwardReferences) {
+                withClauses.forEach(cte => this.addCTEName(aliasMap.cteNames, cte.name));
+            }
+            for (const cte of withClauses) {
+                const cteAliasMap = this.cloneAliasMap(aliasMap);
+                if (this.isRecursiveCte(cte, stmt)) {
+                    this.addCTEName(cteAliasMap.cteNames, cte.name);
                 }
-
-                // Extract references from CTE definition
                 const cteStmt = this.getCteStatement(cte);
                 if (cteStmt) {
-                    const cteAliasMap = this.createCteDefinitionAliasMap(aliasMap, cte.name);
-                    this.extractFromStatement(
-                        cteStmt,
-                        filePath,
-                        sql,
-                        references,
-                        cteAliasMap,
-                        depth + 1,
-                        statementIndex
-                    );
+                    this.extractFromStatement(cteStmt, filePath, sql, references, cteAliasMap, depth + 1, statementIndex);
                 }
+                this.addCTEName(aliasMap.cteNames, cte.name);
             }
         }
-
-        // Also check if the statement itself is a WITH statement (some parsers structure it this way)
-        if (stmt.type && stmt.type.toLowerCase() === 'with') {
-            // Process WITH CTEs
-            if (stmt.ctes) {
-                const ctes = Array.isArray(stmt.ctes) ? stmt.ctes : [stmt.ctes];
-                for (const cte of ctes) {
-                    const cteName = this.getCTENameString(cte.name);
-                    if (cteName) {
-                        this.addCTEName(aliasMap.cteNames, cte.name);
-                    }
-
-                    const cteStmt = this.getCteStatement(cte);
-                    if (cteStmt) {
-                        const cteAliasMap = this.createCteDefinitionAliasMap(aliasMap, cte.name);
-                        this.extractFromStatement(
-                            cteStmt,
-                            filePath,
-                            sql,
-                            references,
-                            cteAliasMap,
-                            depth + 1,
-                            statementIndex
-                        );
-                    }
-                }
-            }
-
-            // Process the main statement after WITH
-            if (stmt.statement || stmt.query) {
-                const mainStmt = stmt.statement || stmt.query;
-                this.extractFromStatement(
-                    mainStmt,
-                    filePath,
-                    sql,
-                    references,
-                    aliasMap,
-                    depth,
-                    statementIndex
-                );
-            }
+        if (stmt.type?.toLowerCase() === 'with') {
+            this.extractFromStatement(stmt.statement || stmt.query, filePath, sql, references, aliasMap, depth, statementIndex);
             return;
         }
 
@@ -1156,6 +1134,12 @@ export class ReferenceExtractor {
                     'UPDATE',
                     statementIndex
                 );
+                if (tableRef.on) {
+                    this.extractFromExpression(tableRef.on, filePath, sql, references, aliasMap, depth, statementIndex);
+                }
+                if (ref && !stmt.from && targetTables.length > 1) {
+                    ref.alsoRead = true;
+                }
                 if (ref?.tableName) {
                     const isCTE = this.isCTEReference(aliasMap.cteNames, ref);
                     if (!isCTE) {
@@ -1174,29 +1158,6 @@ export class ReferenceExtractor {
         if (stmt.from) {
             const fromItems = Array.isArray(stmt.from) ? stmt.from : [stmt.from];
             for (const item of fromItems) {
-                // Track subquery aliases in FROM clause FIRST
-                // Check if this is a subquery with an alias
-                if (item.expr?.type === 'select' || item.expr?.ast) {
-                    // Extract alias name from various possible structures
-                    let aliasName: string | null = null;
-                    if (item.as) {
-                        if (typeof item.as === 'string') {
-                            aliasName = item.as;
-                        } else if (item.as.value) {
-                            aliasName = item.as.value;
-                        } else if (item.as.name) {
-                            aliasName = item.as.name;
-                        } else if (typeof item.as === 'object' && 'alias' in item.as) {
-                            aliasName = item.as.alias ?? null;
-                        }
-                    }
-
-                    if (aliasName) {
-                        // Mark subquery alias - it's not a real table
-                        aliasMap.cteNames.add(this.getIdentifierIdentity(aliasName, this.isQuotedAstIdentifier(item.as)));
-                    }
-                }
-
                 // Now process the FROM item (this will process the subquery)
                 this.extractFromItem(
                     item,
@@ -1352,28 +1313,7 @@ export class ReferenceExtractor {
         // Subquery
         if (item.expr?.type === 'select' || item.expr?.ast) {
             const subStmt = item.expr?.ast || item.expr;
-            const subAliasMap = this.createAliasMap();
-            subAliasMap.cteNames = new Set(aliasMap.cteNames);
-            subAliasMap.tables = new Map(aliasMap.tables); // Copy existing aliases
-
-            // Track subquery alias if present - subqueries are not real tables
-            if (item.as) {
-                const aliasName = typeof item.as === 'string' ? item.as : item.as.value || item.as.name || '';
-                if (aliasName) {
-                    // Mark this as a subquery alias, not a real table
-                    // We'll use a special marker or just track it separately
-                    // For now, we'll add it to a set of subquery aliases
-                    // Actually, we can use the tables map but mark it specially
-                    // Or better: add to a new set for subquery aliases
-                    // For simplicity, let's add it to cteNames since subqueries should be treated similarly
-                    const aliasIdentity = this.getIdentifierIdentity(
-                        this.unquoteIdentifier(aliasName),
-                        this.isQuotedAstIdentifier(item.as)
-                    );
-                    aliasMap.cteNames.add(aliasIdentity);
-                    subAliasMap.cteNames.add(aliasIdentity);
-                }
-            }
+            const subAliasMap = this.cloneAliasMap(aliasMap);
 
             this.extractFromStatement(
                 subStmt,
