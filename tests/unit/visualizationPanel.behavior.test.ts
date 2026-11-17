@@ -195,7 +195,6 @@ describe('VisualizationPanel behavior', () => {
             _isPinned: true,
             _currentSql: 'SELECT * FROM pinned_snapshot',
             _currentOptions: { dialect: 'PostgreSQL', fileName: 'snapshot.sql' },
-            _isStale: true,
             _postMessage: postMessage,
         };
 
@@ -205,8 +204,8 @@ describe('VisualizationPanel behavior', () => {
             command: 'refresh',
             sql: 'SELECT * FROM pinned_snapshot',
             options: { dialect: 'PostgreSQL', fileName: 'snapshot.sql' },
+            documentKey: 'snapshot.sql',
         });
-        expect(panel._isStale).toBe(false);
         expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith('sql-crack.refresh');
     });
 

@@ -366,7 +366,7 @@ If the extension behaves unexpectedly:
 2. If issues persist, disable/re-enable the extension
 3. For workspace index issues, click **Refresh** in the workspace panel to rebuild. To bypass saved cache restoration, set `sqlCrack.advanced.cacheTTLHours` to `0`, close the workspace panel, and run **SQL Crack: Analyze Workspace Dependencies** again. Restore the normal TTL afterward if you want cached startup.
 
-Pinned SQL snapshots and panel preferences are stored in VS Code's local workspace state. Use the `×` on a pinned query tab to remove that snapshot; closing its panel alone does not unpin it. The workspace index also uses local workspace state and is rebuilt when its version, dialect, scope or source files change. No SQL Crack cloud account or server stores this data.
+Pinned SQL snapshots and panel preferences are stored in VS Code's local workspace state. Use the `×` on a pinned query tab to remove that snapshot; closing its panel alone does not unpin it. A workspace keeps up to 50 pinned snapshots (4 MB of SQL in total). The workspace index also uses local workspace state and is rebuilt when its version, dialect, scope or source files change. No SQL Crack cloud account or server stores this data.
 
 ---
 

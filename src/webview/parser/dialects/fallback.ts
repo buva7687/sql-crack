@@ -414,13 +414,7 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
     }
 
     const upperSql = commentStripped.toUpperCase().trim();
-    let statementType = 'UNKNOWN';
-    if (upperSql.startsWith('SELECT')) { statementType = 'SELECT'; }
-    else if (upperSql.startsWith('INSERT')) { statementType = 'INSERT'; }
-    else if (upperSql.startsWith('UPDATE')) { statementType = 'UPDATE'; }
-    else if (upperSql.startsWith('DELETE')) { statementType = 'DELETE'; }
-    else if (upperSql.startsWith('MERGE')) {
-        statementType = 'MERGE';
+    if (upperSql.startsWith('MERGE')) {
         const whenClauses: Array<{ type: string; action: string }> = [];
         const whenMatchedPattern = /WHEN\s+MATCHED\s+(?:AND\s+[^:]+\s+)?THEN\s+(\w+)/gi;
         let match;
@@ -550,9 +544,6 @@ export function regexFallbackParse(sql: string, dialect: SqlDialect): ParseResul
             });
         }
     }
-    else if (upperSql.startsWith('CREATE')) { statementType = 'CREATE'; }
-    else if (upperSql.startsWith('ALTER')) { statementType = 'ALTER'; }
-    else if (upperSql.startsWith('DROP')) { statementType = 'DROP'; }
 
     const joinCount = edges.filter(edge => edge.clauseType === 'join').length;
     const stats: QueryStats = {

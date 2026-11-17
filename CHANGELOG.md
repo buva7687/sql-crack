@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Run SQL Flow parsing in its background worker again. The worker never started inside VS Code, so every parse ran on the panel's own thread, where a slow query froze the panel and the parse timeout could not stop it.
+- Keep saving a pinned SQL Flow tab's layout, zoom and toggles after you refresh it.
+- Jump to the correct source line when you click a node in a pinned tab made from a later statement in a file or from a selection. Pins created before this version still jump relative to the top of the file.
+- Keep a pinned tab's "Pinned" time when you reopen it.
+- Accept `sqlCrack.defaultDialect` values in any letter case, plus common names such as `postgres` and `mssql`; an unrecognised value now falls back to MySQL instead of failing every parse.
+- Clamp `sqlCrack.autoRefreshDelay` (100–5000 ms) and `sqlCrack.advanced.cacheTTLHours` (0–168) to their documented ranges when settings.json holds a value outside them.
+- Show Problems diagnostics only for editor documents, not for the copies VS Code opens in diff and source-control views.
+
+### Changed
+- Limit pinned SQL Flow tabs to 50 per workspace (4 MB of SQL in total). Pinning past the limit shows a message instead of growing workspace storage without bound.
+
+### Removed
+- Unused internal code: unreferenced renderer and layout helpers, message handlers nothing sent to, and the obsolete `.vsixignore` file. `noUnusedLocals` is now enforced for source files.
+
 ## [1.0.1] - 2026-11-16
 
 ### Fixed

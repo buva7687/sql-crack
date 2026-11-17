@@ -295,6 +295,77 @@ function handleWorkerError(event: ErrorEvent): void {
     rejectPendingWorkerRequests(new Error(message));
 }
 
+interface PreparedWorkerScript {
+    sourceUri: string;
+    scriptUrl: string;
+}
+
+let preparedWorkerScript: PreparedWorkerScript | null = null;
+let workerScriptPreparation: { sourceUri: string; promise: Promise<boolean> } | null = null;
+let unavailableWorkerUri: string | null = null;
+
+/**
+ * A worker script must share the page's origin (or be a blob:/data: URL).
+ * VS Code serves extension files from a different origin than the webview
+ * page, so `new Worker(asWebviewUri(...))` throws a SecurityError there.
+ */
+function workerScriptNeedsBlob(workerUri: string): boolean {
+    if (typeof fetch !== 'function' || typeof URL === 'undefined' || typeof URL.createObjectURL !== 'function') {
+        return false;
+    }
+    try {
+        const parsed = new URL(workerUri, window.location.href);
+        return parsed.protocol !== 'blob:'
+            && parsed.protocol !== 'data:'
+            && parsed.origin !== window.location.origin;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Make the parser worker script loadable before the first worker is created.
+ * Cross-origin scripts are fetched once and kept as a blob URL, which is
+ * reused for every respawned worker. Resolves false when the script cannot be
+ * loaded; parsing then stays on the main thread without retrying each parse.
+ */
+function isWorkerScriptReady(): boolean {
+    const workerUri = getParserWorkerUri();
+    return Boolean(workerUri)
+        && unavailableWorkerUri !== workerUri
+        && (preparedWorkerScript?.sourceUri === workerUri || !workerScriptNeedsBlob(workerUri as string));
+}
+
+async function prepareWorkerScript(): Promise<boolean> {
+    const workerUri = getParserWorkerUri();
+    if (!workerUri || unavailableWorkerUri === workerUri) {
+        return false;
+    }
+    if (workerScriptPreparation?.sourceUri !== workerUri) {
+        const promise = (async () => {
+            try {
+                const response = await fetch(workerUri);
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                const blob = new Blob([await response.text()], { type: 'text/javascript' });
+                preparedWorkerScript = { sourceUri: workerUri, scriptUrl: URL.createObjectURL(blob) };
+                return true;
+            } catch (error) {
+                unavailableWorkerUri = workerUri;
+                console.warn('[SQL Crack] Parser worker unavailable; parsing on the main thread.', error);
+                return false;
+            }
+        })();
+        workerScriptPreparation = { sourceUri: workerUri, promise };
+    }
+    return workerScriptPreparation.promise;
+}
+
+function resolveWorkerScriptUrl(workerUri: string): string {
+    return preparedWorkerScript?.sourceUri === workerUri ? preparedWorkerScript.scriptUrl : workerUri;
+}
+
 function getOrCreateWorker(): Worker {
     if (parserWorker) {
         return parserWorker;
@@ -305,7 +376,9 @@ function getOrCreateWorker(): Worker {
         throw new Error('Parser worker is not available in the current environment');
     }
 
-    parserWorker = new Worker(workerUri);
+    // Use the prepared same-origin blob URL when there is one: a webview page
+    // cannot construct a worker straight from its extension resource URL.
+    parserWorker = new Worker(resolveWorkerScriptUrl(workerUri));
     parserWorker.addEventListener('message', handleWorkerMessage as EventListener);
     parserWorker.addEventListener('error', handleWorkerError as EventListener);
     return parserWorker;
@@ -437,7 +510,13 @@ export async function parseAsync(
             return createCancelledParseResult(sql);
         }
 
-        if (isWorkerSupported()) {
+        // Awaits only while the worker script is first being fetched.
+        const workerReady = isWorkerSupported() && (isWorkerScriptReady() || await prepareWorkerScript());
+        if (isParseRequestStale(requestId, requestMode)) {
+            return createCancelledParseResult(sql);
+        }
+
+        if (workerReady) {
             try {
                 return await queueWorkerRequest<ParseResult>(requestId, 'parse', sql, {
                     type: 'parse',
@@ -493,7 +572,13 @@ export async function parseBatchAsync(
             return createCancelledBatchParseResult(sql);
         }
 
-        if (isWorkerSupported()) {
+        // Awaits only while the worker script is first being fetched.
+        const workerReady = isWorkerSupported() && (isWorkerScriptReady() || await prepareWorkerScript());
+        if (isParseRequestStale(requestId, requestMode)) {
+            return createCancelledBatchParseResult(sql);
+        }
+
+        if (workerReady) {
             try {
                 return await queueWorkerRequest<BatchParseResult>(requestId, 'parseBatch', sql, {
                     type: 'parseBatch',

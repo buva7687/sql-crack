@@ -3,7 +3,6 @@
 
 import { NODE_ACCENT_COLORS } from '../../shared/themeTokens';
 import { BADGE_COLORS, getHighContrastTextColor } from '../constants';
-import type { NodeAccentType } from '../../shared/themeTokens';
 import { prefersReducedMotion } from './motion';
 
 export interface LegendBarCallbacks {

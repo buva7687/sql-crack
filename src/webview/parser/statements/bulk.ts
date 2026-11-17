@@ -1,5 +1,5 @@
 import { Parser } from 'node-sql-parser';
-import type { FlowEdge, FlowNode, OptimizationHint, ParseResult, QueryStats, SqlDialect } from '../../types';
+import type { FlowEdge, FlowNode, ParseResult, QueryStats, SqlDialect } from '../../types';
 import type { ParserContext } from '../context';
 import { findMatchingParen, stripSqlComments } from '../dialects/preprocessing';
 

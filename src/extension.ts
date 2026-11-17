@@ -102,6 +102,9 @@ function isSqlLikeFileName(fileName: string): boolean {
     return lower.endsWith('.sql') || additionalExtensions.some(ext => lower.endsWith(ext));
 }
 
+/** Document schemes that receive SQL Crack diagnostics and quick fixes. */
+const DIAGNOSTIC_DOCUMENT_SCHEMES: ReadonlySet<string> = new Set(['file', 'untitled']);
+
 /**
  * Check if a document is SQL-like (either .sql or in additional extensions)
  */
@@ -208,7 +211,10 @@ export function activate(context: vscode.ExtensionContext) {
         const version = document.version;
         const isCurrent = () => diagnosticRequests.get(key) === request && document.version === version
             && shouldShowDiagnosticsInProblems() && !document.isClosed;
-        if (!isSqlLikeDocument(document)) {
+        // Only real editor documents get Problems entries. Diff and source-control
+        // views open the same SQL under other schemes (git:, ...), which would
+        // list every hint twice. Matches the quick-fix selector's schemes.
+        if (!isSqlLikeDocument(document) || !DIAGNOSTIC_DOCUMENT_SCHEMES.has(document.uri.scheme)) {
             diagnosticsCollection.delete(document.uri);
             return;
         }
@@ -547,7 +553,7 @@ export function activate(context: vscode.ExtensionContext) {
         parser.cancel(e.document.uri.toString());
         const config = getConfig();
         const diagnosticsAutoRefresh = config.get<boolean>('autoRefresh', true);
-        const autoRefreshDelay = config.get<number>('autoRefreshDelay', 500);
+        const autoRefreshDelay = normalizeAdvancedLimit(config.get<number>('autoRefreshDelay', 500), 500, 100, 5000);
 
         if (isSqlLikeDocument(e.document) && diagnosticsAutoRefresh && shouldShowDiagnosticsInProblems()) {
             // Debounce per document URI so concurrent edits across files don't

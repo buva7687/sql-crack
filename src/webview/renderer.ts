@@ -3,12 +3,10 @@ import {
     FlowNode,
     FlowEdge,
     ColumnFlow,
-    LineagePathStep,
     ParseResult,
     QueryStats,
     OptimizationHint,
     ColumnLineage,
-    SqlDialect,
     ViewState,
     CloudViewState,
     FocusMode,
@@ -20,12 +18,10 @@ import {
     getNodeColor,
     getHighContrastTextColor,
     getTransformationColor,
-    NODE_COLORS,
     UI_COLORS,
     EDGE_COLORS,
     BADGE_COLORS,
     CONDITION_COLORS,
-    STATUS_COLORS,
     getColorblindMode,
     setColorblindMode as setGlobalColorblindMode,
     getEdgeDashPattern,
@@ -41,7 +37,6 @@ import {
     isLegendBarVisible,
     getLegendBarHeight,
     createCommandBar,
-    showCommandBar,
     hideCommandBar,
     toggleCommandBar,
     isCommandBarVisible,
@@ -98,10 +93,8 @@ import {
     updateCloudAndArrowFeature,
 } from './rendering/cloudPositioning';
 import {
-    layoutSubflowNodes as layoutSubflowNodesFeature,
     layoutSubflowNodesVertical as layoutSubflowNodesVerticalFeature,
     renderCloudSubflow as renderCloudSubflowFeature,
-    renderSubflow as renderSubflowFeature,
 } from './rendering/cloudRenderer';
 import {
     applyClusteringFeature,
@@ -139,7 +132,6 @@ import {
     COLUMN_LINEAGE_BANNER_TEXT,
     COLUMN_LINEAGE_UNAVAILABLE_BANNER_TEXT,
     shouldEnableColumnLineage,
-    shouldShowTraceColumnsAction,
 } from './columnLineageUx';
 import { extractSqlSnippet } from './sqlSnippet';
 import { shouldShowMinimap } from './minimapVisibility';
@@ -149,7 +141,6 @@ import {
     fitViewFeature,
     getConnectedNodesFeature,
     getKeyboardNavigationNodesFeature,
-    isNodeInViewportFeature,
     navigateToAdjacentNodeFeature,
     navigateToConnectedNodeFeature,
     navigateToSiblingNodeFeature,
@@ -184,7 +175,6 @@ import {
     clearLineageHighlightsFeature,
     ensureColumnLineagePanelScrollbarStylesFeature,
     hideColumnLineagePanelFeature,
-    highlightColumnSourcesFeature,
     highlightLineageNodesFeature,
     showColumnLineagePanelFeature,
     showLineagePathFeature,
@@ -2067,11 +2057,6 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
     renderCteNodeVisual(node, group, isExpanded, hasChildren, getContainerNodeRendererDeps());
 }
 
-// Layout children nodes using dagre for subflow visualization
-function layoutSubflowNodes(children: FlowNode[], edges: FlowEdge[]): { width: number; height: number } {
-    return layoutSubflowNodesFeature(children, edges);
-}
-
 // Layout children nodes VERTICALLY (top to bottom) for cloud visualization
 function layoutSubflowNodesVertical(children: FlowNode[], edges: FlowEdge[]): { width: number; height: number } {
     return layoutSubflowNodesVerticalFeature(children, edges);
@@ -2104,32 +2089,6 @@ function renderCloudSubflow(
     });
 }
 
-// Render the subflow (children and edges) inside a container node
-function renderSubflow(
-    parentNode: FlowNode,
-    children: FlowNode[],
-    childEdges: FlowEdge[],
-    group: SVGGElement,
-    offsetX: number,
-    offsetY: number,
-    containerWidth: number,
-    containerHeight: number
-): void {
-    renderSubflowFeature({
-        childEdges,
-        children,
-        containerHeight,
-        containerWidth,
-        getNodeIcon,
-        group,
-        isDarkTheme: state.isDarkTheme,
-        offsetX,
-        offsetY,
-        parentNode,
-        truncate,
-    });
-}
-
 function renderWindowNode(node: FlowNode, group: SVGGElement): void {
     renderWindowNodeVisual(node, group, getNodeVisualRendererDeps());
 }
@@ -2140,30 +2099,6 @@ function renderAggregateNode(node: FlowNode, group: SVGGElement): void {
 
 function renderCaseNode(node: FlowNode, group: SVGGElement): void {
     renderCaseNodeVisual(node, group, getNodeVisualRendererDeps());
-}
-
-function toggleNodeExpansion(node: FlowNode): void {
-    node.expanded = !node.expanded;
-
-    // Recalculate height
-    if (node.expanded && node.children) {
-        node.height = 70 + node.children.length * 30;
-    } else {
-        node.height = 50;
-    }
-
-    // Re-render (this is a simple approach; a more efficient one would update in place)
-    const currentResult: ParseResult = {
-        nodes: currentNodes,
-        edges: currentEdges,
-        stats: currentStats!,
-        hints: currentHints,
-        sql: currentSql,
-        columnLineage: currentColumnLineage,
-        columnFlows: currentColumnFlows,
-        tableUsage: currentTableUsage
-    };
-    render(currentResult);
 }
 
 function renderEdge(edge: FlowEdge, parent: SVGGElement): void {
@@ -2423,18 +2358,6 @@ function navigateToSiblingNode(currentNode: FlowNode, direction: 'next' | 'prev'
         onMoveToNode: (node) => {
             moveKeyboardFocusToNode(node);
         },
-    });
-}
-
-/**
- * Check if a node is visible within the current viewport
- */
-function isNodeInViewport(node: FlowNode, margin: number = 50): boolean {
-    return isNodeInViewportFeature({
-        node,
-        margin,
-        svg,
-        state,
     });
 }
 
@@ -2863,13 +2786,6 @@ function clearSearch(): void {
     });
 }
 
-export function getSearchResultCount(): { current: number; total: number } {
-    return {
-        current: state.currentSearchIndex + 1,
-        total: state.searchResults.length
-    };
-}
-
 export function nextSearchResult(): void {
     navigateSearch(1);
 }
@@ -3000,15 +2916,6 @@ function truncate(str: string, maxLen: number): string {
     return truncateCodePoints(str, maxLen);
 }
 
-function lightenColor(hex: string, percent: number): string {
-    const num = parseInt(hex.replace('#', ''), 16);
-    const amt = Math.round(2.55 * percent);
-    const R = Math.min(255, (num >> 16) + amt);
-    const G = Math.min(255, ((num >> 8) & 0x00FF) + amt);
-    const B = Math.min(255, (num & 0x0000FF) + amt);
-    return `#${(1 << 24 | R << 16 | G << 8 | B).toString(16).slice(1)}`;
-}
-
 function notifyRendererStateChanged(): void {
     document.dispatchEvent(new CustomEvent('layout-state-changed'));
 }
@@ -3016,22 +2923,6 @@ function notifyRendererStateChanged(): void {
 // ============================================================
 // FEATURE: Color Legend
 // ============================================================
-
-const NODE_TYPE_INFO: Record<string, { color: string; icon: string; description: string }> = {
-    table: { color: NODE_COLORS.table, icon: '⊞', description: 'Source table' },
-    filter: { color: NODE_COLORS.filter, icon: '⧩', description: 'WHERE/HAVING filter' },
-    join: { color: NODE_COLORS.join, icon: '⋈', description: 'JOIN operation' },
-    aggregate: { color: NODE_COLORS.aggregate, icon: 'Σ', description: 'GROUP BY aggregation' },
-    operation: { color: NODE_COLORS.operation, icon: '⚙', description: 'Operation step' },
-    sort: { color: NODE_COLORS.sort, icon: '↕', description: 'ORDER BY sorting' },
-    limit: { color: NODE_COLORS.limit, icon: '⊟', description: 'LIMIT clause' },
-    select: { color: NODE_COLORS.select, icon: '▤', description: 'Column projection' },
-    result: { color: NODE_COLORS.result, icon: '◉', description: 'Query output' },
-    cte: { color: NODE_COLORS.cte, icon: '↻', description: 'Common Table Expression' },
-    union: { color: NODE_COLORS.union, icon: '∪', description: 'Set operation' },
-    subquery: { color: NODE_COLORS.subquery, icon: '⊂', description: 'Subquery/Derived table' },
-    window: { color: NODE_COLORS.window, icon: '▦', description: 'Window function' },
-};
 
 /** @deprecated Legend content is now managed by the bottom legend bar module */
 function updateLegendPanel(): void {
@@ -3335,23 +3226,6 @@ function getConnectedNodes(nodeId: string): Set<string> {
 // ============================================================
 // FEATURE: Column Flow Highlighting
 // ============================================================
-
-export function highlightColumnSources(columnName: string): void {
-    highlightColumnSourcesFeature({
-        columnName,
-        currentColumnLineage,
-        currentNodes,
-        currentEdges,
-        mainGroup,
-        state,
-        edgeColors: {
-            default: EDGE_COLORS.default,
-            defaultLight: EDGE_COLORS.defaultLight,
-            focus: EDGE_COLORS.focus,
-            columnLineage: EDGE_COLORS.columnLineage,
-        },
-    });
-}
 
 // ============================================================
 // FEATURE: SQL Preview Panel

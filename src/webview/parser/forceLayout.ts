@@ -266,34 +266,3 @@ function normalizePositions(nodes: FlowNode[]): void {
     });
 }
 
-/**
- * Calculate layout metrics for debugging/optimization
- */
-export function getLayoutMetrics(nodes: FlowNode[], edges: FlowEdge[]): {
-    nodeCount: number;
-    edgeCount: number;
-    averageConnections: number;
-    maxConnections: number;
-} {
-    if (nodes.length === 0) {
-        return { nodeCount: 0, edgeCount: 0, averageConnections: 0, maxConnections: 0 };
-    }
-
-    const connections = new Map<string, number>();
-    nodes.forEach(n => connections.set(n.id, 0));
-    edges.forEach(e => {
-        connections.set(e.source, (connections.get(e.source) || 0) + 1);
-        connections.set(e.target, (connections.get(e.target) || 0) + 1);
-    });
-
-    const connectionCounts = Array.from(connections.values());
-    const avg = connectionCounts.reduce((a, b) => a + b, 0) / connectionCounts.length;
-    const max = Math.max(...connectionCounts);
-
-    return {
-        nodeCount: nodes.length,
-        edgeCount: edges.length,
-        averageConnections: avg,
-        maxConnections: max
-    };
-}

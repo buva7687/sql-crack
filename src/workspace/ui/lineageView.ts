@@ -708,7 +708,6 @@ export class LineageView {
     ): string {
         const {
             showColumns = false,
-            showTransformations = true,
             direction = 'horizontal'
         } = options;
 

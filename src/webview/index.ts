@@ -1634,12 +1634,13 @@ function createToolbarCallbacks(): ToolbarCallbacks {
         },
         onPinVisualization: (sql: string, dialect: SqlDialect, name: string) => {
             if (window.vscodeApi) {
-                const { sql: querySql, name: queryName } = getCurrentQuerySql();
+                const { sql: querySql, name: queryName, lineOffset } = getCurrentQuerySql();
                 window.vscodeApi.postMessage({
                     command: 'pinVisualization',
                     sql: querySql,
                     dialect: currentDialect,
-                    name: queryName
+                    name: queryName,
+                    lineOffset
                 });
             }
         },
@@ -2001,22 +2002,29 @@ function updateBatchTabsUI(): void {
     });
 }
 
-function getCurrentQuerySql(): { sql: string; name: string } {
+function getCurrentQuerySql(): { sql: string; name: string; lineOffset: number } {
     let sqlToPin = window.initialSqlCode || '';
     let queryName = window.fileName || 'Query';
+    // Node lines are relative to the pinned statement once it is parsed alone,
+    // so report how many lines precede it in the SQL this page was given.
+    let lineOffset = 0;
+    const statementStartLine = (index: number): number =>
+        Math.max(0, (batchResult?.queryLineRanges?.[index]?.startLine ?? 1) - 1);
 
     if (batchResult && batchResult.queries.length > 1) {
         const currentQuery = batchResult.queries[currentQueryIndex];
         if (currentQuery && currentQuery.sql) {
             sqlToPin = currentQuery.sql;
             queryName = `${(window.fileName || 'Query').replace('.sql', '')} Q${currentQueryIndex + 1}`;
+            lineOffset = statementStartLine(currentQueryIndex);
         }
     } else if (batchResult && batchResult.queries.length === 1) {
         const currentQuery = batchResult.queries[0];
         if (currentQuery && currentQuery.sql) {
             sqlToPin = currentQuery.sql;
+            lineOffset = statementStartLine(0);
         }
     }
 
-    return { sql: sqlToPin, name: queryName };
+    return { sql: sqlToPin, name: queryName, lineOffset };
 }

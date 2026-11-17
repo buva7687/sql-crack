@@ -18,6 +18,7 @@ import {
 import { WorkspaceScanner } from './scanner';
 import { DiskIndexCache } from './diskIndexCache';
 import { normalizeFileExtensions } from '../shared/fileExtensions';
+import { normalizeAdvancedLimit } from '../shared/limits';
 import { getQualifiedKey, IdentifierQualification, normalizeIdentifier } from './identifiers';
 import { logger } from '../logger';
 
@@ -1107,7 +1108,7 @@ export class IndexManager {
     private async loadCachedIndex(currentFileCount: number): Promise<WorkspaceIndex | null> {
         // Check advanced settings
         const config = vscode.workspace.getConfiguration('sqlCrack.advanced');
-        const cacheTTLHours = config.get<number>('cacheTTLHours', DEFAULT_CACHE_TTL_HOURS);
+        const cacheTTLHours = normalizeAdvancedLimit(config.get<number>('cacheTTLHours', DEFAULT_CACHE_TTL_HOURS), DEFAULT_CACHE_TTL_HOURS, 0, 168);
 
         // If TTL is 0, caching is disabled
         if (cacheTTLHours === 0) {
@@ -1440,7 +1441,7 @@ export class IndexManager {
         if (!this.index) {return true;}
 
         const config = vscode.workspace.getConfiguration('sqlCrack.advanced');
-        const cacheTTLHours = config.get<number>('cacheTTLHours', DEFAULT_CACHE_TTL_HOURS);
+        const cacheTTLHours = normalizeAdvancedLimit(config.get<number>('cacheTTLHours', DEFAULT_CACHE_TTL_HOURS), DEFAULT_CACHE_TTL_HOURS, 0, 168);
 
         // If TTL is 0, always consider stale (caching disabled)
         if (cacheTTLHours === 0) {return true;}

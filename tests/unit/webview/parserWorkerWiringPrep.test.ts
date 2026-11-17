@@ -20,7 +20,7 @@ describe('parser worker wiring prep', () => {
     it('adds worker support detection and a worker-backed parser path in parser client', () => {
         expect(parserClientSource).toContain('isWorkerSupported(): boolean');
         expect(parserClientSource).toContain("typeof Worker !== 'undefined'");
-        expect(parserClientSource).toContain('new Worker(workerUri)');
+        expect(parserClientSource).toContain('new Worker(resolveWorkerScriptUrl(workerUri))');
         expect(parserClientSource).toContain('cancelPendingParse(): void');
     });
 
@@ -50,7 +50,7 @@ describe('parser worker wiring prep', () => {
 
     it('instantiates worker from injected URI in parserClient worker manager path', () => {
         expect(parserClientSource).toContain('getParserWorkerUri()');
-        expect(parserClientSource).toContain('new Worker(workerUri)');
+        expect(parserClientSource).toContain('new Worker(resolveWorkerScriptUrl(workerUri))');
         expect(parserClientSource).toContain('queueWorkerRequest<ParseResult>');
         expect(parserClientSource).toContain('queueWorkerRequest<BatchParseResult>');
     });

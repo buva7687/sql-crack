@@ -84,16 +84,6 @@ describe('visualizationPanel.ts', () => {
     });
 
     describe('webview message handling', () => {
-        it('handles error messages', () => {
-            expect(source).toContain("case 'error':");
-            expect(source).toContain('showErrorMessage(message.text)');
-        });
-
-        it('handles info messages', () => {
-            expect(source).toContain("case 'info':");
-            expect(source).toContain('showInformationMessage(message.text)');
-        });
-
         it('handles goToLine navigation', () => {
             expect(source).toContain("case 'goToLine':");
             expect(source).toContain('this._goToLine(message.line)');
@@ -156,7 +146,7 @@ describe('visualizationPanel.ts', () => {
         it('validates a finite integer line and clamps to line 1 before Position', () => {
             expect(source).toContain('Number.isFinite(line)');
             expect(source).toContain('const safeLine = Math.max(1, Math.floor(line))');
-            expect(source).toContain('const zeroBasedLine = safeLine - 1 + (this._currentOptions.sourceRange?.start.line ?? 0);');
+            expect(source).toContain('const zeroBasedLine = safeLine - 1 + getSourceLineOffset(this._currentOptions);');
             expect(source).toContain('new vscode.Position(zeroBasedLine, 0)');
         });
 
@@ -468,9 +458,6 @@ describe('visualizationPanel refresh flow', () => {
         expect(source).toContain('currentPanel._currentOptions = options');
     });
 
-    it('clears stale flag', () => {
-        expect(source).toContain('currentPanel._isStale = false');
-    });
 });
 
 describe('visualizationPanel stale state', () => {
@@ -478,7 +465,6 @@ describe('visualizationPanel stale state', () => {
 
     it('marks panel as stale', () => {
         expect(source).toContain('public static markAsStale()');
-        expect(source).toContain('currentPanel._isStale = true');
     });
 
     it('posts markStale message to webview', () => {

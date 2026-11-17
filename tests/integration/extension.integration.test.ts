@@ -20,22 +20,22 @@ describe('extension.ts integration', () => {
             expect(normalizeDialect('Snowflake')).toBe('Snowflake');
             expect(normalizeDialect('SQLite')).toBe('SQLite');
             expect(normalizeDialect('Hive')).toBe('Hive');
-            expect(normalizeDialect('Presto')).toBe('Presto');
+            expect(normalizeDialect('Presto')).toBe('Trino');
             expect(normalizeDialect('Trino')).toBe('Trino');
         });
 
-        it('handles case-sensitive input (does not lowercase)', () => {
-            expect(normalizeDialect('sql server')).toBe('sql server');
-            expect(normalizeDialect('pl/sql')).toBe('pl/sql');
-            expect(normalizeDialect('mysql')).toBe('mysql');
+        it('matches known dialects case-insensitively', () => {
+            expect(normalizeDialect('sql server')).toBe('TransactSQL');
+            expect(normalizeDialect('pl/sql')).toBe('Oracle');
+            expect(normalizeDialect('mysql')).toBe('MySQL');
         });
 
-        it('handles empty string', () => {
-            expect(normalizeDialect('')).toBe('');
+        it('falls back to MySQL for an empty string', () => {
+            expect(normalizeDialect('')).toBe('MySQL');
         });
 
-        it('handles whitespace-only input', () => {
-            expect(normalizeDialect('   ')).toBe('   ');
+        it('falls back to MySQL for whitespace-only input', () => {
+            expect(normalizeDialect('   ')).toBe('MySQL');
         });
     });
 });

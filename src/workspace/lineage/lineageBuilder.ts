@@ -392,7 +392,7 @@ export class LineageBuilder implements LineageGraph {
 
         // Add column nodes if enabled
         if (this.options.includeColumns) {
-            for (const [key, defs] of index.definitionMap.entries()) {
+            for (const defs of index.definitionMap.values()) {
                 for (const def of defs) {
                     const tableKey = getDefinitionKey(def);
                     const nodeId = this.getTableNodeId(def.type, tableKey);

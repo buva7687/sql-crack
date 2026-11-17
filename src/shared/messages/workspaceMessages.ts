@@ -1,7 +1,7 @@
 // Typed message protocol for Workspace Dependencies webview panel
 // Discriminated unions on the `command` field for compile-time safety.
 
-import type { GraphMode, SearchFilter } from '../../workspace/types';
+import type { SearchFilter } from '../../workspace/types';
 import type { ViewMode } from '../../workspace/ui/types';
 import type {
     WorkspaceErrorPayload,

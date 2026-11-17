@@ -484,7 +484,6 @@ export function zoomToNodeFeature(options: ZoomToNodeOptions): void {
         maxY = Math.max(maxY, visibleNode.y + visibleNode.height);
 
         if (visibleNode.expanded && (visibleNode.type === 'cte' || visibleNode.type === 'subquery') && visibleNode.children && visibleNode.children.length > 0) {
-            const cloudPadding = 15;
             const cloudGap = 30;
             const nodeHeight = 60;
             let cloudWidth = 160;

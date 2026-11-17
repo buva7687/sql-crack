@@ -16,16 +16,13 @@ export interface PinnedVisualizationInfo {
 // ─── Webview → Host messages ───
 
 export type SqlFlowWebviewMessage =
-    | { command: 'error'; text: string }
-    | { command: 'info'; text: string }
     | { command: 'requestRefresh' }
     | { command: 'persistUiState'; state: unknown; documentKey?: string | null }
     | { command: 'goToLine'; line: number }
     | { command: 'traceInWorkspaceLineage'; tableName: string; nodeType: 'table' | 'view' }
     | { command: 'requestFullscreen'; enable: boolean }
-    | { command: 'pinVisualization'; sql?: string; dialect?: string; name?: string }
+    | { command: 'pinVisualization'; sql?: string; dialect?: string; name?: string; lineOffset?: number }
     | { command: 'changeViewLocation'; location: ViewLocation }
-    | { command: 'getViewLocationOptions' }
     | { command: 'openPinnedTab'; pinId: string }
     | { command: 'unpinTab'; pinId: string }
     | { command: 'savePng'; data: string; filename: string }

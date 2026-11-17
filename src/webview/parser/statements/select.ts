@@ -4,7 +4,6 @@ import type {
     FlowNode,
     SqlDialect
 } from '../../types';
-import { unwrapIdentifierValue } from '../astUtils';
 import { getSetOperationTree, type SetOperationTree } from './setOperations';
 import type { ParserContext } from '../context';
 import {

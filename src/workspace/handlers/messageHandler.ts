@@ -256,13 +256,6 @@ export class MessageHandler {
         this.postMessage(attachWorkspaceRequestId(msg, requestId));
     }
 
-    private setPanelHtml(html: string): void {
-        if (this._disposed) {
-            return;
-        }
-        this._context.panel.webview.html = html;
-    }
-
     public async handleMessage(message: WorkspaceWebviewMessage): Promise<void> {
         if (this._disposed) {
             return;
@@ -1081,7 +1074,7 @@ export class MessageHandler {
         const results: Array<{ id: string; name: string; type: string; filePath?: string }> = [];
         const queryLower = query.toLowerCase();
 
-        for (const [id, node] of lineageGraph.nodes) {
+        for (const node of lineageGraph.nodes.values()) {
             // Skip columns and external tables in search
             if (node.type === 'column' || node.type === 'external') {continue;}
 

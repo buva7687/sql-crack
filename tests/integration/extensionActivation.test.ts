@@ -409,7 +409,7 @@ describe('Extension Activation Wiring', () => {
             const mockVscode = require('vscode');
             mockVscode.__setMockConfig('sqlCrack', {
                 autoRefresh: true,
-                autoRefreshDelay: 50,
+                autoRefreshDelay: 100,
                 defaultDialect: 'MySQL',
             });
 
@@ -431,7 +431,7 @@ describe('Extension Activation Wiring', () => {
 
             expect(panelMock.markAsStale).toHaveBeenCalledTimes(1);
             panelMock.sourceDocumentUri = vscode.Uri.file('/workspace/new-source.sql');
-            jest.advanceTimersByTime(50);
+            jest.advanceTimersByTime(100);
 
             expect(panelMock.refresh).not.toHaveBeenCalled();
         });
@@ -448,7 +448,7 @@ describe('Extension Activation Wiring', () => {
             const mockVscode = require('vscode');
             mockVscode.__setMockConfig('sqlCrack', {
                 autoRefresh: true,
-                autoRefreshDelay: 50,
+                autoRefreshDelay: 100,
                 defaultDialect: 'PostgreSQL',
             });
 
@@ -468,7 +468,7 @@ describe('Extension Activation Wiring', () => {
                 reason: undefined,
             } as unknown as vscode.TextDocumentChangeEvent);
 
-            jest.advanceTimersByTime(50);
+            jest.advanceTimersByTime(100);
 
             expect(panelMock.refresh).toHaveBeenCalledWith('SELECT 1', {
                 dialect: 'PostgreSQL',
@@ -491,7 +491,7 @@ describe('Extension Activation Wiring', () => {
             const mockVscode = require('vscode');
             mockVscode.__setMockConfig('sqlCrack', {
                 autoRefresh: true,
-                autoRefreshDelay: 50,
+                autoRefreshDelay: 100,
                 'advanced.showDiagnosticsInProblems': true,
             });
 
@@ -512,7 +512,7 @@ describe('Extension Activation Wiring', () => {
                 reason: undefined,
             } as unknown as vscode.TextDocumentChangeEvent);
 
-            jest.advanceTimersByTime(50);
+            jest.advanceTimersByTime(100);
 
             await Promise.resolve();
             await Promise.resolve();
@@ -539,7 +539,7 @@ describe('Extension Activation Wiring', () => {
             const mockVscode = require('vscode');
             mockVscode.__setMockConfig('sqlCrack', {
                 autoRefresh: true,
-                autoRefreshDelay: 50,
+                autoRefreshDelay: 100,
                 'advanced.showDiagnosticsInProblems': true,
             });
 
@@ -557,7 +557,7 @@ describe('Extension Activation Wiring', () => {
                 } as unknown as vscode.TextDocumentChangeEvent);
             }
             documentCloseHandler?.(closed);
-            jest.advanceTimersByTime(50);
+            jest.advanceTimersByTime(100);
 
             expect(diagnostics.delete).toHaveBeenCalledWith(closed.uri);
             await Promise.resolve();
