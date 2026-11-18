@@ -32,6 +32,9 @@ export {
 } from './stringUtils';
 export type { StripSqlCommentsOptions } from './stringUtils';
 export { unwrapIdentifierValue } from './astUtils';
+export { getQueryScopeOffsets, visitQueryScopes } from './queryScopes';
+export { getAstIdentifier, getRelationIdentifiers, getSqlIdentifierKey, getSqlRelationIdentifiers, getStarQualifier, tokenizeSqlIdentifiers } from './sqlIdentifiers';
+export type { SqlIdentifier } from './sqlIdentifiers';
 export { getSetOperationTree } from './setOperations';
 export type { SetOperationTree } from './setOperations';
 export { TextOffsetIndex, buildSegmentStarts, countStartsAtOrBefore } from './textOffsets';

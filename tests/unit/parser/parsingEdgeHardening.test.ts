@@ -50,7 +50,7 @@ describe('parsing edge hardening guards', () => {
 
     it('preserves temp-table identifiers when normalizing SQL for advanced issue detection', () => {
         const source = readFileSync(join(__dirname, '../../../src/webview/parser/hints/advancedIssues.ts'), 'utf8');
-        expect(source).toContain("import { escapeRegex, stripSqlComments } from '../../../shared';");
+        expect(source).toMatch(/import \{[^}]*\bescapeRegex\b[^}]*\bstripSqlComments\b[^}]*\} from '\.\.\/\.\.\/\.\.\/shared';/);
         expect(source).toContain('const fullNormalizedSql = stripSqlComments(sql).replace(/\\s+/g, \' \').trim();');
     });
 
@@ -58,7 +58,7 @@ describe('parsing edge hardening guards', () => {
         const source = readFileSync(join(__dirname, '../../../src/webview/parser/hints/advancedIssues.ts'), 'utf8');
         expect(source).toContain("import { maskStringsAndComments } from '../dialects/preprocessing';");
         expect(source).toContain('maskedNormalizedSql ??= maskStringsAndComments(fullNormalizedSql);');
-        expect(source).toContain('extractCteBodyScope(fullNormalizedSql, maskedNormalizedSql, cteName)');
+        expect(source).toContain('extractCteBodyScope(fullNormalizedSql, maskedNormalizedSql, cteName, context.dialect)');
         expect(source).toContain('const cteMatch = ctePattern.exec(maskedSql);');
     });
 

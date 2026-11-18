@@ -952,11 +952,11 @@ function processFromItem(
     if (!tableName) { return null; }
 
     ctx.stats.tables++;
-    trackTableUsage(runtime, tableName);
     const tableId = genId(runtime, 'table');
     const tableAlias = getAstString(fromItem.as)?.trim() || undefined;
     // Determine if this is a CTE reference
     const cteKey = getCteReferenceKey(fromItem, cteNames, ctx.dialect);
+    if (cteKey === undefined) { trackTableUsage(runtime, tableName); }
     nodes.push({
         id: tableId,
         type: 'table',
@@ -1032,12 +1032,10 @@ function parseCteOrSubqueryInternals(
             } else if (!fromItem.join) {
                 const tableName = getTableName(fromItem);
                 if (tableName && tableName !== 'table') {
-                    // Track table usage for stats (including tables from CTEs and subqueries)
-                    trackTableUsage(runtime, tableName);
                     const tableId = genId(runtime, 'child_table');
                     const tableAlias = getAstString(fromItem.as)?.trim() || undefined;
                     const cteKey = getCteReferenceKey(fromItem, cteNames, ctx.dialect);
-                    if (cteKey !== undefined) { onCteReference?.(cteKey); }
+                    if (cteKey !== undefined) { onCteReference?.(cteKey); } else { trackTableUsage(runtime, tableName); }
                     nodes.push({
                         id: tableId,
                         type: 'table',
@@ -1073,9 +1071,8 @@ function parseCteOrSubqueryInternals(
                     const joinTable = getTableName(fromItem);
                     // Track table usage for joined tables in CTEs/subqueries
                     if (joinTable && joinTable !== 'table') {
-                        trackTableUsage(runtime, joinTable);
                         const cteKey = getCteReferenceKey(fromItem, cteNames, ctx.dialect);
-                        if (cteKey !== undefined) { onCteReference?.(cteKey); }
+                        if (cteKey !== undefined) { onCteReference?.(cteKey); } else { trackTableUsage(runtime, joinTable); }
                     }
                     // Extract join condition details
                     const joinDetails: string[] = [];

@@ -1,6 +1,7 @@
 import type { SqlDialect } from '../../types';
 import { getAstString } from './columns';
 import { getCteNameKey, getNormalizedFromAlias, getTableName } from './tables';
+import { getAstIdentifier, getRelationIdentifiers, getSqlIdentifierKey, getStarQualifier } from '../../../shared';
 
 export function getCteStatementAst(cte: any): any {
     return cte?.stmt?.ast || cte?.stmt || cte?.ast || cte?.expr?.ast || cte?.definition?.ast || cte?.definition || null;
@@ -13,11 +14,9 @@ export function getCteReferenceKey(
 ): string | undefined {
     // A qualified relation can never name a CTE.
     if (!names.size || !item?.table || item.db || item.schema || item.catalog) { return undefined; }
-    const table = getTableName(item);
-    const key = getCteNameKey(item.table, dialect);
-    // Some dialect ASTs unwrap quoted FROM identifiers to plain strings.
-    // Prefer the spelling of a matching declared identifier before folding.
-    if (names.has(table)) { return table; }
+    const source = getRelationIdentifiers(item)?.table;
+    const identifier = source ?? getAstIdentifier(item.table);
+    const key = identifier ? getSqlIdentifierKey({ ...identifier, quoted: identifier.quoted || Boolean(item.surround?.table) }, dialect) : getCteNameKey(item.table, dialect);
     if (names.has(key)) { return key; }
     return undefined;
 }
@@ -53,22 +52,27 @@ export function getSelectProjection(stmt: any, shapes: CteColumns, dialect: SqlD
     if (!columns.some(isWildcardProjection) || !Array.isArray(stmt.from)) { return columns; }
     const bindings = stmt.from.map((item: any) => ({
         qualifier: getNormalizedFromAlias(item) || getTableName(item),
+        qualifierIdentity: getRelationIdentifiers(item)?.alias ?? getRelationIdentifiers(item)?.table
+            ?? getAstIdentifier(item.as || item.table),
         key: getCteReferenceKey(item, shapes, dialect),
         using: item.using || /\bNATURAL\b/i.test(item.join || ''),
     }));
     return columns.flatMap(column => {
         if (!isWildcardProjection(column)) { return [column]; }
         const qualifier = getAstString(column?.expr?.table);
+        const qualifierIdentity = getStarQualifier(column.expr) ?? getAstIdentifier(column?.expr?.table);
         const selected = qualifier
-            ? bindings.filter((binding: { qualifier: string }) => binding.qualifier === qualifier)
+            ? bindings.filter((binding: { qualifierIdentity?: { value: string; quoted: boolean } }) => binding.qualifierIdentity && qualifierIdentity
+                && getSqlIdentifierKey(binding.qualifierIdentity, dialect) === getSqlIdentifierKey(qualifierIdentity, dialect))
             : bindings;
         if (selected.length === 0 || (qualifier && selected.length !== 1)) { return [column]; }
         if (selected.some((binding: { key?: string; using?: unknown }) => !binding.key || (!qualifier && binding.using))) {
             return [column];
         }
-        return selected.flatMap((binding: { qualifier: string; key: string }) =>
+        return selected.flatMap((binding: { qualifier: string; key: string; qualifierIdentity?: { quoted: boolean } }) =>
             shapes.get(binding.key)!.map(name => ({
-                expr: { type: 'column_ref', table: binding.qualifier, column: name },
+                expr: { type: 'column_ref', table: binding.qualifierIdentity?.quoted
+                    ? { type: 'double_quote_string', value: binding.qualifier } : binding.qualifier, column: name },
             }))
         );
     });

@@ -7,9 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.0.2] - 2026-11-17
+## [1.0.2] - 2026-11-18
 
 ### Fixed
+- Keep quoted CTE bindings separate from physical relations, expand unquoted qualified stars regardless of case, and preserve quoted alias identities in wildcard lineage.
+- Stop reporting columns selected through a quoted alias star as dead columns.
+- Show CROSS and NATURAL joins correctly while preserving explicitly quoted keyword aliases.
+- Exclude CTE references from Tables Used and repeated physical-table access hints.
 - Keep qualified physical relations separate from same-named CTEs and respect declaration order in nonrecursive WITH clauses. Recursive CTEs written without the RECURSIVE keyword still resolve their self-reference in Snowflake, SQLite, SQL Server, and Oracle.
 - Expand known CTE wildcard projections before mapping UNION outputs. Preserve explicit lineage where column positions are known.
 - Show table writes for parsed PostgreSQL and SQL Server SELECT INTO statements, display Athena UNNEST aliases correctly, and preserve hash comments in formatted MySQL-family SQL.

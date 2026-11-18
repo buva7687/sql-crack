@@ -1,1 +1,1 @@
-export { unwrapIdentifierValue } from '../../shared/astUtils';
+export { prepareSqlAst, repairJoinKeywordAliases, unwrapIdentifierValue } from '../../shared/astUtils';

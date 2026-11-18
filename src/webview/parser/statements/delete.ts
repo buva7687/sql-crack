@@ -1,3 +1,4 @@
+import { prepareSqlAst } from '../astUtils';
 import { Parser } from 'node-sql-parser';
 import type { FlowEdge, FlowNode, ParseResult, QueryStats, SqlDialect } from '../../types';
 import type { ParserContext } from '../context';
@@ -96,7 +97,7 @@ function splitTopLevelComma(input: string): string[] {
 
 function parseSelectAst(selectSql: string, dialect: SqlDialect = 'PostgreSQL'): any | null {
     try {
-        return SELECT_PARSER.astify(selectSql, { database: dialect });
+        return prepareSqlAst(SELECT_PARSER.astify(selectSql, { database: dialect }), selectSql, dialect);
     } catch {
         return null;
     }

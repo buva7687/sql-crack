@@ -1,3 +1,4 @@
+import { prepareSqlAst } from './parser/astUtils';
 import { Parser } from 'node-sql-parser';
 import { analyzePerformance } from './performanceAnalyzer';
 import {
@@ -1354,6 +1355,7 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
     try {
         let ast: any;
         let effectiveDialect = dialect;
+        let parsedSql = sql;
 
         const parseWithDialect = (targetDialect: SqlDialect, sqlText: string = sql): any => {
             // Oracle and Teradata are not supported by node-sql-parser; use proxy dialects
@@ -1361,7 +1363,9 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
                 : targetDialect === 'Teradata' ? 'MySQL'
                 : targetDialect;
             try {
-                return parser.astify(sqlText, { database: parserDialect });
+                const parsed = parser.astify(sqlText, { database: parserDialect });
+                parsedSql = sqlText;
+                return parsed;
             } catch (parseError) {
                 const postgresWindowCompatibilityAst = tryParsePostgresWindowCompatibilityAstFallback(
                     parser,
@@ -1445,6 +1449,7 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
             });
         }
         const statements = (Array.isArray(ast) ? ast : [ast]).filter(Boolean);
+        prepareSqlAst(statements, parsedSql, effectiveDialect);
 
         for (const stmt of statements) {
             processStatement(context, stmt, nodes, edges);
