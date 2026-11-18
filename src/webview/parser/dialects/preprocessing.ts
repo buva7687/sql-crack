@@ -1,5 +1,5 @@
 import type { SqlDialect } from '../../types';
-import { dialectSupportsHashComments, getDollarQuoteDelimiterAt, isPostgresJsonPathOperatorAt, maskSqlCommentsPreservingPositions } from '../../../shared';
+import { dialectSupportsHashComments, getDollarQuoteDelimiterAt, isPostgresJsonPathOperatorAt, maskSqlCommentsPreservingPositions, tokenizeSqlIdentifiers } from '../../../shared';
 import { preprocessJinjaTemplates } from './jinjaPreprocessor';
 
 interface TextRewrite {
@@ -241,8 +241,9 @@ export function normalizeSelectIntoTargets(sql: string, dialect: SqlDialect): st
         return null;
     }
     const tsql = dialect === 'TransactSQL';
-    const masked = maskStringsAndComments(sql, { hashComments: false });
-    const part = tsql ? String.raw`(?:\[[^\]\n]+\]|[A-Za-z_#][\w$#]*)` : String.raw`[A-Za-z_][\w$]*`;
+    const masked = maskSqlCommentsPreservingPositions(sql, { maskStringLiterals: true, hashComments: false, backslashEscapes: false, dollarQuotes: !tsql });
+    const structural = maskSqlCommentsPreservingPositions(sql, { maskQuotedText: true, hashComments: false, backslashEscapes: false, dollarQuotes: !tsql });
+    const part = tsql ? String.raw`(?:\[(?:[^\]]|\]\])+\]|"(?:[^"]|"")+"|[A-Za-z_#][\w$#]*)` : String.raw`(?:"(?:[^"]|"")+"|[A-Za-z_][\w$]*)`;
     const modifiers = tsql ? '()' : String.raw`((?:(?:TEMPORARY|TEMP|UNLOGGED)\s+)?(?:TABLE\s+)?)`;
     const pattern = new RegExp(
         String.raw`(?<!\b(?:INSERT|MERGE|IGNORE|OVERWRITE)\s+)\bINTO\s+${modifiers}(${part}(?:\s*\.\s*${part})*)(?=\s+FROM\b)`,
@@ -252,11 +253,13 @@ export function normalizeSelectIntoTargets(sql: string, dialect: SqlDialect): st
     let last = 0;
     for (const match of masked.matchAll(pattern)) {
         const [, modifier, target] = match;
-        if (!modifier && !target.includes('.')) { continue; }
-        const name = target.split(/\s*\.\s*/).map(piece => piece.replace(/^\[|\]$/g, '')).join('.');
+        if (!/^INTO\b/i.test(structural.slice(match.index))) { continue; }
+        const parts = tokenizeSqlIdentifiers(target, dialect).filter(token => token.quoted || token.value !== '.');
+        if (!modifier && parts.length === 1 && !target.includes(']]')) { continue; }
+        const name = parts.map(part => part.value).join('.');
         const targetStart = match.index + match[0].length - target.length;
         const modifierStart = targetStart - modifier.length;
-        result += sql.slice(last, modifierStart) + (tsql ? `[${name}]` : `"${name}"`);
+        result += sql.slice(last, modifierStart) + (tsql ? `[${name.replace(/\]/g, ']]')}]` : `"${name.replace(/"/g, '""')}"`);
         last = match.index + match[0].length;
     }
     return last === 0 ? null : result + sql.slice(last);

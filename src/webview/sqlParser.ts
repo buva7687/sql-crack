@@ -1,4 +1,4 @@
-import { prepareSqlAst } from './parser/astUtils';
+import { astifySql, prepareSqlAst } from './parser/astUtils';
 import { Parser } from 'node-sql-parser';
 import { analyzePerformance } from './performanceAnalyzer';
 import {
@@ -963,7 +963,7 @@ function tryParsePostgresWindowCompatibilityAstFallback(
     }
 
     try {
-        const ast = parser.astify(compatibilityRewrite.sql, { database: 'PostgreSQL' });
+        const ast = astifySql(parser, compatibilityRewrite.sql, 'PostgreSQL');
         restorePostgresCompatibilityWindowFunctionNames(ast, compatibilityRewrite.rewrites);
         pushHintOnce(context, {
             type: 'info',
@@ -1012,7 +1012,7 @@ function tryParseDialectProxyAstFallback(parser: Parser, sql: string, dialect: S
     }
 
     try {
-        return parser.astify(sql, { database: proxyDialect });
+        return astifySql(parser, sql, proxyDialect);
     } catch (e) {
         if (isDebugLoggingEnabled()) {
             console.debug('[sqlParser] AST parse failed:', e);
@@ -1363,7 +1363,7 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
                 : targetDialect === 'Teradata' ? 'MySQL'
                 : targetDialect;
             try {
-                const parsed = parser.astify(sqlText, { database: parserDialect });
+                const parsed = astifySql(parser, sqlText, parserDialect);
                 parsedSql = sqlText;
                 return parsed;
             } catch (parseError) {

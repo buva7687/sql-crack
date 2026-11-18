@@ -10,7 +10,7 @@ import {
     ExtractionOptions,
     DEFAULT_EXTRACTION_OPTIONS,
 } from './types';
-import { dialectSupportsBackslashEscapes, dialectSupportsHashComments, escapeRegex, getDollarQuoteDelimiterAt, isPostgresJsonPathOperatorAt, maskSqlCommentsPreservingPositions, quotedStringAllowsBackslashEscapes, stripSqlComments, TextOffsetIndex, unwrapIdentifierValue } from '../../shared';
+import { dialectSupportsBackslashEscapes, dialectSupportsHashComments, escapeRegex, getDollarQuoteDelimiterAt, isPostgresJsonPathOperatorAt, maskSqlCommentsPreservingPositions, quotedStringAllowsBackslashEscapes, TextOffsetIndex, unwrapIdentifierValue } from '../../shared';
 import { parseWorkspaceStatement, preprocessSqlForWorkspaceParsing } from '../parserConfig';
 import { getIdentifierSemantics } from '../identifiers';
 import { SCHEMA_SQL_RESERVED_WORDS } from './constants';
@@ -195,13 +195,16 @@ export class SchemaExtractor {
         // dispatch above does not visit, so scan the original offset-preserving
         // SQL view and merge the result with any preprocessed Redshift CTAS.
         for (const definition of this.extractSelectIntoDefinitions(sql, filePath, sourceViews, dialect)) {
-            const alreadyExtracted = definitions.some(existing =>
+            const alreadyExtracted = definitions.find(existing =>
                 existing.statementIndex === definition.statementIndex
                 && existing.name.toLowerCase() === definition.name.toLowerCase()
                 && (existing.schema || '').toLowerCase() === (definition.schema || '').toLowerCase()
                 && (existing.catalog || '').toLowerCase() === (definition.catalog || '').toLowerCase()
             );
-            if (!alreadyExtracted) {
+            if (alreadyExtracted) {
+                // Preserve normalized CTAS SQL needed by lineage, but navigate to the original statement.
+                alreadyExtracted.lineNumber = definition.lineNumber;
+            } else {
                 definitions.push(definition);
             }
         }
@@ -884,7 +887,7 @@ export class SchemaExtractor {
             }
 
             let sqlStart = statementStart;
-            while (sqlStart < sql.length && /\s/.test(sql[sqlStart])) {
+            while (sqlStart < sql.length && /\s/.test(sourceViews.structuralSql[sqlStart])) {
                 sqlStart++;
             }
             const statementIndex = this.getStatementIndexAt(sourceViews.structuralSql, statementStart);
@@ -1413,22 +1416,19 @@ export class SchemaExtractor {
         identifier: string
     ): { lineNumber: number; charIndex: number } | null {
         const escaped = escapeRegex(identifier);
+        const sourceViews = this.createSqlSearchViews(sql);
         const intoRegex = new RegExp(
             `\\bINTO\\s+(?:TEMP(?:ORARY)?(?:\\s+TABLE)?\\s+)?(?:\\w+\\.)?["'\`]?${escaped}["'\`]?`,
             'gi'
         );
 
         let match: RegExpExecArray | null;
-        while ((match = intoRegex.exec(sql)) !== null) {
-            const statementStart = sql.lastIndexOf(';', Math.max(0, match.index - 1)) + 1;
-            const statementPrefix = stripSqlComments(sql.slice(statementStart, match.index), {
-                dollarQuotes: this.dollarQuotes,
-                nestedBlockComments: this.nestedBlockComments,
-            }).toUpperCase();
-            if (!/\bSELECT\b/.test(statementPrefix)) {
+        while ((match = intoRegex.exec(sourceViews.searchableSql)) !== null) {
+            let statementStart = sourceViews.structuralSql.lastIndexOf(';', Math.max(0, match.index - 1)) + 1;
+            if (!this.isTopLevelSelectInto(sourceViews.structuralSql, statementStart, match.index)) {
                 continue;
             }
-
+            while (statementStart < sql.length && /\s/.test(sourceViews.structuralSql[statementStart])) { statementStart++; }
             const lineNumber = this.getLineNumberAtIndex(sql, statementStart);
             return { lineNumber, charIndex: statementStart };
         }

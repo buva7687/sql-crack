@@ -1,6 +1,7 @@
 // Lineage Builder - Build lineage graph from workspace index
 
 import * as fs from 'fs';
+import { astifySql } from '../../shared';
 import { logger } from '../../logger';
 import { getStatementRelations } from '../statementRelations';
 import {
@@ -1344,7 +1345,7 @@ export class LineageBuilder implements LineageGraph {
             let parsedSuccessfully = false;
             for (const dialect of CTE_PARSE_DIALECTS) {
                 try {
-                    const ast = parser.astify(statementSql, { database: dialect });
+                    const ast = astifySql(parser, statementSql, dialect);
                     const statements = Array.isArray(ast) ? ast : [ast];
                     for (const stmt of statements) {
                         const localNames = new Map<string, {name: string; filePath: string; lineNumber: number}>();

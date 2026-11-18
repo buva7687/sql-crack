@@ -1,4 +1,4 @@
-import { prepareSqlAst } from '../shared/astUtils';
+import { astifySql, prepareSqlAst } from '../shared/astUtils';
 import type { SqlDialect as WebviewSqlDialect } from '../webview/types';
 import { maskStringsAndComments, preprocessForParsing } from '../webview/parser/dialects/preprocessing';
 import type { Parser } from 'node-sql-parser';
@@ -17,7 +17,7 @@ export function preprocessSqlForWorkspaceParsing(sql: string, dialect: SqlDialec
 /** Parse compound view bodies separately when the parser's CREATE VIEW grammar rejects them. */
 export function parseWorkspaceStatement(parser: Parser, sql: string, database: string): ReturnType<Parser['astify']> {
     try {
-        return prepareSqlAst(parser.astify(sql, { database }), sql, database);
+        return prepareSqlAst(astifySql(parser, sql, database), sql, database);
     } catch (originalError) {
         // Match structural tokens only; quoted names, comments and strings may contain AS/UNION.
         const masked = maskStringsAndComments(sql);
@@ -28,13 +28,13 @@ export function parseWorkspaceStatement(parser: Parser, sql: string, database: s
         if (!as) { throw originalError; }
         try {
             const bodySql = sql.slice(as.index + as[0].length).replace(/;\s*$/, '');
-            const body = prepareSqlAst(parser.astify(bodySql, { database }), bodySql, database);
+            const body = prepareSqlAst(astifySql(parser, bodySql, database), bodySql, database);
             if (Array.isArray(body) || body.type !== 'select') { throw originalError; }
             const compound = body as unknown as { _next?: unknown; from?: Array<{ join?: string }> };
             if (!compound._next && !compound.from?.some(item => /^(?:UNION|INTERSECT|EXCEPT)(?:\s+(?:ALL|DISTINCT))?$/i.test(item.join || ''))) {
                 throw originalError;
             }
-            const header = parser.astify(sql.slice(0, as.index + as[0].length) + ' SELECT 1', { database });
+            const header = astifySql(parser, sql.slice(0, as.index + as[0].length) + ' SELECT 1', database);
             if (Array.isArray(header) || header.type !== 'create' || header.keyword !== 'view') { throw originalError; }
             return Object.assign(header, { select: body });
         } catch {

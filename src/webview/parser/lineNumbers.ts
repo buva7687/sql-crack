@@ -85,10 +85,10 @@ const TRANSPARENT_PAREN_BODY = /^\s*(?:SELECT|WITH|VALUES|\()/i;
 const SET_OPERATOR_BEFORE = /\b(?:UNION|INTERSECT|EXCEPT|MINUS)(?:\s+(?:ALL|DISTINCT))?\s*$/i;
 const CTE_BODY_BEFORE = /\bAS\s*(?:NOT\s+)?(?:MATERIALIZED\s*)?$/i;
 const JOIN_MODIFIER_BEFORE = /\b(?:LEFT|RIGHT|FULL|CROSS|NATURAL|OUTER|SEMI|ANTI|ASOF|POSITIONAL)\s+$/i;
-const TABLE_KEYWORD_CONTEXT = /\b(FROM|JOIN|INTO|USING|UPDATE|TABLE|ONLY|DELETE|MERGE|VIEW|EXISTS)\s+(?:(?:[\w$#]+|"[^"]*"|`[^`]*`|\[[^\]]*\])\s*\.\s*)*["`[]?$/i;
+const TABLE_KEYWORD_CONTEXT = /\b(FROM|JOIN|INTO|USING|UPDATE|TABLE|ONLY|DELETE|MERGE|VIEW|EXISTS)\s+(?:(?:[\w$#]+|"[^"]*"|`[^`]*`|\[(?:[^\]]|\]\])*\])\s*\.\s*)*["`[]?$/i;
 const TABLE_READ_KEYWORDS = new Set(['FROM', 'JOIN', 'USING', 'ONLY']);
 const CTE_DEFINITION_AFTER = /^["`\]]?\s*(?:\([^()]*\)\s*)?AS\s*(?:NOT\s+)?(?:MATERIALIZED\s*)?\(/i;
-const TABLE_COMMA_CONTEXT = /,\s*(?:(?:[\w$#]+|"[^"]*"|`[^`]*`|\[[^\]]*\])\s*\.\s*)*["`[]?$/i;
+const TABLE_COMMA_CONTEXT = /,\s*(?:(?:[\w$#]+|"[^"]*"|`[^`]*`|\[(?:[^\]]|\]\])*\])\s*\.\s*)*["`[]?$/i;
 const CLAUSE_KEYWORD = /\b(?:SELECT|FROM|WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|LIMIT|QUALIFY|WINDOW|ON|USING|JOIN|SET|VALUES|RETURNING|UPDATE|DELETE|INTO|UNION|INTERSECT|EXCEPT|MINUS)\b/gi;
 /** Clauses whose comma-separated items are table references. */
 const TABLE_LIST_CLAUSES: ReadonlySet<string> = new Set(['FROM', 'JOIN', 'ON', 'USING', 'UPDATE', 'DELETE']);
@@ -336,7 +336,9 @@ function assignScopedLineNumbers(nodes: FlowNode[], sql: string, childScope: boo
         let candidates = tableOccurrences.get(key);
         if (!candidates) {
             candidates = [];
-            const pattern = new RegExp(`(?<![\\w$#])${escapeRegex(tableName)}(?![\\w$#])`, 'gi');
+            const spellings = [escapeRegex(tableName)];
+            if (dialect === 'TransactSQL' && tableName.includes(']')) { spellings.push(escapeRegex(tableName.replace(/\]/g, ']]'))); }
+            const pattern = new RegExp(`(?<![\\w$#])(?:${spellings.join('|')})(?![\\w$#])`, 'gi');
             let match: RegExpExecArray | null;
             while ((match = pattern.exec(commentStripped)) !== null) {
                 const after = commentStripped.slice(match.index + match[0].length, match.index + match[0].length + 160);

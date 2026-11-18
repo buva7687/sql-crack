@@ -1,7 +1,43 @@
 import { getQueryScopeOffsets, visitQueryScopes } from './queryScopes';
 import { dialectSupportsBackslashEscapes, dialectSupportsHashComments, maskSqlCommentsPreservingPositions } from './stringUtils';
 import { normalizeDialect } from './dialect';
-import { annotateSqlIdentifiers } from './sqlIdentifiers';
+import { annotateSqlIdentifiers, tokenizeSqlIdentifiers } from './sqlIdentifiers';
+import type { Parser } from 'node-sql-parser';
+
+/** Parse escaped T-SQL bracket identifiers through request-local, collision-free names. */
+export function astifySql(parser: Pick<Parser, 'astify'>, sql: string, database: string): ReturnType<Parser['astify']> {
+    if (normalizeDialect(database) !== 'TransactSQL' || !sql.includes(']]')) { return parser.astify(sql, { database }); }
+    const identifiers = new Map<string, string>();
+    const source = sql.toLowerCase();
+    let rewritten = '';
+    let last = 0;
+    let nextId = 0;
+    for (const token of tokenizeSqlIdentifiers(sql, 'TransactSQL')) {
+        if (!token.quoted || sql[token.offset] !== '[' || !token.value.includes(']')) { continue; }
+        const original = `[${token.value.replace(/\]/g, ']]')}]`;
+        if (sql.slice(token.offset, token.offset + original.length) !== original) { continue; }
+        let placeholder: string;
+        do { placeholder = `__sql_crack_bracket_${nextId++}__`; } while (source.includes(placeholder));
+        identifiers.set(placeholder, token.value);
+        const end = token.offset + original.length;
+        rewritten += sql.slice(last, token.offset) + `[${placeholder}]`;
+        last = end;
+    }
+    if (!identifiers.size) { return parser.astify(sql, { database }); }
+    const ast = parser.astify(rewritten + sql.slice(last), { database });
+    const seen = new Set<object>();
+    const restore = (value: any): any => {
+        if (typeof value === 'string') {
+            // tableList/columnList metadata prefixes identifiers with `::`.
+            return identifiers.get(value) ?? value.split('::').map(part => identifiers.get(part) ?? part).join('::');
+        }
+        if (!value || typeof value !== 'object' || seen.has(value)) { return value; }
+        seen.add(value);
+        for (const key of Object.keys(value)) { value[key] = restore(value[key]); }
+        return value;
+    };
+    return restore(ast);
+}
 
 /**
  * Unwrap identifier-like AST nodes produced by node-sql-parser.

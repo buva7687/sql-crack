@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.2] - 2026-11-18
 
 ### Fixed
+- Navigate Workspace SELECT INTO definitions to their statement after leading comments.
+- Parse SQL Server escaped bracket identifiers such as `[weird]]name]` in write targets, source tables and columns without inventing partial-graph reads.
 - Keep quoted CTE bindings separate from physical relations, expand unquoted qualified stars regardless of case, and preserve quoted alias identities in wildcard lineage.
 - Stop reporting columns selected through a quoted alias star as dead columns.
 - Show CROSS and NATURAL joins correctly while preserving explicitly quoted keyword aliases.

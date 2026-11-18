@@ -1,4 +1,4 @@
-import { prepareSqlAst } from '../astUtils';
+import { astifySql, prepareSqlAst } from '../astUtils';
 import { Parser } from 'node-sql-parser';
 import type { FlowEdge, FlowNode, ParseResult, QueryStats } from '../../types';
 import type { ParserContext } from '../context';
@@ -277,11 +277,11 @@ function parseSelectAst(selectSql: string, dialect: ParserContext['dialect']): a
             : dialect;
 
     try {
-        return prepareSqlAst(parser.astify(selectSql, { database: parserDialect }), selectSql, dialect);
+        return prepareSqlAst(astifySql(parser, selectSql, parserDialect), selectSql, dialect);
     } catch {
         if (dialect === 'Redshift') {
             try {
-                return prepareSqlAst(parser.astify(selectSql, { database: 'PostgreSQL' }), selectSql, dialect);
+                return prepareSqlAst(astifySql(parser, selectSql, 'PostgreSQL'), selectSql, dialect);
             } catch {
                 return null;
             }
