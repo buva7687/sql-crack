@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-11-17
+
 ### Fixed
 - Keep qualified physical relations separate from same-named CTEs and respect declaration order in nonrecursive WITH clauses. Recursive CTEs written without the RECURSIVE keyword still resolve their self-reference in Snowflake, SQLite, SQL Server, and Oracle.
 - Expand known CTE wildcard projections before mapping UNION outputs. Preserve explicit lineage where column positions are known.
