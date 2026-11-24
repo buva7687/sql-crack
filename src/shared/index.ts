@@ -33,7 +33,7 @@ export {
 export type { StripSqlCommentsOptions } from './stringUtils';
 export { astifySql, unwrapIdentifierValue } from './astUtils';
 export { getQueryScopeOffsets, visitQueryScopes } from './queryScopes';
-export { getAstIdentifier, getRelationIdentifiers, getSqlIdentifierKey, getSqlRelationIdentifiers, getStarQualifier, tokenizeSqlIdentifiers } from './sqlIdentifiers';
+export { getAstIdentifier, getColumnQualifier, getRelationIdentifiers, getSqlIdentifierKey, getSqlRelationIdentifiers, getStarQualifier, tokenizeSqlIdentifiers } from './sqlIdentifiers';
 export type { SqlIdentifier } from './sqlIdentifiers';
 export { getSetOperationTree } from './setOperations';
 export type { SetOperationTree } from './setOperations';

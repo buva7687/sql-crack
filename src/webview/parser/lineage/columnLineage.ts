@@ -1,11 +1,16 @@
 // Column lineage extraction
 
 import { FlowNode, FlowEdge, ColumnLineage, SqlDialect } from '../../types';
-import { getAstIdentifier, getRelationIdentifiers, getSqlIdentifierKey, getSetOperationTree, type SetOperationTree } from '../../../shared';
+import { getAstIdentifier, getColumnQualifier, getRelationIdentifiers, getSqlIdentifierKey, getSetOperationTree, type SetOperationTree } from '../../../shared';
 import { getSelectSourceScope, getIncomingEdgeMap } from './sourceScope';
 
 import { getAstString, getNormalizedFromAlias, getTableName } from '../extractors';
 import { collectCteColumnShapes, getSelectProjection } from '../extractors/selectProjection';
+
+interface SourceBinding {
+    tableName: string;
+    alias?: string;
+}
 
 export function extractColumnLineage(stmt: any, nodes: FlowNode[], edges: FlowEdge[], dialect: SqlDialect = 'MySQL'): ColumnLineage[] {
     const nodeMap = new Map(nodes.map(node => [node.id, node]));
@@ -52,7 +57,7 @@ function extractSelectColumnLineage(stmt: any, columns: any[], nodes: FlowNode[]
     }
 
     // Build table alias map
-    const tableAliasMap = new Map<string, string>();
+    const tableAliasMap = new Map<string, SourceBinding>();
     if (stmt.from && Array.isArray(stmt.from)) {
         for (const fromItem of stmt.from) {
             const tableName = getTableName(fromItem);
@@ -60,7 +65,9 @@ function extractSelectColumnLineage(stmt: any, columns: any[], nodes: FlowNode[]
             if (tableName && alias) {
                 const source = getRelationIdentifiers(fromItem);
                 const identifier = source?.alias ?? source?.table ?? getAstIdentifier(alias)!;
-                tableAliasMap.set(getSqlIdentifierKey(identifier, dialect), tableName);
+                tableAliasMap.set(getSqlIdentifierKey(identifier, dialect), {
+                    tableName, alias: getNormalizedFromAlias(fromItem) || undefined,
+                });
             }
         }
     }
@@ -103,7 +110,7 @@ function extractSelectColumnLineage(stmt: any, columns: any[], nodes: FlowNode[]
 export function extractSourcesFromExpr(
     expr: any,
     sources: ColumnLineage['sources'],
-    tableAliasMap: Map<string, string>,
+    tableAliasMap: Map<string, SourceBinding>,
     tableNodes: FlowNode[],
     dialect: SqlDialect = 'MySQL'
 ): void {
@@ -115,17 +122,14 @@ export function extractSourcesFromExpr(
         const rawTable = expr.table;
         const tableAlias = getAstString(rawTable) || '';
 
-        let tableName = tableAlias;
-        const identifier = getAstIdentifier(rawTable);
+        const identifier = getColumnQualifier(expr) ?? getAstIdentifier(rawTable);
         const aliasKey = identifier ? getSqlIdentifierKey(identifier, dialect) : '';
-        if (tableAlias && tableAliasMap.has(aliasKey)) {
-            tableName = tableAliasMap.get(aliasKey) || tableAlias;
-        }
+        const binding = tableAlias ? tableAliasMap.get(aliasKey) : undefined;
+        const tableName = binding?.tableName || tableAlias;
 
         // Aliases identify table instances; labels do not distinguish self-joins.
-        const caseSensitive = identifier?.quoted && ['PostgreSQL', 'Redshift', 'Snowflake', 'Oracle'].includes(dialect);
-        const aliasNode = tableAlias ? tableNodes.find(n => n.label === tableName
-            && (caseSensitive ? n.alias === tableAlias : n.alias?.toLowerCase() === tableAlias.toLowerCase())) : undefined;
+        const aliasNode = binding ? tableNodes.find(n => n.label === tableName
+            && (binding.alias ? n.alias === binding.alias : !n.alias)) : undefined;
         const labelNodes = tableNodes.filter(n => n.label.toLowerCase() === tableName.toLowerCase());
         const tableNode = aliasNode || (labelNodes.length === 1 ? labelNodes[0] : undefined);
 

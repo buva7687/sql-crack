@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.2] - 2026-11-24
 
 ### Fixed
+- Resolve quoted SQL Flow column qualifiers to their source tables and keep case-distinct aliases attached to separate self-join instances.
 - Navigate Workspace SELECT INTO definitions to their statement after leading comments.
 - Parse SQL Server escaped bracket identifiers such as `[weird]]name]` in write targets, source tables and columns without inventing partial-graph reads.
 - Keep quoted CTE bindings separate from physical relations, expand unquoted qualified stars regardless of case, and preserve quoted alias identities in wildcard lineage.

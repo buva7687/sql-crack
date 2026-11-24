@@ -6,6 +6,7 @@ interface SqlToken extends SqlIdentifier { offset: number; depth: number; scope:
 interface RelationIdentifiers { table?: SqlIdentifier; alias?: SqlIdentifier }
 const relationIdentifiers = new WeakMap<object, RelationIdentifiers>();
 const starQualifiers = new WeakMap<object, SqlIdentifier>();
+const columnQualifiers = new WeakMap<object, SqlIdentifier>();
 
 export function getSqlIdentifierKey(identifier: SqlIdentifier, dialect: string): string {
     const sensitive = ['PostgreSQL', 'Redshift', 'Oracle', 'Snowflake'].includes(dialect);
@@ -22,6 +23,7 @@ export function getAstIdentifier(value: any): SqlIdentifier | undefined {
 
 export function getRelationIdentifiers(item: object): RelationIdentifiers | undefined { return relationIdentifiers.get(item); }
 export function getStarQualifier(expr: object): SqlIdentifier | undefined { return starQualifiers.get(expr); }
+export function getColumnQualifier(expr: object): SqlIdentifier | undefined { return columnQualifiers.get(expr); }
 
 /** Tokenize identifiers without treating comments or literal contents as SQL. */
 export function tokenizeSqlIdentifiers(sql: string, dialect: string): SqlToken[] {
@@ -76,7 +78,11 @@ function isIdentifier(token?: SqlToken): boolean {
     return Boolean(token && (token.quoted || /^[\p{L}_#$@]/u.test(token.value)));
 }
 
-function readSources(sql: string, dialect: string): { relations: Map<number, RelationIdentifiers[]>; stars: Map<number, SqlIdentifier[]> } {
+function readSources(sql: string, dialect: string): {
+    relations: Map<number, RelationIdentifiers[]>;
+    stars: Map<number, SqlIdentifier[]>;
+    columns: Map<number, Map<string, SqlIdentifier[]>>;
+} {
     const tokens = tokenizeSqlIdentifiers(sql, dialect);
     const closes = new Map<number, number>();
     const opens: number[] = [];
@@ -86,12 +92,25 @@ function readSources(sql: string, dialect: string): { relations: Map<number, Rel
     });
     const relations = new Map<number, RelationIdentifiers[]>();
     const stars = new Map<number, SqlIdentifier[]>();
+    const columns = new Map<number, Map<string, SqlIdentifier[]>>();
     const states = new Map<number, { depth: number; from: boolean; seenFrom: boolean; expect: boolean }>();
     for (let i = 0; i < tokens.length; i++) {
         const token = tokens[i];
         const keyword = token.quoted ? '' : token.value.toUpperCase();
         if (keyword === 'SELECT') { states.set(token.scope, { depth: token.depth, from: false, seenFrom: false, expect: false }); }
         const state = states.get(token.scope);
+        // Capture projected qualifiers at every expression depth. Proxy grammars
+        // discard their delimiters even when FROM aliases retain their identity.
+        const column = tokens[i + 2];
+        if (state && !state.seenFrom && isIdentifier(token) && tokens[i + 1]?.value === '.'
+            && (isIdentifier(column) || column?.value === '*')) {
+            const key = JSON.stringify([token.value, column.value]);
+            const byName = columns.get(token.scope) ?? new Map<string, SqlIdentifier[]>();
+            const qualifiers = byName.get(key) ?? [];
+            qualifiers.push(token);
+            byName.set(key, qualifiers);
+            columns.set(token.scope, byName);
+        }
         if (!state || token.depth !== state.depth) { continue; }
         if (!state.seenFrom && isIdentifier(token) && tokens[i + 1]?.value === '.' && tokens[i + 2]?.value === '*') {
             const list = stars.get(token.scope) ?? []; list.push(token); stars.set(token.scope, list);
@@ -118,7 +137,37 @@ function readSources(sql: string, dialect: string): { relations: Map<number, Rel
         const alias = next && isIdentifier(next) && (next.quoted || !NON_ALIASES.has(next.value.toUpperCase())) ? next : undefined;
         const list = relations.get(token.scope) ?? []; list.push({ table, alias }); relations.set(token.scope, list);
     }
-    return { relations, stars };
+    return { relations, stars, columns };
+}
+
+/** Match repeated references by name and SQL order, without entering child queries. */
+function annotateColumnQualifiers(statement: any, qualifiers: Map<string, SqlIdentifier[]> | undefined): void {
+    if (!qualifiers) { return; }
+    const expressions = new Map<string, object[]>();
+    const visit = (value: any): void => {
+        if (!value || typeof value !== 'object' || value.type === 'select') { return; }
+        if (Array.isArray(value)) { value.forEach(visit); return; }
+        if (value.type === 'column_ref') {
+            const table = getAstIdentifier(value.table);
+            const column = getAstIdentifier(value.column);
+            if (table && column) {
+                const key = JSON.stringify([table.value, column.value]);
+                const matches = expressions.get(key) ?? [];
+                matches.push(value);
+                expressions.set(key, matches);
+            }
+            return;
+        }
+        Object.values(value).forEach(visit);
+    };
+    visit(statement.columns);
+    for (const [key, matches] of expressions) {
+        const tokens = qualifiers.get(key);
+        // Do not guess when a grammar rewrote or omitted a projection.
+        if (tokens?.length === matches.length) {
+            matches.forEach((expr, index) => columnQualifiers.set(expr, tokens[index]));
+        }
+    }
 }
 
 export function getSqlRelationIdentifiers(sql: string, dialect: string): RelationIdentifiers[] {
@@ -129,6 +178,7 @@ export function getSqlRelationIdentifiers(sql: string, dialect: string): Relatio
 export function annotateSqlIdentifiers(ast: unknown, sql: string, dialect: string): void {
     const sources = readSources(sql, dialect);
     visitQueryScopes(ast, (statement, scope) => {
+        annotateColumnQualifiers(statement, sources.columns.get(scope));
         const from = statement.from;
         const relations = sources.relations.get(scope);
         if (Array.isArray(from) && relations?.length === from.length) {
