@@ -455,6 +455,10 @@ function assignScopedLineNumbers(nodes: FlowNode[], sql: string, childScope: boo
 
     const childBodies = new Map<FlowNode, number>();
     const onLineByJoin = new Map<string, number>();
+    // Claim SELECT INTO source reads before its write target, even when both
+    // occurrences have the same name. Otherwise the read consumes INTO.
+    const hasTransactSqlSelectInto = dialect === 'TransactSQL' && keywordLines.has('INTO')
+        && nodes.some(node => node.type === 'table' && node.accessMode === 'write' && node.operationType === 'CREATE_TABLE');
     for (const node of nodes) {
         targetDepth = childScope ? Math.max(0, (node.depth ?? 1) - 1) : 0;
         switch (node.type) {
@@ -462,7 +466,8 @@ function assignScopedLineNumbers(nodes: FlowNode[], sql: string, childScope: boo
                 // RENAME targets are labeled "old → new"; locate the old name.
                 const tableName = node.label.split(' → ')[0].trim();
                 const occurrence = tableName
-                    ? findTableOccurrence(tableName, dialect === 'PostgreSQL' && node.relationIdentity !== undefined && node.accessMode !== 'write')
+                    ? findTableOccurrence(tableName, (dialect === 'PostgreSQL' || hasTransactSqlSelectInto)
+                        && node.relationIdentity !== undefined && node.accessMode !== 'write')
                     : undefined;
                 if (occurrence !== undefined) {
                     node.startLine = occurrence.line;

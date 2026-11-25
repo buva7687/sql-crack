@@ -137,4 +137,34 @@ describe('CI parse performance gate', () => {
             expect(run.medianMs).toBeLessThanOrEqual(budgetMs);
         });
     });
+
+    it('keeps dead-column analysis responsive across many independently referenced CTEs', () => {
+        const cteCount = 140;
+        const ctes = Array.from({ length: cteCount }, (_, index) => {
+            const columns = Array.from({ length: 20 }, (_, ordinal) => `id${ordinal} AS c${index}_col${ordinal}`);
+            return `c${index} AS (SELECT ${columns.join(', ')} FROM source${index})`;
+        });
+        const joins = Array.from({ length: cteCount - 1 }, (_, index) =>
+            `JOIN c${index + 1} ON c0.c0_col0=c${index + 1}.c${index + 1}_col0`
+        );
+        const sql = `WITH ${ctes.join(', ')} SELECT c0.c0_col0 FROM c0 ${joins.join(' ')}`;
+        expect(Buffer.byteLength(sql)).toBeLessThan(100 * 1024);
+
+        parseSql(sql, 'PostgreSQL', { allowDialectFallback: false });
+        const durations: number[] = [];
+        for (let sample = 0; sample < SAMPLE_COUNT; sample++) {
+            const start = performance.now();
+            const result = parseSql(sql, 'PostgreSQL', { allowDialectFallback: false });
+            durations.push(performance.now() - start);
+            // Do not satisfy the budget by skipping analysis or returning a fallback.
+            expect(result.error).toBeUndefined();
+            expect(result.partial).toBeUndefined();
+            expect(result.stats.ctes).toBe(cteCount);
+            expect(result.tableUsage.size).toBe(cteCount);
+            expect(result.hints.some(hint => hint.message.includes('dead column'))).toBe(true);
+        }
+        const budgetMs = 1500 * PERF_BUDGET_MULTIPLIER;
+        console.log(`[perf] independent CTE dead-column analysis: median ${median(durations).toFixed(2)}ms; budget ${budgetMs}ms`);
+        expect(median(durations)).toBeLessThanOrEqual(budgetMs);
+    });
 });

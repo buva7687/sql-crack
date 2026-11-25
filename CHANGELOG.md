@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.0.2] - 2026-11-24
 
 ### Fixed
+- Honor BigQuery `* EXCEPT` and Snowflake `* EXCLUDE` (including quote-sensitive Snowflake aliases and declared CTE column lists) in SQL Flow wildcard lineage, `UNION` column-count checks, and dead-column hints, while leaving BigQuery `* REPLACE` unexpanded.
+- Navigate schema-qualified and quoted SQL Flow `SELECT INTO` write targets to their `INTO` line instead of `FROM` or earlier string literals.
+- Keep quoted CTE bindings and `CROSS`/`NATURAL` join detection intact when queries reference keyword-named or prefixed columns such as `b.offset`, `src.select`, or `$select`.
+- Resolve recursive self-references for later CTEs in `WITH RECURSIVE` clauses and parenthesized Snowflake `UNION` branches, and avoid repeated tokenization during dead-column detection on large CTE chains.
+- Stop listing a later `WITH RECURSIVE` CTE, or a Snowflake / SQLite CTE with a parenthesized recursive `UNION` branch, as an external table in the Workspace graph.
 - Resolve quoted SQL Flow column qualifiers to their source tables and keep case-distinct aliases attached to separate self-join instances.
 - Navigate Workspace SELECT INTO definitions to their statement after leading comments.
 - Parse SQL Server escaped bracket identifiers such as `[weird]]name]` in write targets, source tables and columns without inventing partial-graph reads.

@@ -143,15 +143,19 @@ export class ReferenceExtractor {
     }
 
     private isRecursiveCte(cte: AstCTE, statement: AstStatement): boolean {
+        // WITH RECURSIVE applies to every CTE in the list, but the parser only
+        // flags the first one, so check the whole clause.
         if (cte.recursive || statement.recursive
+            || this.getWithClauses(statement).some(clause => clause.recursive)
             || this._activeDialect === 'TransactSQL' || this._activeDialect === 'Oracle') {
             return true;
         }
         // Snowflake and SQLite make RECURSIVE optional: a compound body that
-        // names its own CTE is recursive.
+        // names its own CTE is recursive. A parenthesized arm such as
+        // `UNION ALL (SELECT ...)` is held in FROM rather than _next.
         const body = this.getCteStatement(cte) as { _next?: unknown; set_op?: unknown } | null;
         return (this._activeDialect === 'Snowflake' || this._activeDialect === 'SQLite')
-            && Boolean(body?._next || body?.set_op);
+            && Boolean(body?._next || body?.set_op || getSetOperationTree(body, this._activeDialect));
     }
 
     private hasForwardCteReferences(clauses: AstCTE[]): boolean {
