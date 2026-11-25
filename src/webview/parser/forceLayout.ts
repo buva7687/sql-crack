@@ -265,4 +265,3 @@ function normalizePositions(nodes: FlowNode[]): void {
         node.y = node.y - minY + padding;
     });
 }
-

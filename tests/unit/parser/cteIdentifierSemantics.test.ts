@@ -69,4 +69,42 @@ describe('CTE identifier semantics', () => {
         const result = parseSql('WITH c AS (SELECT a,b FROM src) SELECT t.a, \'"t".*\' AS note FROM c t /* "t".* */', 'PostgreSQL', { allowDialectFallback: false });
         expect(result.hints.some(hint => /dead column.*b/.test(hint.message))).toBe(true);
     });
+
+    it('keeps quoted CTE bindings when JOIN predicates use keyword-like qualified columns', () => {
+        const sql = `
+            WITH "Orders" AS (SELECT id, src.offset FROM src)
+            SELECT b.id
+            FROM "Orders" b
+            JOIN mid m ON b.offset = m.offset
+            JOIN last_table z ON m.id = z.id
+        `;
+        const result = parseSql(sql, 'PostgreSQL', { allowDialectFallback: false });
+        expect(result.error).toBeUndefined();
+        expect(result.partial).toBeUndefined();
+        expect(result.nodes.find(node => node.type === 'table' && node.label === 'Orders')?.tableCategory).toBe('cte_reference');
+        expect([...result.tableUsage.keys()]).toEqual(['src', 'mid', 'last_table']);
+    });
+
+    it('does not shift query scopes on dot-qualified or sigil-prefixed select identifiers', () => {
+        const qualifiedSelect = `
+            WITH "Orders" AS (SELECT id, src.select FROM src)
+            SELECT "O".id
+            FROM "Orders" "O"
+            JOIN mid m ON "O".limit = m.offset
+            JOIN last_table z ON m.id = z.id
+        `;
+        const pgResult = parseSql(qualifiedSelect, 'PostgreSQL', { allowDialectFallback: false });
+        expect(pgResult.error).toBeUndefined();
+        expect(pgResult.nodes.find(node => node.type === 'table' && node.label === 'Orders')?.tableCategory).toBe('cte_reference');
+        expect(pgResult.columnLineage[0].sources.map(source => source.table)).toEqual(['Orders']);
+
+        const sfResult = parseSql('SELECT $select FROM tbl_a CROSS JOIN tbl_b', 'Snowflake', { allowDialectFallback: false });
+        expect(sfResult.error).toBeUndefined();
+        expect(sfResult.nodes.filter(node => node.type === 'join').map(node => node.label)).toEqual(['CROSS JOIN']);
+        expect(sfResult.nodes.find(node => node.type === 'table' && node.label === 'tbl_a')?.alias).toBeUndefined();
+
+        const leadingDecimal = parseSql('SELECT .5 FROM "Orders"', 'PostgreSQL', { allowDialectFallback: false });
+        expect(leadingDecimal.error).toBeUndefined();
+        expect(leadingDecimal.nodes.find(node => node.type === 'table')?.label).toBe('Orders');
+    });
 });

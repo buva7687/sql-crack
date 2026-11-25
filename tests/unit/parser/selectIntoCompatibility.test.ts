@@ -78,6 +78,27 @@ describe('SELECT INTO source locations and escaped identifiers', () => {
         expect(result.nodes.find(node => node.accessMode === 'write')?.startLine).toBe(2);
     });
 
+    it.each([
+        ['PostgreSQL', 'SELECT id\nINTO "my schema"."my table"\nFROM orders;'],
+        ['PostgreSQL', 'SELECT id\nINTO TEMP TABLE "my schema"."my table"\nFROM orders;'],
+        ['PostgreSQL', 'SELECT id\nINTO myschema."my table"\nFROM orders;'],
+        ['PostgreSQL', 'SELECT id\nINTO "my schema".archive\nFROM orders;'],
+        ['TransactSQL', 'SELECT id\nINTO [dbo].[new_table]\nFROM [dbo].[orders];'],
+        ['TransactSQL', 'SELECT id\nINTO [a.b].[name]]with"quote]\nFROM dbo.orders;'],
+    ] as const)('navigates qualified quoted %s SELECT INTO target to the INTO line (%#)', (dialect, sql) => {
+        const result = parseSql(sql, dialect, { allowDialectFallback: false });
+        expect(result.error).toBeUndefined();
+        expect(result.partial).toBeUndefined();
+        expect(result.nodes.find(node => node.accessMode === 'write')?.startLine).toBe(2);
+    });
+
+    it('ignores a quoted SELECT INTO target inside an earlier string literal when resolving line numbers', () => {
+        const sql = "SELECT 'INTO \"my schema\".\"my table\"' AS note,\n  id\nINTO \"my schema\".\"my table\"\nFROM orders;";
+        const result = parseSql(sql, 'PostgreSQL', { allowDialectFallback: false });
+        expect(result.error).toBeUndefined();
+        expect(result.nodes.find(node => node.accessMode === 'write')?.startLine).toBe(3);
+    });
+
     it('does not collide with existing identifiers or rewrite literal values', () => {
         const sql = 'SELECT [__sql_crack_bracket_0__], [a]]b], \'__sql_crack_bracket_1__\' AS note INTO [out]]table] FROM [src]]table];';
         const ast: any = astifySql(new Parser(), sql, 'TransactSQL');

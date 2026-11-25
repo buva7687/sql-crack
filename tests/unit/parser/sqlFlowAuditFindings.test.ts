@@ -201,4 +201,156 @@ describe('SQL Flow parser audit regressions', () => {
         const parsed = new ReferenceExtractor().extractReferencesWithStatus(sql, '/a.sql', dialect);
         expect(parsed.references.map(reference => reference.tableName)).not.toContain('t');
     });
+
+    it.each(['MySQL', 'MariaDB', 'Trino', 'Athena', 'Redshift', 'PostgreSQL'] as const)(
+        'classifies a later recursive CTE self-reference in WITH RECURSIVE for %s',
+        (dialect) => {
+            const sql = `
+                WITH RECURSIVE
+                    seed(id) AS (SELECT id FROM src),
+                    tree(id) AS (SELECT id FROM seed UNION ALL SELECT id FROM tree)
+                SELECT id FROM tree;
+            `;
+            const result = parseSql(sql, dialect, { allowDialectFallback: false });
+            expect(result.error).toBeUndefined();
+            expect(result.partial).toBeUndefined();
+            const treeCte = result.nodes.find(node => node.type === 'cte' && node.label.endsWith('tree'));
+            expect(treeCte?.children?.find(node => node.type === 'table' && node.label === 'tree')?.tableCategory).toBe('cte_reference');
+            expect([...result.tableUsage.keys()]).toEqual(['src']);
+        }
+    );
+
+    it('classifies a Snowflake parenthesized recursive CTE arm as a CTE reference', () => {
+        const sql = `
+            WITH c(id) AS (
+                SELECT id FROM src
+                UNION ALL
+                (SELECT id FROM c)
+            )
+            SELECT id FROM c;
+        `;
+        const result = parseSql(sql, 'Snowflake', { allowDialectFallback: false });
+        expect(result.error).toBeUndefined();
+        expect(result.partial).toBeUndefined();
+        const cte = result.nodes.find(node => node.type === 'cte');
+        expect(cte?.children?.find(node => node.type === 'table' && node.label === 'c')?.tableCategory).toBe('cte_reference');
+        expect([...result.tableUsage.keys()]).toEqual(['src']);
+    });
+
+    it.each([
+        ['BigQuery', 'WITH c AS (SELECT id, secret FROM src) SELECT * EXCEPT (secret) FROM c UNION ALL SELECT id FROM other'],
+        ['BigQuery', 'WITH c AS (SELECT id, secret FROM src) SELECT c.* EXCEPT (secret) FROM c UNION ALL SELECT id FROM other'],
+        ['Snowflake', 'WITH c AS (SELECT id, secret FROM src) SELECT * EXCLUDE (secret) FROM c UNION ALL SELECT id FROM other'],
+        ['Snowflake', 'WITH c AS (SELECT id, secret FROM src) SELECT * EXCLUDE secret FROM c UNION ALL SELECT id FROM other'],
+        ['Snowflake', 'WITH c AS (SELECT id, secret FROM src) SELECT c.* EXCLUDE (secret) FROM c UNION ALL SELECT id FROM other'],
+    ] as const)('applies star exclusions in %s lineage, UNION column counts, and dead-column hints (%#)', (dialect, sql) => {
+        const result = parseSql(sql, dialect, { allowDialectFallback: false });
+        expect(result.error).toBeUndefined();
+        expect(result.partial).toBeUndefined();
+        expect(result.columnLineage.map(column => column.outputColumn)).toEqual(['id']);
+        expect(result.columnLineage[0].sources.map(source => `${source.table}.${source.column}`)).toEqual(['c.id', 'other.id']);
+        expect(result.hints.some(hint => hint.message.includes('different column counts'))).toBe(false);
+        expect(result.hints.filter(hint => hint.message.includes('dead column')).map(hint => hint.message)).toEqual([
+            '1 dead column detected: secret',
+        ]);
+    });
+
+    it('keeps BigQuery * REPLACE as an unresolved wildcard instead of fabricating unmodified lineage', () => {
+        const sql = 'WITH c AS (SELECT id, secret FROM src) SELECT * REPLACE (1 AS secret) FROM c UNION ALL SELECT id, secret FROM other';
+        const result = parseSql(sql, 'BigQuery', { allowDialectFallback: false });
+        expect(result.error).toBeUndefined();
+        expect(result.partial).toBeUndefined();
+        expect(result.hints.some(hint => hint.message.includes('different column counts'))).toBe(false);
+        expect(result.columnLineage.some(column => column.outputColumn === 'secret')).toBe(false);
+    });
+
+    it.each(['PostgreSQL', 'MySQL', 'Snowflake', 'SQLite', 'TransactSQL', 'Oracle', 'Redshift', 'Trino'] as const)(
+        'preserves declared CTE column names when expanding c.* in %s',
+        (dialect) => {
+            const sql = 'WITH c(x, y) AS (SELECT a, b FROM src) SELECT c.* FROM c';
+            const result = parseSql(sql, dialect, { allowDialectFallback: false });
+            expect(result.error).toBeUndefined();
+            expect(result.partial).toBeUndefined();
+            expect(result.columnLineage.map(column => column.outputColumn)).toEqual(['x', 'y']);
+        }
+    );
+
+    it('preserves quote sensitivity for Snowflake * EXCLUDE on quoted aliases, CTE column lists, and chained CTEs', () => {
+        const quotedMatch = parseSql(
+            'WITH c AS (SELECT a AS "Mixed", b AS "OTHER" FROM src) SELECT * EXCLUDE ("Mixed") FROM c',
+            'Snowflake',
+            { allowDialectFallback: false }
+        );
+        expect(quotedMatch.columnLineage.map(column => column.outputColumn)).toEqual(['OTHER']);
+        expect(quotedMatch.hints.filter(hint => hint.message.includes('dead column')).map(hint => hint.message)).toEqual([
+            '1 dead column detected: Mixed',
+        ]);
+
+        const unquotedMiss = parseSql(
+            'WITH c AS (SELECT a AS "Mixed", b AS "OTHER" FROM src) SELECT * EXCLUDE (mixed) FROM c',
+            'Snowflake',
+            { allowDialectFallback: false }
+        );
+        expect(unquotedMiss.columnLineage.map(column => column.outputColumn)).toEqual(['Mixed', 'OTHER']);
+        expect(unquotedMiss.hints.filter(hint => hint.message.includes('dead column'))).toEqual([]);
+
+        const upperMatch = parseSql(
+            'WITH c AS (SELECT a AS "Mixed", b AS "OTHER" FROM src) SELECT * EXCLUDE (other) FROM c',
+            'Snowflake',
+            { allowDialectFallback: false }
+        );
+        expect(upperMatch.columnLineage.map(column => column.outputColumn)).toEqual(['Mixed']);
+        expect(upperMatch.hints.filter(hint => hint.message.includes('dead column')).map(hint => hint.message)).toEqual([
+            '1 dead column detected: OTHER',
+        ]);
+
+        const declaredCols = parseSql(
+            'WITH c("Mixed", "OTHER") AS (SELECT a, b FROM src) SELECT * EXCLUDE ("Mixed") FROM c',
+            'Snowflake',
+            { allowDialectFallback: false }
+        );
+        expect(declaredCols.columnLineage.map(column => column.outputColumn)).toEqual(['OTHER']);
+
+        const chained = parseSql(
+            'WITH c AS (SELECT a AS "Mixed", b AS "OTHER" FROM src), d AS (SELECT * FROM c) SELECT * EXCLUDE ("Mixed") FROM d',
+            'Snowflake',
+            { allowDialectFallback: false }
+        );
+        expect(chained.columnLineage.map(column => column.outputColumn)).toEqual(['OTHER']);
+    });
+
+    it.each([
+        ['BigQuery', 'WITH c AS (SELECT secret AS retained, x AS secret FROM src) SELECT * EXCEPT (secret) FROM c'],
+        ['Snowflake', 'WITH c AS (SELECT secret AS retained, x AS secret FROM src) SELECT * EXCLUDE (secret) FROM c'],
+    ] as const)('evaluates %s star exclusions by output column name so retained aliases are not flagged as dead', (dialect, sql) => {
+        const result = parseSql(sql, dialect, { allowDialectFallback: false });
+        expect(result.error).toBeUndefined();
+        expect(result.partial).toBeUndefined();
+        expect(result.columnLineage.map(column => column.outputColumn)).toEqual(['retained']);
+        expect(result.hints.filter(hint => hint.message.includes('dead column')).map(hint => hint.message)).toEqual([
+            '1 dead column detected: secret',
+        ]);
+    });
+
+    it('detects dead columns across large CTE chains without quadratic re-tokenization', () => {
+        const cteCount = 140;
+        const colCount = 20;
+        const ctes: string[] = [];
+        for (let i = 0; i < cteCount; i++) {
+            const cols = Array.from({ length: colCount }, (_, j) => `src.c${j} AS cte_${i}_col_${j}`).join(', ');
+            const from = i === 0 ? 'base_table src' : `cte_${i - 1} src`;
+            ctes.push(`cte_${i} AS (SELECT ${cols} FROM ${from})`);
+        }
+        const sql = `WITH ${ctes.join(',\n')}\nSELECT cte_${cteCount - 1}_col_0 FROM cte_${cteCount - 1}`;
+        expect(sql.length).toBeGreaterThan(55_000);
+
+        const start = performance.now();
+        const result = parseSql(sql, 'PostgreSQL', { allowDialectFallback: false });
+        const elapsedMs = performance.now() - start;
+
+        expect(result.error).toBeUndefined();
+        expect(result.partial).toBeUndefined();
+        expect(result.hints.some(hint => hint.message.includes('dead column'))).toBe(true);
+        expect(elapsedMs).toBeLessThan(2000);
+    });
 });

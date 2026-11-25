@@ -85,7 +85,7 @@ const TRANSPARENT_PAREN_BODY = /^\s*(?:SELECT|WITH|VALUES|\()/i;
 const SET_OPERATOR_BEFORE = /\b(?:UNION|INTERSECT|EXCEPT|MINUS)(?:\s+(?:ALL|DISTINCT))?\s*$/i;
 const CTE_BODY_BEFORE = /\bAS\s*(?:NOT\s+)?(?:MATERIALIZED\s*)?$/i;
 const JOIN_MODIFIER_BEFORE = /\b(?:LEFT|RIGHT|FULL|CROSS|NATURAL|OUTER|SEMI|ANTI|ASOF|POSITIONAL)\s+$/i;
-const TABLE_KEYWORD_CONTEXT = /\b(FROM|JOIN|INTO|USING|UPDATE|TABLE|ONLY|DELETE|MERGE|VIEW|EXISTS)\s+(?:(?:[\w$#]+|"[^"]*"|`[^`]*`|\[(?:[^\]]|\]\])*\])\s*\.\s*)*["`[]?$/i;
+const TABLE_KEYWORD_CONTEXT = /\b(FROM|JOIN|INTO|USING|UPDATE|TABLE|ONLY|DELETE|MERGE|VIEW|EXISTS)\s+(?:(?:TEMPORARY|TEMP|UNLOGGED)\s+)?(?:TABLE\s+)?(?:(?:[\w$#]+|"[^"]*"|`[^`]*`|\[(?:[^\]]|\]\])*\])\s*\.\s*)*["`[]?$/i;
 const TABLE_READ_KEYWORDS = new Set(['FROM', 'JOIN', 'USING', 'ONLY']);
 const CTE_DEFINITION_AFTER = /^["`\]]?\s*(?:\([^()]*\)\s*)?AS\s*(?:NOT\s+)?(?:MATERIALIZED\s*)?\(/i;
 const TABLE_COMMA_CONTEXT = /,\s*(?:(?:[\w$#]+|"[^"]*"|`[^`]*`|\[(?:[^\]]|\]\])*\])\s*\.\s*)*["`[]?$/i;
@@ -336,9 +336,22 @@ function assignScopedLineNumbers(nodes: FlowNode[], sql: string, childScope: boo
         let candidates = tableOccurrences.get(key);
         if (!candidates) {
             candidates = [];
-            const spellings = [escapeRegex(tableName)];
-            if (dialect === 'TransactSQL' && tableName.includes(']')) { spellings.push(escapeRegex(tableName.replace(/\]/g, ']]'))); }
-            const pattern = new RegExp(`(?<![\\w$#])(?:${spellings.join('|')})(?![\\w$#])`, 'gi');
+            const escapeSegment = (segment: string): string => {
+                let escaped = escapeRegex(segment).replace(/"/g, '(?:"|"")');
+                if (dialect === 'TransactSQL') {
+                    escaped = escaped.replace(/\\\]/g, '(?:\\]|\\]\\])');
+                }
+                return escaped;
+            };
+            const spellings = [`(?<![\\w$#])${escapeRegex(tableName)}(?![\\w$#])`];
+            if (dialect === 'TransactSQL' && tableName.includes(']')) {
+                spellings.push(`(?<![\\w$#])${escapeRegex(tableName.replace(/\]/g, ']]'))}(?![\\w$#])`);
+            }
+            if (tableName.includes('.')) {
+                const multiPart = tableName.split('.').map(escapeSegment).join('["`\\]]?\\s*\\.\\s*["`[]?');
+                spellings.push(`(?:["\`[]|(?<![\\w$#]))${multiPart}(?:["\`\\]]|(?![\\w$#]))`);
+            }
+            const pattern = new RegExp(`(?:${spellings.join('|')})`, 'gi');
             let match: RegExpExecArray | null;
             while ((match = pattern.exec(commentStripped)) !== null) {
                 const after = commentStripped.slice(match.index + match[0].length, match.index + match[0].length + 160);
@@ -349,13 +362,16 @@ function assignScopedLineNumbers(nodes: FlowNode[], sql: string, childScope: boo
                 }
                 const before = textBefore(match.index, 160);
                 const occurrence = occurrenceAt(`table:${key}@${match.index}`, match.index);
-                // A whole quoted identifier ("orders", `orders`, [orders]) is a
-                // reference, not quoted text.
+                // A whole quoted identifier ("orders", `orders`, [orders]) or a
+                // qualified quoted target ("my schema"."my table") is a
+                // reference, not quoted text inside a string literal.
                 const opener = commentStripped[match.index - 1];
                 const closer = commentStripped[match.index + match[0].length];
                 const quoted = (opener === '"' || opener === '`' || opener === '[')
                     && closer === (opener === '[' ? ']' : opener);
-                if (quoted) {
+                const matchStartsQuoted = match[0].startsWith('"') || match[0].startsWith('`') || match[0].startsWith('[');
+                const startsFreshQuotedRef = matchStartsQuoted && (match.index === 0 || !nesting.inQuotes[match.index - 1]);
+                if (quoted || startsFreshQuotedRef) {
                     occurrence.inQuotes = false;
                 }
                 candidates.push({
@@ -445,7 +461,9 @@ function assignScopedLineNumbers(nodes: FlowNode[], sql: string, childScope: boo
             case 'table': {
                 // RENAME targets are labeled "old → new"; locate the old name.
                 const tableName = node.label.split(' → ')[0].trim();
-                const occurrence = tableName ? findTableOccurrence(tableName, dialect === 'PostgreSQL' && node.relationIdentity !== undefined) : undefined;
+                const occurrence = tableName
+                    ? findTableOccurrence(tableName, dialect === 'PostgreSQL' && node.relationIdentity !== undefined && node.accessMode !== 'write')
+                    : undefined;
                 if (occurrence !== undefined) {
                     node.startLine = occurrence.line;
                     applyRelationIdentity(node, occurrence);
@@ -492,7 +510,9 @@ function assignScopedLineNumbers(nodes: FlowNode[], sql: string, childScope: boo
                     }
                 }
 
-                node.startLine = foundLine || (fromLines.length > 0 ? fromLines[0] : firstCodeLine);
+                node.startLine = foundLine || (node.accessMode === 'write' && intoLines.length > 0
+                    ? intoLines[0]
+                    : (fromLines.length > 0 ? fromLines[0] : firstCodeLine));
                 break;
             }
             case 'join': {

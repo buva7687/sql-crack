@@ -206,7 +206,7 @@ function processSelect(
             const cteChildEdges: FlowEdge[] = [];
             const cteStmt = getCteStatementAst(cte);
             const isRecursive = declaresRecursiveCte(cte);
-            if (isRecursive || allowsImplicitCteSelfReference(cteStmt, ctx.dialect)) {
+            if (recursive || allowsImplicitCteSelfReference(cteStmt, ctx.dialect)) {
                 cteNames.add(key);
             }
             const dependencies = new Set<string>();
@@ -1514,7 +1514,7 @@ function collectTablesFromSelectTree(
         for (const cte of stmt.with) {
             const key = getCteNameKey(cte.name, dialect);
             const cteStmt = getCteStatementAst(cte);
-            if (declaresRecursiveCte(cte) || allowsImplicitCteSelfReference(cteStmt, dialect)) {
+            if (recursive || allowsImplicitCteSelfReference(cteStmt, dialect)) {
                 scopedCteNames.add(key);
             }
             if (cteStmt) {

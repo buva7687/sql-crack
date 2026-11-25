@@ -1,3 +1,14 @@
+function isPrefixedSelectIdentifier(sql: string, index: number): boolean {
+    if (index <= 0) { return false; }
+    const prev = sql[index - 1];
+    if (prev === '.' || prev === '$' || prev === '@' || prev === '#' || prev === ':') {
+        return true;
+    }
+    let pos = index - 1;
+    while (pos >= 0 && /\s/.test(sql[pos])) { pos--; }
+    return pos >= 0 && sql[pos] === '.';
+}
+
 /** Query scopes in SQL order, shared by source annotations and AST repairs. */
 export function getQueryScopeOffsets(maskedSql: string): Int32Array {
     const scopes = new Int32Array(maskedSql.length + 1).fill(-1);
@@ -15,7 +26,7 @@ export function getQueryScopeOffsets(maskedSql: string): Int32Array {
             parents[depth] = parents[depth - 1];
         } else if (token[0] === ')') {
             depth = Math.max(0, depth - 1);
-        } else if (token[0].toUpperCase() === 'SELECT') {
+        } else if (token[0].toUpperCase() === 'SELECT' && !isPrefixedSelectIdentifier(maskedSql, token.index)) {
             parents[depth] = nextScope++;
         }
         cursor = token.index + token[0].length;
