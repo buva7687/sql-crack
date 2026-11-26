@@ -2,7 +2,7 @@
 import process from 'process/browser';
 (window as unknown as { process: typeof process }).process = process;
 
-import { configureCustomFunctions, configureParseTimeout, isCancelledBatchParseResult, parseAsync, parseBatchAsync } from './parserClient';
+import { configureCustomFunctions, configureParseTimeout, isCancelledBatchParseResult, parseAsync, parseBatchAsync, terminateWorker } from './parserClient';
 import { setMinimapMode, MinimapMode } from './minimapVisibility';
 import { detectDialect } from './sqlParser';
 import { getComponentUiColors, setHighContrastMode } from './constants';
@@ -10,6 +10,7 @@ import { installCompactPanelLayout } from './ui/compactPanelLayout';
 import { BatchParseResult, LayoutType, ParseError, ParseResult, QueryLineRange, SqlDialect } from './types';
 import {
     initRenderer,
+    cleanupRenderer,
     render,
     zoomIn,
     zoomOut,
@@ -90,7 +91,6 @@ import {
     createBatchTabs,
     updateBatchTabs,
     getScopedAdjacentQueryIndex,
-    getActiveTabId,
     showFirstRunOverlay,
     showCompareView,
     hideCompareView,
@@ -192,8 +192,11 @@ let currentDialect: SqlDialect =
 let batchResult: BatchParseResult | null = null;
 let currentQueryIndex = 0;
 let isStale: boolean = false;
+let staleRefreshPending = false;
 let toolbarCleanup: ToolbarCleanup | null = null;
 let parseRequestId = 0;
+let renderedParseRequestId = 0;
+let pendingCursorLine: number | undefined;
 let queryLoadingToken = 0;
 let queryLoadingVisible = false;
 // Monotonic token guarding async cursor-follow query switches. Rapid cursor
@@ -269,7 +272,6 @@ interface PersistedWebviewState {
     currentQueryIndex: number;
     userExplicitlySetDialect: boolean;
     compareModeActive: boolean;
-    activeTabId: string | null;
     queryViewStates: Array<{ queryIndex: number; viewState: TabViewState }>;
     renderer: PersistedRendererUiState;
 }
@@ -638,7 +640,6 @@ function capturePersistedState(): PersistedWebviewState {
         currentQueryIndex,
         userExplicitlySetDialect,
         compareModeActive,
-        activeTabId: getActiveTabId(),
         queryViewStates: Array.from(persistedQueryViewStates.entries()).map(([queryIndex, viewState]) => ({ queryIndex, viewState })),
         renderer: {
             viewState: getViewState(),
@@ -692,10 +693,6 @@ function schedulePersistUiState(delayMs = 150): void {
             persistStateDirty = false;
         }
     }, delayMs);
-}
-
-export function markPersistDirty(): void {
-    persistStateDirty = true;
 }
 
 function parseInitialUiState(raw: unknown): PersistedWebviewState | null {
@@ -1141,7 +1138,7 @@ function setupVSCodeMessageListener(): void {
                     applyRuntimeConfigUpdate(message.config);
                     break;
                 case 'markStale':
-                    markAsStale();
+                    markAsStale(message.refreshPending !== false);
                     break;
                 case 'setEditorActivity':
                     isInactiveEditor = message.isSqlLikeActiveEditor !== true;
@@ -1184,6 +1181,7 @@ function handleRefresh(
         }
         persistUiStateNow();
         currentQueryIndex = 0;
+        pendingCursorLine = undefined;
     }
     window.documentKey = nextDocumentKey;
     window.fileName = options.fileName;
@@ -1228,6 +1226,11 @@ function findQueryIndexForLine(line: number): number | null {
 
 async function handleCursorPosition(line: number): Promise<void> {
     const token = ++cursorFollowToken;
+    if ((isStale && staleRefreshPending) || renderedParseRequestId !== parseRequestId) {
+        pendingCursorLine = line;
+        return;
+    }
+    pendingCursorLine = undefined;
     const targetIndex = findQueryIndexForLine(line);
     const hasValidTarget = targetIndex !== null &&
         batchResult &&
@@ -1270,13 +1273,18 @@ function handleSwitchToQuery(queryIndex: number): void {
     }
 }
 
-function markAsStale(): void {
+function markAsStale(refreshPending = true): void {
+    ++cursorFollowToken;
     isStale = true;
+    // With auto-refresh off no new ranges are coming, so cursor follow keeps
+    // using the rendered ones instead of waiting for a refresh.
+    staleRefreshPending = refreshPending;
     syncRefreshButtonState();
 }
 
 function clearStaleIndicator(): void {
     isStale = false;
+    staleRefreshPending = false;
     syncRefreshButtonState();
 }
 
@@ -1424,6 +1432,8 @@ function init(): void {
         persistUiStateNow();
         toolbarCleanup?.();
         toolbarCleanup = null;
+        terminateWorker();
+        cleanupRenderer();
     });
 
     // Show first-run onboarding overlay
@@ -1634,12 +1644,13 @@ function createToolbarCallbacks(): ToolbarCallbacks {
         },
         onPinVisualization: (sql: string, dialect: SqlDialect, name: string) => {
             if (window.vscodeApi) {
-                const { sql: querySql, name: queryName } = getCurrentQuerySql();
+                const { sql: querySql, name: queryName, lineOffset } = getCurrentQuerySql();
                 window.vscodeApi.postMessage({
                     command: 'pinVisualization',
                     sql: querySql,
                     dialect: currentDialect,
-                    name: queryName
+                    name: queryName,
+                    lineOffset
                 });
             }
         },
@@ -1686,6 +1697,7 @@ function createToolbarCallbacks(): ToolbarCallbacks {
 
 async function visualize(sql: string): Promise<void> {
     const requestId = ++parseRequestId;
+    ++cursorFollowToken;
     const documentKeyForParse = window.documentKey ?? window.fileName ?? null;
     const preserveInteractionState = batchResult !== null && renderedDocumentKey === documentKeyForParse;
     // Error and empty results below have a single entry, so they fall back to Q1.
@@ -1721,6 +1733,8 @@ async function visualize(sql: string): Promise<void> {
             }
         };
         renderedDocumentKey = documentKeyForParse;
+        renderedParseRequestId = requestId;
+        pendingCursorLine = undefined;
         currentQueryIndex = 0;
         updateBatchTabsUI();
         renderCurrentQuery();
@@ -1815,6 +1829,7 @@ async function visualize(sql: string): Promise<void> {
     }
     // Stale and cancelled parses returned above, so this result is on screen.
     renderedDocumentKey = documentKeyForParse;
+    renderedParseRequestId = requestId;
 
     batchResult?.queries.forEach(applyQuerySettings);
 
@@ -1831,7 +1846,8 @@ async function visualize(sql: string): Promise<void> {
         currentQueryIndex = 0;
         updateBatchTabsUI();
         updateErrorBadge(1, [{ queryIndex: 0, message }]);
-        render(buildFallbackQueryErrorResult(sql, message));
+        render(buildFallbackQueryErrorResult(sql, message), { dialect: currentDialect });
+        pendingCursorLine = undefined;
         schedulePersistUiState();
         return;
     }
@@ -1853,6 +1869,9 @@ async function visualize(sql: string): Promise<void> {
     updateBatchTabsUI();
     renderCurrentQuery(preserveInteractionState);
     await applyInitialUiStateIfAvailable();
+    if (requestId === parseRequestId && pendingCursorLine !== undefined) {
+        await handleCursorPosition(pendingCursorLine);
+    }
     schedulePersistUiState();
 }
 
@@ -1882,7 +1901,10 @@ function renderCurrentQuery(preserveInteractionState = false): void {
         }
     }
 
-    render(query, { preserveInteractionState: preserveInteractionState && renderedQueryIndex === currentQueryIndex });
+    render(query, {
+        preserveInteractionState: preserveInteractionState && renderedQueryIndex === currentQueryIndex,
+        dialect: currentDialect,
+    });
     renderedQueryIndex = currentQueryIndex;
     schedulePersistUiState();
 }
@@ -2001,22 +2023,29 @@ function updateBatchTabsUI(): void {
     });
 }
 
-function getCurrentQuerySql(): { sql: string; name: string } {
+function getCurrentQuerySql(): { sql: string; name: string; lineOffset: number } {
     let sqlToPin = window.initialSqlCode || '';
     let queryName = window.fileName || 'Query';
+    // Node lines are relative to the pinned statement once it is parsed alone,
+    // so report how many lines precede it in the SQL this page was given.
+    let lineOffset = 0;
+    const statementStartLine = (index: number): number =>
+        Math.max(0, (batchResult?.queryLineRanges?.[index]?.startLine ?? 1) - 1);
 
     if (batchResult && batchResult.queries.length > 1) {
         const currentQuery = batchResult.queries[currentQueryIndex];
         if (currentQuery && currentQuery.sql) {
             sqlToPin = currentQuery.sql;
             queryName = `${(window.fileName || 'Query').replace('.sql', '')} Q${currentQueryIndex + 1}`;
+            lineOffset = statementStartLine(currentQueryIndex);
         }
     } else if (batchResult && batchResult.queries.length === 1) {
         const currentQuery = batchResult.queries[0];
         if (currentQuery && currentQuery.sql) {
             sqlToPin = currentQuery.sql;
+            lineOffset = statementStartLine(0);
         }
     }
 
-    return { sql: sqlToPin, name: queryName };
+    return { sql: sqlToPin, name: queryName, lineOffset };
 }

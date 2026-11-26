@@ -1,3 +1,4 @@
+import { astifySql, prepareSqlAst } from './parser/astUtils';
 import { Parser } from 'node-sql-parser';
 import { analyzePerformance } from './performanceAnalyzer';
 import {
@@ -18,6 +19,7 @@ import {
     preprocessRedshiftSyntax,
     preprocessRedshiftTypes,
     preprocessTransactSqlSyntax,
+    normalizeSelectIntoTargets,
     rewriteUnsupportedPostgresWindowFunctionsForCompatibility,
     preprocessSnowflakeSyntax,
     preprocessTeradataSyntax,
@@ -961,7 +963,7 @@ function tryParsePostgresWindowCompatibilityAstFallback(
     }
 
     try {
-        const ast = parser.astify(compatibilityRewrite.sql, { database: 'PostgreSQL' });
+        const ast = astifySql(parser, compatibilityRewrite.sql, 'PostgreSQL');
         restorePostgresCompatibilityWindowFunctionNames(ast, compatibilityRewrite.rewrites);
         pushHintOnce(context, {
             type: 'info',
@@ -1010,7 +1012,7 @@ function tryParseDialectProxyAstFallback(parser: Parser, sql: string, dialect: S
     }
 
     try {
-        return parser.astify(sql, { database: proxyDialect });
+        return astifySql(parser, sql, proxyDialect);
     } catch (e) {
         if (isDebugLoggingEnabled()) {
             console.debug('[sqlParser] AST parse failed:', e);
@@ -1122,6 +1124,8 @@ function applyParserCompatibilityPreprocessing(
             severity: 'low',
         });
     }
+
+    transformedSql = normalizeSelectIntoTargets(transformedSql, dialect) ?? transformedSql;
 
     const redshiftPreprocessedSql = preprocessRedshiftSyntax(transformedSql, dialect);
     if (redshiftPreprocessedSql !== null) {
@@ -1351,6 +1355,7 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
     try {
         let ast: any;
         let effectiveDialect = dialect;
+        let parsedSql = sql;
 
         const parseWithDialect = (targetDialect: SqlDialect, sqlText: string = sql): any => {
             // Oracle and Teradata are not supported by node-sql-parser; use proxy dialects
@@ -1358,7 +1363,9 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
                 : targetDialect === 'Teradata' ? 'MySQL'
                 : targetDialect;
             try {
-                return parser.astify(sqlText, { database: parserDialect });
+                const parsed = astifySql(parser, sqlText, parserDialect);
+                parsedSql = sqlText;
+                return parsed;
             } catch (parseError) {
                 const postgresWindowCompatibilityAst = tryParsePostgresWindowCompatibilityAstFallback(
                     parser,
@@ -1442,6 +1449,7 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
             });
         }
         const statements = (Array.isArray(ast) ? ast : [ast]).filter(Boolean);
+        prepareSqlAst(statements, parsedSql, effectiveDialect);
 
         for (const stmt of statements) {
             processStatement(context, stmt, nodes, edges);
@@ -1514,7 +1522,7 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
         layoutGraph(nodes, edges);
 
         // Assign line numbers to nodes for editor sync
-        assignLineNumbers(nodes, originalSql, edges);
+        assignLineNumbers(nodes, originalSql, edges, context.dialect);
 
         // Extract column lineage
         const columnLineage = extractColumnLineage(innerSelectStmt, nodes, edges, context.dialect);
@@ -1547,7 +1555,10 @@ function parseSqlForDialect(sql: string, dialect: SqlDialect, options: ParseOpti
         // This helps users quickly identify when they need to switch SQL dialects
         const syntaxSql = maskStringsAndComments(originalSql).toUpperCase();
         const hasIntervalQuoted = /INTERVAL\s*'[^']+'/i.test(originalSql);
-        const hasParenthesizedUnion = /\(\s*SELECT[\s\S]+\)\s*(UNION|INTERSECT|EXCEPT)/i.test(originalSql);
+        const selectInParens = /\(\s*SELECT\b/.exec(syntaxSql);
+        const setOperatorAfterClose = /\)\s*(?:UNION|INTERSECT|EXCEPT)\b/g;
+        setOperatorAfterClose.lastIndex = selectInParens ? selectInParens.index + selectInParens[0].length : 0;
+        const hasParenthesizedUnion = !!selectInParens && setOperatorAfterClose.test(syntaxSql);
 
         // Extract specific syntax issue from error message
         // Parser errors are typically: "Expected X but "Y" found" or "Unexpected token Y"

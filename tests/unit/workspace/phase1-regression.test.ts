@@ -206,7 +206,8 @@ describe('File watcher custom extensions', () => {
             dispose: jest.fn(),
             setDialect: jest.fn(),
             getDialect: jest.fn().mockReturnValue('MySQL'),
-            findSqlFiles: jest.fn().mockResolvedValue([])
+            findSqlFiles: jest.fn(async () => Array.from({ length: await mockScanner.getFileCount() },
+                (_, index) => vscode.Uri.file(`/audit/file-${index}.sql`)))
         } as unknown as jest.Mocked<WorkspaceScanner>;
 
         (WorkspaceScanner as jest.MockedClass<typeof WorkspaceScanner>)
@@ -303,7 +304,8 @@ describe('buildIndex concurrency guard', () => {
             dispose: jest.fn(),
             setDialect: jest.fn(),
             getDialect: jest.fn().mockReturnValue('MySQL'),
-            findSqlFiles: jest.fn().mockResolvedValue([])
+            findSqlFiles: jest.fn(async () => Array.from({ length: await mockScanner.getFileCount() },
+                (_, index) => vscode.Uri.file(`/audit/file-${index}.sql`)))
         } as unknown as jest.Mocked<WorkspaceScanner>;
 
         (WorkspaceScanner as jest.MockedClass<typeof WorkspaceScanner>)

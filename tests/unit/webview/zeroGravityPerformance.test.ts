@@ -16,9 +16,8 @@ describe('zero-gravity rendering performance guards', () => {
     it('uses node maps instead of linear node searches while applying animated edge paths', () => {
         const body = rendererSource.match(/function applyEdgePositionsToDom\(\): void {[\s\S]*?function getZeroGravityBounds/)?.[0] || '';
 
-        expect(body).toContain('const currentNodeMap = new Map(currentNodes.map(node => [node.id, node]));');
-        expect(body).toContain('const sourceNode = renderNodeMap.get(sourceId) || currentNodeMap.get(sourceId);');
-        expect(body).toContain('const targetNode = renderNodeMap.get(targetId) || currentNodeMap.get(targetId);');
+        expect(body).toContain('const sourceNode = renderNodeMap.get(sourceId);');
+        expect(body).toContain('const targetNode = renderNodeMap.get(targetId);');
         expect(body).not.toContain('currentNodes.find(node => node.id === sourceId)');
         expect(body).not.toContain('currentNodes.find(node => node.id === targetId)');
     });

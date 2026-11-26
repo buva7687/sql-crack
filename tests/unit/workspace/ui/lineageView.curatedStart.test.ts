@@ -108,6 +108,16 @@ function createDepthGraph(): LineageGraph {
 }
 
 describe('LineageView curated start content', () => {
+    it('preserves case-distinct object names in the full grid search data', () => {
+        const graph = createGraph();
+        graph.nodes.set('table:Orders', { id: 'table:Orders', type: 'table', name: 'Orders', metadata: {} });
+
+        const html = new LineageView().generateLineageSearchView(graph);
+
+        expect(html).toMatch(/data-node-id="table:Orders"\s+data-name="Orders"/);
+        expect(html).toMatch(/data-node-id="table:orders"\s+data-name="orders"/);
+    });
+
     it('renders Most Connected section with show-all control and hidden full grid by default', () => {
         const html = new LineageView().generateLineageSearchView(createGraph());
 

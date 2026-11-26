@@ -23,7 +23,6 @@ describe('phase 2.1 dark surface blue-tint cleanup', () => {
     ].join('\n');
     const batchTabs = readSource('src/webview/ui/batchTabs.ts');
     const compareView = readSource('src/webview/ui/compareView.ts');
-    const pinnedTabs = readSource('src/webview/ui/pinnedTabs.ts');
     const colors = readSource('src/webview/constants/colors.ts');
     const workspaceStyles = readSource('src/workspace/ui/sharedStyles.ts');
     const variablesStyles = readSource('src/workspace/ui/styles/variables.ts');
@@ -33,7 +32,6 @@ describe('phase 2.1 dark surface blue-tint cleanup', () => {
         expect(toolbar).toContain('rgba(17, 17, 17, 0.98)');
         expect(batchTabs).toContain('rgba(17, 17, 17, 0.95)');
         expect(compareView).toContain('rgba(17,17,17,0.96)');
-        expect(pinnedTabs).toContain('rgba(17, 17, 17, 0.95)');
     });
 
     it('uses black-based overlay/track tones for dark theme tokens', () => {

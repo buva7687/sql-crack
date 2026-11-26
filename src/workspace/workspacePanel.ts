@@ -26,7 +26,7 @@ import { TableExplorer } from './ui/tableExplorer';
 import { LineageView } from './ui/lineageView';
 import { ImpactView } from './ui/impactView';
 import { ViewMode } from './ui/types';
-import { getWebviewStyles, getIssuesStyles, getStateStyles } from './ui/sharedStyles';
+import { getWebviewStyles, getIssuesStyles } from './ui/sharedStyles';
 import { getWebviewScript, getIssuesScript, WebviewScriptParams } from './ui/clientScripts';
 
 // Handler modules

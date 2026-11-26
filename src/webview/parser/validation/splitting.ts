@@ -139,6 +139,8 @@ function scanSqlStatements(
             && !isPostgresJsonPathOperatorAt(sql, offset)
             && !isHashTempTableIdentifierAt(sql, offset));
 
+    let prefixScannedUntil = 0;
+    let lineHasEarlierText = false;
     /**
      * `SELECT 1; -- note` attaches `-- note` to the next statement. When a
      * statement starts on the same line as earlier source text, skip comments
@@ -146,8 +148,20 @@ function scanSqlStatements(
      * own line instead of overlapping the previous statement.
      */
     const skipCommentsTrailingPreviousStatement = (start: number, end: number): number => {
-        const lineStart = sql.lastIndexOf('\n', start - 1) + 1;
-        if (!sql.slice(lineStart, start).trim()) {
+        if (!isLineCommentAt(start) && !sql.startsWith('/*', start)) {
+            return start;
+        }
+        // Leading comments are sparse in ordinary files. Advance only when
+        // needed and scan each character at most once even on one long line.
+        while (prefixScannedUntil < start) {
+            const char = sql[prefixScannedUntil++];
+            if (char === '\n') {
+                lineHasEarlierText = false;
+            } else if (!lineHasEarlierText && /\S/.test(char)) {
+                lineHasEarlierText = true;
+            }
+        }
+        if (!lineHasEarlierText) {
             return start;
         }
         let position = start;

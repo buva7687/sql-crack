@@ -3,7 +3,8 @@
  * Formats SQL with proper indentation, capitalized keywords, and line breaks
  */
 
-import { escapeHtml, getDollarQuoteDelimiterAt } from '../shared/stringUtils';
+import type { SqlDialect } from './types';
+import { dialectSupportsHashComments, escapeHtml, getDollarQuoteDelimiterAt } from '../shared/stringUtils';
 
 const SQL_KEYWORDS = [
     'SELECT', 'FROM', 'WHERE', 'JOIN', 'LEFT', 'RIGHT', 'INNER', 'OUTER', 'FULL',
@@ -25,6 +26,7 @@ export interface FormatOptions {
     indent: string;
     uppercase: boolean;
     lineWidth: number;
+    dialect?: SqlDialect;
 }
 
 interface HighlightPalette {
@@ -52,7 +54,7 @@ export function formatSql(sql: string, options: Partial<FormatOptions> = {}): st
     }
 
     // Extract comments and replace with placeholders to preserve them
-    const { sqlWithoutComments, comments } = extractComments(sql);
+    const { sqlWithoutComments, comments } = extractComments(sql, opts.dialect !== undefined && dialectSupportsHashComments(opts.dialect));
     // All formatting passes work on SQL structure only. Quoted values and
     // identifiers may contain whitespace, commas, keywords, or newlines.
     const { sqlWithoutQuotes, quotes } = protectQuotedTokens(sqlWithoutComments);
@@ -132,7 +134,7 @@ function restoreQuotedTokens(sql: string, quotes: Map<string, string>): string {
  * Extract comments from SQL and replace with placeholders
  * Includes trailing newline to preserve line structure
  */
-function extractComments(sql: string): { sqlWithoutComments: string; comments: Map<string, string> } {
+function extractComments(sql: string, hashComments: boolean): { sqlWithoutComments: string; comments: Map<string, string> } {
     const comments = new Map<string, string>();
     let result = '';
     let commentIndex = 0;
@@ -188,7 +190,7 @@ function extractComments(sql: string): { sqlWithoutComments: string; comments: M
             }
         }
 
-        if (char === '-' && sql[index + 1] === '-') {
+        if ((char === '-' && sql[index + 1] === '-') || (hashComments && char === '#')) {
             const start = index;
             while (index < sql.length && sql[index] !== '\n' && sql[index] !== '\r') {
                 index++;
@@ -245,7 +247,7 @@ function extractComments(sql: string): { sqlWithoutComments: string; comments: M
 function restoreComments(sql: string, comments: Map<string, string>): string {
     let result = sql;
     for (const [placeholder, comment] of comments) {
-        result = result.replace(placeholder, comment);
+        result = result.replace(placeholder, () => comment);
     }
     return result;
 }

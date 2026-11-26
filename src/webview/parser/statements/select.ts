@@ -4,7 +4,6 @@ import type {
     FlowNode,
     SqlDialect
 } from '../../types';
-import { unwrapIdentifierValue } from '../astUtils';
 import { getSetOperationTree, type SetOperationTree } from './setOperations';
 import type { ParserContext } from '../context';
 import {
@@ -17,12 +16,24 @@ import {
     extractWindowFunctionDetails,
     formatCondition,
     getAstString,
+    getCteNameKey,
     getFromItemDisplayName,
+    getFromItemIdentity,
     getFromItemLookupKey,
     getTableName,
     getTableValuedFunctionName,
     resolveFunctionNameFromExpr
 } from '../extractors';
+
+import {
+    allowsImplicitCteSelfReference,
+    declaresRecursiveCte,
+    getCteReferenceKey,
+    getCteStatementAst,
+    collectCteColumnShapes,
+    getSelectProjection,
+    isWildcardProjection,
+} from '../extractors/selectProjection';
 
 export interface SelectRuntimeDependencies {
     genId: (prefix: string) => string;
@@ -158,104 +169,76 @@ function processSelect(
     const ctx = runtime.context;
     const setTree = getSetOperationTree(stmt, ctx.dialect);
     if (setTree) {
-        return processSetOperationTree(runtime, setTree, nodes, edges,
-            branch => processSelect(runtime, branch, nodes, edges, cteNames, cteNodeIdsByName)).id!;
+        const intoTarget = getSelectIntoTarget(stmt, ctx.dialect);
+        const root = processSetOperationTree(runtime, setTree, nodes, edges,
+            branch => processSelect(runtime, intoTarget ? { ...branch, into: undefined } : branch,
+                nodes, edges, cteNames, cteNodeIdsByName), undefined, collectCteColumnShapes(stmt, ctx.dialect)).id!;
+        return intoTarget ? appendSelectIntoTarget(runtime, nodes, edges, root, intoTarget) : root;
     }
     const cteReferenceIdsByName = new Map<string, string[]>();
 
-    const recordCteReference = (cteName: string, nodeId: string): void => {
-        const normalizedName = cteName.toLowerCase();
-        const existing = cteReferenceIdsByName.get(normalizedName);
+    const recordCteReference = (cteKey: string, nodeId: string): void => {
+        const existing = cteReferenceIdsByName.get(cteKey);
         if (existing) {
             if (!existing.includes(nodeId)) { existing.push(nodeId); }
             return;
         }
-        cteReferenceIdsByName.set(normalizedName, [nodeId]);
+        cteReferenceIdsByName.set(cteKey, [nodeId]);
     };
 
-    // Collect CTE names first
-    if (stmt.with && Array.isArray(stmt.with)) {
-        for (const cte of stmt.with) {
-            const cteName = cte.name?.value || cte.name || 'CTE';
-            cteNames.add(cteName.toLowerCase());
+    if (Array.isArray(stmt.with)) {
+        const recursive = stmt.with.some(declaresRecursiveCte);
+        const supportsForwardCteReferences = recursive && (ctx.dialect === 'PostgreSQL' || ctx.dialect === 'BigQuery');
+        if (supportsForwardCteReferences) {
+            for (const cte of stmt.with) {
+                const key = getCteNameKey(cte.name, ctx.dialect);
+                cteNames.add(key);
+                cteNodeIdsByName.set(key, genId(runtime, 'cte'));
+            }
         }
-    }
 
-    // Process CTEs first - with nested sub-graph
-    if (stmt.with && Array.isArray(stmt.with)) {
         for (const cte of stmt.with) {
             ctx.stats.ctes++;
-            const cteId = genId(runtime, 'cte');
-            const cteName = cte.name?.value || cte.name || 'CTE';
-
-            // Parse CTE's internal structure
+            const key = getCteNameKey(cte.name, ctx.dialect);
+            const cteId = supportsForwardCteReferences ? cteNodeIdsByName.get(key)! : genId(runtime, 'cte');
+            const cteName = getAstString(cte.name) || 'CTE';
             const cteChildren: FlowNode[] = [];
             const cteChildEdges: FlowEdge[] = [];
-
-            // CTE statement can be in different locations depending on parser output
-            // Handle various AST structures from node-sql-parser
             const cteStmt = getCteStatementAst(cte);
-
+            const isRecursive = declaresRecursiveCte(cte);
+            if (recursive || allowsImplicitCteSelfReference(cteStmt, ctx.dialect)) {
+                cteNames.add(key);
+            }
+            const dependencies = new Set<string>();
             if (cteStmt) {
-                // Phase 1 Feature: CTE Expansion Controls & Breadcrumb Navigation
-                // Recursively parse the CTE's SELECT statement with parentId and depth for breadcrumb navigation
-                parseCteOrSubqueryInternals(runtime, cteStmt, cteChildren, cteChildEdges, cteId, 0, cteNames);
+                parseCteOrSubqueryInternals(runtime, cteStmt, cteChildren, cteChildEdges, cteId, 0, cteNames,
+                    referencedKey => {
+                        const dependencyId = cteNodeIdsByName.get(referencedKey);
+                        if (dependencyId && dependencyId !== cteId) { dependencies.add(dependencyId); }
+                    });
+            }
+            for (const dependencyId of dependencies) {
+                edges.push({ id: genId(runtime, 'e'), source: dependencyId, target: cteId });
             }
 
-            // Calculate container size based on children
             const containerWidth = Math.max(200, cteChildren.length > 0 ? 220 : 160);
             const containerHeight = cteChildren.length > 0 ? 80 + cteChildren.length * 35 : 60;
-
-            // Check if this CTE is recursive (node-sql-parser sets recursive flag on the CTE or parent)
-            const isRecursive = cte.recursive === true || cte.prefix?.toLowerCase() === 'recursive';
-            const cteLabel = isRecursive ? `WITH RECURSIVE ${cteName}` : `WITH ${cteName}`;
-            const cteDescription = isRecursive ? 'Recursive Common Table Expression' : 'Common Table Expression';
-
+            const ctePrefix = isRecursive ? 'WITH RECURSIVE ' : 'WITH ';
             nodes.push({
                 id: cteId,
                 type: 'cte',
-                label: cteLabel,
-                description: cteDescription,
+                label: ctePrefix + cteName,
+                relationIdentity: { name: ctePrefix + key, qualifiers: [] },
+                description: isRecursive ? 'Recursive Common Table Expression' : 'Common Table Expression',
                 children: cteChildren.length > 0 ? cteChildren : undefined,
-                childEdges: cteChildren.length > 0 ? cteChildEdges : undefined, // Keep empty array if children exist
-                expanded: false, // Start collapsed, expand on click to show subflow
-                collapsible: cteChildren.length > 0, // Only collapsible if has children
-                depth: 0, // Root level CTE - used for breadcrumb navigation
+                childEdges: cteChildren.length > 0 ? cteChildEdges : undefined,
+                expanded: false,
+                collapsible: cteChildren.length > 0,
+                depth: 0,
                 x: 0, y: 0, width: containerWidth, height: containerHeight
             });
-            cteNodeIdsByName.set(cteName.toLowerCase(), cteId);
-        }
-    }
-
-    // Connect inter-CTE dependencies: when a CTE's internal body references
-    // another CTE (via FROM or JOIN), create a top-level edge between the
-    // two CTE container nodes.
-    for (const cte of Array.isArray(stmt.with) ? stmt.with : []) {
-        const cteName = cte.name?.value || cte.name || 'CTE';
-        const cteId = cteNodeIdsByName.get(cteName.toLowerCase());
-        if (!cteId) { continue; }
-        const cteNode = nodes.find(n => n.id === cteId);
-        if (!cteNode?.children) { continue; }
-        const connected = new Set<string>();
-        for (const child of cteNode.children) {
-            let refName: string | undefined;
-            if (child.type === 'table') {
-                refName = child.label.toLowerCase();
-            } else if (child.type === 'join') {
-                // Join labels are "LEFT JOIN tableName" — extract the table name
-                const parts = child.label.split(/\s+/);
-                refName = parts[parts.length - 1]?.toLowerCase();
-            }
-            if (!refName) { continue; }
-            const referencedCteId = cteNodeIdsByName.get(refName);
-            if (referencedCteId && referencedCteId !== cteId && !connected.has(referencedCteId)) {
-                connected.add(referencedCteId);
-                edges.push({
-                    id: genId(runtime, 'e'),
-                    source: referencedCteId,
-                    target: cteId
-                });
-            }
+            cteNames.add(key);
+            cteNodeIdsByName.set(key, cteId);
         }
     }
 
@@ -677,6 +660,11 @@ function processSelect(
 
     previousId = appendSelectTail(runtime, stmt, nodes, edges, previousId)!;
 
+    const intoTarget = getSelectIntoTarget(stmt, ctx.dialect);
+    if (intoTarget) {
+        return appendSelectIntoTarget(runtime, nodes, edges, previousId, intoTarget);
+    }
+
     // Add result node
     const resultId = genId(runtime, 'result');
     nodes.push({
@@ -694,6 +682,34 @@ function processSelect(
     });
 
     return resultId;
+}
+
+function getSelectIntoTarget(stmt: any, dialect: SqlDialect): string | null {
+    if (dialect !== 'PostgreSQL' && dialect !== 'TransactSQL') { return null; }
+    const into = stmt.into;
+    if (into?.type !== 'into' || into.keyword) { return null; }
+    const target = typeof into.expr === 'string' ? into.expr
+        : (into.expr?.type === 'double_quote_string' ? getAstString(into.expr) : null);
+    return target && !target.startsWith('@') ? target : null;
+}
+
+function appendSelectIntoTarget(
+    runtime: SelectExecutionContext,
+    nodes: FlowNode[],
+    edges: FlowEdge[],
+    source: string,
+    target: string
+): string {
+    const id = genId(runtime, 'table');
+    nodes.push({
+        id, type: 'table', label: target,
+        description: 'Table created by SELECT INTO',
+        tableCategory: 'physical', accessMode: 'write', operationType: 'CREATE_TABLE',
+        x: 0, y: 0, width: 140, height: 60,
+    });
+    edges.push({ id: genId(runtime, 'e'), source, target: id, label: 'SELECT INTO' });
+    runtime.context.stats.tables++;
+    return id;
 }
 
 interface NestedSelectPosition {
@@ -745,17 +761,18 @@ function processSetOperationTree(
     nodes: FlowNode[],
     edges: FlowEdge[],
     renderBranch: (statement: any) => string | null,
-    nested?: NestedSelectPosition
+    nested?: NestedSelectPosition,
+    cteShapes: ReturnType<typeof collectCteColumnShapes> = new Map(),
 ): { id: string | null; statement: any; tables: string[] } {
     if ('statement' in tree) {
         return { id: renderBranch(tree.statement), statement: tree.statement,
             tables: extractTablesFromStatement(tree.statement, runtime.context.dialect) };
     }
     // Render leaves in SQL order so SELECT/UNION lineage keeps its branch ordinals.
-    const left = processSetOperationTree(runtime, tree.left, nodes, edges, renderBranch, nested);
-    const right = processSetOperationTree(runtime, tree.right, nodes, edges, renderBranch, nested);
+    const left = processSetOperationTree(runtime, tree.left, nodes, edges, renderBranch, nested, cteShapes);
+    const right = processSetOperationTree(runtime, tree.right, nodes, edges, renderBranch, nested, cteShapes);
     runtime.context.stats.unions++;
-    maybeAddSetOperationColumnCountHint(runtime.context, tree.operator, left.statement, right.statement);
+    maybeAddSetOperationColumnCountHint(runtime.context, tree.operator, left.statement, right.statement, cteShapes);
     const edgePrefix = nested ? 'ce' : 'e';
     const leftNode = nodes.find(node => node.id === left.id);
     const rightNode = nodes.find(node => node.id === right.id);
@@ -793,21 +810,19 @@ function processSetOperationTree(
     return { id, statement: left.statement, tables: [...new Set([...left.tables, ...right.tables])] };
 }
 
-function getProjectedColumnCount(stmt: any): number | null {
-    if (!stmt?.columns || stmt.columns === '*' || !Array.isArray(stmt.columns)) {
-        return null;
-    }
-    return stmt.columns.length;
-}
-
 function maybeAddSetOperationColumnCountHint(
     context: ParserContext,
     setOp: string,
     leftStmt: any,
-    rightStmt: any
+    rightStmt: any,
+    cteShapes: ReturnType<typeof collectCteColumnShapes>
 ): void {
-    const leftCount = getProjectedColumnCount(leftStmt);
-    const rightCount = getProjectedColumnCount(rightStmt);
+    const count = (stmt: any): number | null => {
+        const columns = getSelectProjection(stmt, collectCteColumnShapes(stmt, context.dialect, cteShapes), context.dialect);
+        return columns.length === 0 || columns.some(isWildcardProjection) ? null : columns.length;
+    };
+    const leftCount = count(leftStmt);
+    const rightCount = count(rightStmt);
     if (leftCount === null || rightCount === null || leftCount === rightCount) {
         return;
     }
@@ -831,28 +846,6 @@ function maybeAddSetOperationColumnCountHint(
     });
 }
 
-function getCteStatementAst(cte: any): any {
-    if (cte?.stmt?.ast) {
-        return cte.stmt.ast;
-    }
-    if (cte?.stmt?.type === 'select' || cte?.stmt?.from) {
-        return cte.stmt;
-    }
-    if (cte?.ast) {
-        return cte.ast;
-    }
-    if (cte?.expr?.ast) {
-        return cte.expr.ast;
-    }
-    if (cte?.definition?.ast) {
-        return cte.definition.ast;
-    }
-    if (cte?.definition) {
-        return cte.definition;
-    }
-    return null;
-}
-
 function processFromItem(
     runtime: SelectExecutionContext,
     fromItem: any,
@@ -867,7 +860,7 @@ function processFromItem(
     if (fromItem.expr && fromItem.expr.ast) {
         ctx.stats.subqueries++;
         const subqueryId = genId(runtime, 'subquery');
-        const alias = fromItem.as || 'subquery';
+        const alias = getAstString(fromItem.as) || 'subquery';
 
         // Parse subquery's internal structure
         const subChildren: FlowNode[] = [];
@@ -915,6 +908,7 @@ function processFromItem(
             type: 'table',
             label,
             alias: tableAlias,
+            relationIdentity: getFromItemIdentity(fromItem),
             description: asJoin
                 ? `Joined table function (${tableValuedFunctionName})`
                 : `Table function source (${tableValuedFunctionName})`,
@@ -958,26 +952,27 @@ function processFromItem(
     if (!tableName) { return null; }
 
     ctx.stats.tables++;
-    trackTableUsage(runtime, tableName);
     const tableId = genId(runtime, 'table');
     const tableAlias = getAstString(fromItem.as)?.trim() || undefined;
     // Determine if this is a CTE reference
-    const isCteRef = cteNames.has(tableName.toLowerCase());
+    const cteKey = getCteReferenceKey(fromItem, cteNames, ctx.dialect);
+    if (cteKey === undefined) { trackTableUsage(runtime, tableName); }
     nodes.push({
         id: tableId,
         type: 'table',
         label: tableName,
         alias: tableAlias,
-        description: isCteRef
+        relationIdentity: getFromItemIdentity(fromItem),
+        description: cteKey !== undefined
             ? (asJoin ? 'Joined CTE reference' : 'CTE reference')
             : (asJoin ? 'Joined table' : 'Source table'),
         details: tableAlias ? [`Alias: ${tableAlias}`] : undefined,
-        tableCategory: isCteRef ? 'cte_reference' : 'physical',
+        tableCategory: cteKey !== undefined ? 'cte_reference' : 'physical',
         x: 0, y: 0, width: 140, height: 60
     });
 
-    if (isCteRef && onCteReference) {
-        onCteReference(tableName.toLowerCase(), tableId);
+    if (cteKey !== undefined && onCteReference) {
+        onCteReference(cteKey, tableId);
     }
 
     return tableId;
@@ -999,7 +994,7 @@ function parseCteOrSubqueryInternals(
     if (setTree) {
         return processSetOperationTree(runtime, setTree, nodes, edges,
             branch => parseCteOrSubqueryInternals(runtime, branch, nodes, edges, parentId, depth, cteNames, onCteReference),
-            { parentId, depth }).id;
+            { parentId, depth }, collectCteColumnShapes(stmt, ctx.dialect)).id;
     }
 
     // Track function usage inside nested SELECTs so stats include aggregates/scalars
@@ -1037,19 +1032,18 @@ function parseCteOrSubqueryInternals(
             } else if (!fromItem.join) {
                 const tableName = getTableName(fromItem);
                 if (tableName && tableName !== 'table') {
-                    // Track table usage for stats (including tables from CTEs and subqueries)
-                    trackTableUsage(runtime, tableName);
                     const tableId = genId(runtime, 'child_table');
                     const tableAlias = getAstString(fromItem.as)?.trim() || undefined;
-                    const isCteReference = cteNames.has(tableName.toLowerCase());
-                    if (isCteReference) { onCteReference?.(tableName.toLowerCase()); }
+                    const cteKey = getCteReferenceKey(fromItem, cteNames, ctx.dialect);
+                    if (cteKey !== undefined) { onCteReference?.(cteKey); } else { trackTableUsage(runtime, tableName); }
                     nodes.push({
                         id: tableId,
                         type: 'table',
                         label: tableName,
                         alias: tableAlias,
-                        description: isCteReference ? 'CTE reference' : 'Table',
-                        tableCategory: isCteReference ? 'cte_reference' : 'physical',
+                        relationIdentity: getFromItemIdentity(fromItem),
+                        description: cteKey !== undefined ? 'CTE reference' : 'Table',
+                        tableCategory: cteKey !== undefined ? 'cte_reference' : 'physical',
                         details: tableAlias ? [`Alias: ${tableAlias}`] : undefined,
                         parentId: parentId,
                         depth: depth + 1,
@@ -1077,8 +1071,8 @@ function parseCteOrSubqueryInternals(
                     const joinTable = getTableName(fromItem);
                     // Track table usage for joined tables in CTEs/subqueries
                     if (joinTable && joinTable !== 'table') {
-                        trackTableUsage(runtime, joinTable);
-                        if (cteNames.has(joinTable.toLowerCase())) { onCteReference?.(joinTable.toLowerCase()); }
+                        const cteKey = getCteReferenceKey(fromItem, cteNames, ctx.dialect);
+                        if (cteKey !== undefined) { onCteReference?.(cteKey); } else { trackTableUsage(runtime, joinTable); }
                     }
                     // Extract join condition details
                     const joinDetails: string[] = [];
@@ -1090,6 +1084,7 @@ function parseCteOrSubqueryInternals(
                         id: joinId,
                         type: 'join',
                         label: `${fromItem.join} ${joinTable}`,
+                        relationIdentity: getFromItemIdentity(fromItem),
                         joinType: String(fromItem.join || 'JOIN').toUpperCase(),
                         description: 'Join',
                         details: joinDetails,
@@ -1327,7 +1322,7 @@ function collectScalarSubquerySourceTables(
     excludedTableLabels: Set<string>,
     dialect: SqlDialect
 ): Array<{ tableName: string; clause: SqClause }> {
-    const scopedCteNames = new Set<string>(Array.from(cteNames).map(name => name.toLowerCase()));
+    const scopedCteNames = new Set(cteNames);
     // Map from lowercase table name → { originalName, clause } (first clause wins for dedup)
     const tableClauseMap = new Map<string, { originalName: string; clause: SqClause }>();
 
@@ -1512,17 +1507,20 @@ function collectTablesFromSelectTree(
     const scopedCteNames = new Set(inheritedCteNames);
 
     if (Array.isArray(stmt.with)) {
-        for (const cte of stmt.with) {
-            const cteName = (cte?.name?.value || cte?.name || '').toString().trim().toLowerCase();
-            if (cteName) {
-                scopedCteNames.add(cteName);
-            }
+        const recursive = stmt.with.some(declaresRecursiveCte);
+        if (recursive && (dialect === 'PostgreSQL' || dialect === 'BigQuery')) {
+            for (const cte of stmt.with) { scopedCteNames.add(getCteNameKey(cte.name, dialect)); }
         }
         for (const cte of stmt.with) {
+            const key = getCteNameKey(cte.name, dialect);
             const cteStmt = getCteStatementAst(cte);
+            if (recursive || allowsImplicitCteSelfReference(cteStmt, dialect)) {
+                scopedCteNames.add(key);
+            }
             if (cteStmt) {
                 collectTablesFromSelectTree(cteStmt, sourceTables, scopedCteNames, dialect);
             }
+            scopedCteNames.add(key);
         }
     }
 
@@ -1537,7 +1535,7 @@ function collectTablesFromSelectTree(
                 sourceTables.add(tableValuedFunctionName);
             } else {
                 const tableName = getTableName(fromItem);
-                if (tableName && tableName !== 'table' && !scopedCteNames.has(tableName.toLowerCase())) {
+                if (tableName && tableName !== 'table' && getCteReferenceKey(fromItem, scopedCteNames, dialect) === undefined) {
                     sourceTables.add(tableName);
                 }
             }

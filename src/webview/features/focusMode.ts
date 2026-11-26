@@ -48,6 +48,11 @@ export function clearFocusModeFeature(options: ClearFocusModeOptions): void {
         (nodeEl as SVGGElement).style.opacity = '1';
     });
 
+    mainGroup.querySelectorAll<SVGGElement>('.cloud-container').forEach((cloud) => {
+        cloud.style.display = '';
+        cloud.style.opacity = '1';
+    });
+
     mainGroup.querySelectorAll('.edge').forEach((edgeEl) => {
         (edgeEl as SVGPathElement).style.display = '';
         (edgeEl as SVGPathElement).style.opacity = '1';

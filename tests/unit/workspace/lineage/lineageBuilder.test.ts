@@ -662,7 +662,7 @@ describe('LineageBuilder', () => {
         });
     });
 
-    describe('resolveTableId', () => {
+    describe('physical relation resolution', () => {
         it('does not fold an unresolved relation onto a different quoted-case node', () => {
             const quotedDef = makeDef('Users', 'table', [], {
                 nameQuoted: true,
@@ -671,8 +671,8 @@ describe('LineageBuilder', () => {
             const builder = new LineageBuilder();
             builder.buildFromIndex(makeIndex([quotedDef]));
 
-            expect((builder as any).resolveTableId('users', 'query.sql')).toBeNull();
-            expect((builder as any).resolveTableId('Users', 'query.sql')).toBe('table:Users');
+            expect((builder as any).resolveTableNodeId('users')).toBeNull();
+            expect((builder as any).resolveTableNodeId('Users')).toBe('table:Users');
         });
 
         it('resolves table: prefix', () => {
@@ -1152,14 +1152,14 @@ describe('LineageBuilder', () => {
     });
 
     describe('edge dedup performance', () => {
-        it('uses Set-based dedup instead of O(n) array scan', () => {
+        it('uses keyed dedup instead of O(n) array scans', () => {
             const realFs = jest.requireActual('fs') as typeof import('fs');
             const source = realFs.readFileSync(
                 path.join(__dirname, '../../../../src/workspace/lineage/lineageBuilder.ts'),
                 'utf8'
             );
-            // Should use Set for O(1) lookup instead of edges.find() for O(n)
-            expect(source).toContain('private edgeIds = new Set<string>()');
+            // Should use keyed lookups instead of scanning the edge arrays
+            expect(source).toContain('private edgesById = new Map<string, LineageEdge>()');
             expect(source).toContain('private columnEdgeIds = new Set<string>()');
             expect(source).not.toMatch(/this\.edges\.find\(/);
             expect(source).not.toMatch(/this\.columnEdges\.some\(/);

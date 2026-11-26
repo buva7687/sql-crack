@@ -45,20 +45,43 @@ let activeOverlay: HTMLDivElement | null = null;
 let activeCleanupHandlers: Array<() => void> = [];
 let activeCompareContext: ActiveCompareContext | null = null;
 
-function normalizeNodeKey(node: Pick<FlowNode, 'type' | 'label' | 'alias'>): string {
-    const normalizedLabel = node.label.trim().toLowerCase().replace(/\s+/g, ' ');
-    const alias = node.alias?.trim().toLowerCase();
-    return `${node.type}:${encodeURIComponent(normalizedLabel)}${alias ? `:alias:${encodeURIComponent(alias)}` : ''}`;
+function normalizeNodeKey(node: Pick<FlowNode, 'type' | 'label' | 'alias' | 'relationIdentity'>): string {
+    // Relation labels can be delimited identifiers and the parser may return
+    // only their value. Preserve spelling and whitespace so they stay distinct.
+    const isRelation = node.relationIdentity !== undefined || node.type === 'table' || node.type === 'cte' || node.type === 'subquery';
+    const normalizedLabel = isRelation
+        ? (node.relationIdentity?.name ?? node.label)
+        : node.label.trim().toLowerCase().replace(/\s+/g, ' ');
+    const qualifiers = node.relationIdentity?.qualifiers.map(encodeURIComponent);
+    const qualifierKey = qualifiers?.length ? `:qualified:${qualifiers.join(':')}` : '';
+    const alias = node.relationIdentity?.alias ?? node.alias;
+    return `${node.type}:${encodeURIComponent(normalizedLabel)}${qualifierKey}${alias ? `:alias:${encodeURIComponent(alias)}` : ''}`;
 }
 
-function nodeSignature(node: FlowNode): string {
-    return JSON.stringify({
+function nodeSignature(node: FlowNode): unknown {
+    const children = node.children || [];
+    const childIndexes = new Map(children.map((child, index) => [child.id, index]));
+    const alias = node.relationIdentity?.alias;
+    // A join inside a CTE body repeats the joined relation in its details;
+    // compare it by the same canonical name as the node key.
+    const joinedRelation = /\bJOIN\s+(.+)$/i;
+    const rawJoined = node.type === 'join' ? joinedRelation.exec(node.label)?.[1] : undefined;
+    const canonicalJoined = rawJoined ? joinedRelation.exec(node.relationIdentity?.name ?? '')?.[1] : undefined;
+    const details = (node.details || []).map(detail => {
+        if (alias && node.alias && detail === `Alias: ${node.alias}`) { return `Alias: ${alias}`; }
+        return canonicalJoined && detail === rawJoined ? canonicalJoined : detail;
+    });
+    return {
         description: node.description || '',
-        details: node.details || [],
+        details,
         accessMode: node.accessMode || '',
         operationType: node.operationType || '',
         warnings: (node.warnings || []).map(w => `${w.type}:${w.severity}`),
-    });
+        children: children.map(child => [normalizeNodeKey(child), nodeSignature(child)]),
+        edges: (node.childEdges || []).map(edge => [
+            childIndexes.get(edge.source), childIndexes.get(edge.target), edge.label,
+        ]),
+    };
 }
 
 function toNodeMap(nodes: FlowNode[]): Map<string, FlowNode> {
@@ -435,7 +458,7 @@ export function computeCompareDiff(left: ParseResult, right: ParseResult): Compa
             return;
         }
         const leftNode = leftMap.get(key);
-        if (leftNode && nodeSignature(leftNode) !== nodeSignature(rightNode)) {
+        if (leftNode && JSON.stringify(nodeSignature(leftNode)) !== JSON.stringify(nodeSignature(rightNode))) {
             changedNodeKeys.push(key);
         }
     });

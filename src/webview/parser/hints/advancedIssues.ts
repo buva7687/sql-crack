@@ -1,6 +1,7 @@
-import type { FlowEdge, FlowNode } from '../../types';
+import type { FlowEdge, FlowNode, SqlDialect } from '../../types';
 import type { ParserContext } from '../context';
-import { escapeRegex, stripSqlComments } from '../../../shared';
+import { dialectSupportsBackslashEscapes, dialectSupportsHashComments, escapeRegex, getSqlIdentifierKey, getSqlRelationIdentifiers, maskSqlCommentsPreservingPositions, stripSqlComments, tokenizeSqlIdentifiers } from '../../../shared';
+import type { SqlIdentifier } from '../../../shared';
 import { maskStringsAndComments } from '../dialects/preprocessing';
 
 /** Extract the bare CTE name from a label like "WITH foo" or "WITH RECURSIVE foo" */
@@ -49,7 +50,7 @@ function collectSelectNodes(nodes: FlowNode[]): FlowNode[] {
     return selectNodes;
 }
 
-function extractCteBodyScope(fullNormalizedSql: string, maskedSql: string, cteName: string): { bodySql: string; downstreamSql: string } | null {
+function extractCteBodyScope(fullNormalizedSql: string, maskedSql: string, cteName: string, _dialect: SqlDialect): { bodySql: string; bodyEnd: number } | null {
     const ctePattern = new RegExp(`\\b${escapeRegex(cteName)}\\b\\s+as\\s*\\(`, 'i');
     const cteMatch = ctePattern.exec(maskedSql);
     if (!cteMatch) {
@@ -68,115 +69,281 @@ function extractCteBodyScope(fullNormalizedSql: string, maskedSql: string, cteNa
         return null;
     }
 
-    let normalizedSql = fullNormalizedSql;
-    normalizedSql = fullNormalizedSql.substring(bodyStart, bodyEnd).trim();
-
+    const normalizedSql = fullNormalizedSql.substring(bodyStart, bodyEnd).trim();
     return {
         bodySql: normalizedSql,
-        downstreamSql: `${fullNormalizedSql.substring(0, bodyStart)} ${fullNormalizedSql.substring(bodyEnd + 1)}`.trim()
+        bodyEnd,
     };
 }
 
-const SQL_ALIAS_STOP_WORDS = new Set([
-    'on', 'where', 'group', 'having', 'order', 'limit', 'join', 'inner', 'left',
-    'right', 'full', 'cross', 'natural', 'union', 'intersect', 'except'
-]);
-
-function collectCteReferenceQualifiers(sql: string, cteName: string): string[] {
-    const qualifiers = new Set<string>();
-    const referencePattern = new RegExp(`\\b(?:from|join)\\s+${escapeRegex(cteName)}\\b(?:\\s+(?:as\\s+)?([a-z_][\\w$]*))?`, 'gi');
-    let match: RegExpExecArray | null;
-
-    while ((match = referencePattern.exec(sql)) !== null) {
-        qualifiers.add(cteName.toLowerCase());
-        const alias = match[1]?.toLowerCase();
-        if (alias && !SQL_ALIAS_STOP_WORDS.has(alias)) {
-            qualifiers.add(alias);
-        }
-    }
-
-    return Array.from(qualifiers);
+function collectCteReferenceQualifiers(
+    relations: ReadonlyArray<{ table?: SqlIdentifier; alias?: SqlIdentifier; offset?: number }>,
+    bodyEnd: number,
+    cteName: string
+): SqlIdentifier[] {
+    const cteNameLower = cteName.toLowerCase();
+    return relations
+        .filter(source => (source.offset ?? Number.POSITIVE_INFINITY) > bodyEnd
+            && source.table?.value.toLowerCase() === cteNameLower)
+        .flatMap(source => source.alias ? [source.alias] : source.table ? [source.table] : []);
 }
 
-function containsColumnReference(text: string, columnName: string, qualifiers?: string[]): boolean {
-    const escapedColName = escapeRegex(columnName);
+const SIMPLE_IDENTIFIER_RE = /^\w+$/;
+const QUALIFIED_REF_STRIP_RE = /\b[a-z_][\w$]*\s*\.\s*[a-z_][\w$]*\b/gi;
+const QUALIFIED_PAIR_RE = /\b(\w+)\s*\.\s*(\w+)\b/g;
+const WORD_TOKEN_RE = /\w+/g;
+
+interface IndexedClauseText {
+    raw: string;
+    withoutQualifiedRefs: string;
+    words: Set<string>;
+    qualifiedPairs: Set<string>;
+}
+
+interface StarCoverage {
+    unrestricted: boolean;
+    excludedKeySets: Set<string>[];
+    cleanedSelectClause: string;
+}
+
+interface PreparedSqlUsage {
+    hasUnrestrictedStar: boolean;
+    starExcludedKeySets: Set<string>[];
+    clauses: IndexedClauseText[];
+    qualifiers?: SqlIdentifier[];
+    qualifierValuesLower?: string[];
+    dialect: SqlDialect;
+}
+
+function indexClauseText(text: string, hasQualifiers: boolean): IndexedClauseText {
+    const withoutQualifiedRefs = hasQualifiers ? text.replace(QUALIFIED_REF_STRIP_RE, ' ') : text;
+    const words = new Set<string>();
+    for (const match of withoutQualifiedRefs.toLowerCase().matchAll(WORD_TOKEN_RE)) {
+        words.add(match[0]);
+    }
+    const qualifiedPairs = new Set<string>();
+    if (hasQualifiers) {
+        for (const match of text.toLowerCase().matchAll(QUALIFIED_PAIR_RE)) {
+            qualifiedPairs.add(`${match[1]}.${match[2]}`);
+        }
+    }
+    return { raw: text, withoutQualifiedRefs, words, qualifiedPairs };
+}
+
+function clauseContainsColumn(clause: IndexedClauseText, columnName: string, qualifiers?: SqlIdentifier[], qualifierValuesLower?: string[]): boolean {
+    const colLower = columnName.toLowerCase();
+    const isSimpleCol = SIMPLE_IDENTIFIER_RE.test(columnName);
 
     if (qualifiers && qualifiers.length > 0) {
-        for (const qualifier of qualifiers) {
-            const qualifiedPattern = new RegExp(`\\b${escapeRegex(qualifier)}\\s*\\.\\s*${escapedColName}\\b`, 'i');
-            if (qualifiedPattern.test(text)) {
-                return true;
+        for (let i = 0; i < qualifiers.length; i++) {
+            const qualifierValue = qualifiers[i].value;
+            if (isSimpleCol && SIMPLE_IDENTIFIER_RE.test(qualifierValue)) {
+                if (clause.qualifiedPairs.has(`${qualifierValuesLower![i]}.${colLower}`)) {
+                    return true;
+                }
+            } else {
+                const qualifiedPattern = new RegExp(`\\b${escapeRegex(qualifierValue)}\\s*\\.\\s*${escapeRegex(columnName)}\\b`, 'i');
+                if (qualifiedPattern.test(clause.raw)) {
+                    return true;
+                }
             }
         }
-
-        const withoutQualifiedRefs = text.replace(/\b[a-z_][\w$]*\s*\.\s*[a-z_][\w$]*\b/gi, ' ');
-        return new RegExp(`\\b${escapedColName}\\b`, 'i').test(withoutQualifiedRefs);
+        if (isSimpleCol) {
+            return clause.words.has(colLower);
+        }
+        return new RegExp(`\\b${escapeRegex(columnName)}\\b`, 'i').test(clause.withoutQualifiedRefs);
     }
 
-    return new RegExp(`\\b${escapedColName}\\b`, 'i').test(text);
+    if (isSimpleCol) {
+        return clause.words.has(colLower);
+    }
+    return new RegExp(`\\b${escapeRegex(columnName)}\\b`, 'i').test(clause.raw);
 }
 
-function selectClauseHasStar(selectClause: string, qualifiers?: string[]): boolean {
-    if (/(^|,)\s*\*(?:\s*,|\s*$)/.test(selectClause)) {
-        return true;
+function analyzeSelectClauseStar(
+    selectClause: string,
+    qualifiers: SqlIdentifier[] | undefined,
+    dialect: SqlDialect
+): StarCoverage {
+    if (!selectClause.includes('*')) {
+        return { unrestricted: false, excludedKeySets: [], cleanedSelectClause: selectClause };
     }
 
-    return Boolean(qualifiers?.some(qualifier => {
-        const qualifiedStarPattern = new RegExp(`\\b${escapeRegex(qualifier)}\\s*\\.\\s*\\*\\b`, 'i');
-        return qualifiedStarPattern.test(selectClause);
-    }));
+    const tokens = tokenizeSqlIdentifiers(selectClause, dialect);
+    const qualifierKeys = qualifiers?.map(qualifier => getSqlIdentifierKey(qualifier, dialect));
+    const excludedKeySets: Set<string>[] = [];
+    const stripRanges: Array<[number, number]> = [];
+    let unrestricted = false;
+
+    for (let index = 0; index < tokens.length; index++) {
+        const token = tokens[index];
+        if (token.quoted || token.value !== '*' || token.depth !== 0) { continue; }
+
+        const prev = tokens[index - 1];
+        const prevPrev = tokens[index - 2];
+        let matchesTarget = false;
+        if (prev && !prev.quoted && prev.value === '.') {
+            if (prevPrev && qualifierKeys?.includes(getSqlIdentifierKey(prevPrev, dialect))) {
+                matchesTarget = true;
+            }
+        } else if (!prev || (!prev.quoted && (prev.value === ',' || prev.value.toUpperCase() === 'DISTINCT' || prev.value.toUpperCase() === 'ALL'))) {
+            matchesTarget = true;
+        }
+
+        const next = tokens[index + 1];
+        const modifier = next && !next.quoted ? next.value.toUpperCase() : '';
+        if (modifier === 'EXCEPT' || modifier === 'EXCLUDE') {
+            const excluded = new Set<string>();
+            let cursor = index + 2;
+            const afterModifier = tokens[cursor];
+            let endOffset = next.offset + next.value.length;
+            if (afterModifier && !afterModifier.quoted && afterModifier.value === '(') {
+                cursor++;
+                while (cursor < tokens.length && (tokens[cursor].quoted || tokens[cursor].value !== ')')) {
+                    const entry = tokens[cursor];
+                    if (entry.quoted || entry.value !== ',') {
+                        excluded.add(getSqlIdentifierKey(entry, dialect));
+                    }
+                    cursor++;
+                }
+                if (cursor < tokens.length) {
+                    endOffset = tokens[cursor].offset + tokens[cursor].value.length;
+                }
+            } else if (afterModifier) {
+                excluded.add(getSqlIdentifierKey(afterModifier, dialect));
+                endOffset = afterModifier.offset + afterModifier.value.length;
+            }
+            stripRanges.push([next.offset, endOffset]);
+            if (matchesTarget && excluded.size > 0) {
+                excludedKeySets.push(excluded);
+            }
+        } else if (matchesTarget && (!next || (!next.quoted && next.value === ','))) {
+            unrestricted = true;
+        }
+    }
+
+    let cleanedSelectClause = selectClause;
+    if (stripRanges.length > 0) {
+        let out = '';
+        let pos = 0;
+        for (const [start, end] of stripRanges) {
+            out += selectClause.slice(pos, start) + ' ';
+            pos = end;
+        }
+        cleanedSelectClause = out + selectClause.slice(pos);
+    }
+
+    return { unrestricted, excludedKeySets, cleanedSelectClause };
 }
 
-function isColumnUsedInSql(sql: string, columnNames: string[], options: { includeSelectClause?: boolean; qualifiers?: string[] } = {}): boolean {
+function prepareSqlUsage(
+    sql: string,
+    options: { includeSelectClause?: boolean; qualifiers?: SqlIdentifier[]; dialect?: SqlDialect } = {}
+): PreparedSqlUsage {
+    const dialect = options.dialect ?? 'MySQL';
+    const qualifiers = options.qualifiers;
+    const hasQualifiers = Boolean(qualifiers && qualifiers.length > 0);
+    const qualifierValuesLower = hasQualifiers ? qualifiers!.map(q => q.value.toLowerCase()) : undefined;
+    const clauses: IndexedClauseText[] = [];
+    const starExcludedKeySets: Set<string>[] = [];
+    let hasUnrestrictedStar = false;
+
     if (!sql) {
-        return false;
+        return { hasUnrestrictedStar, starExcludedKeySets, clauses, qualifiers, qualifierValuesLower, dialect };
+    }
+
+    if (options.includeSelectClause) {
+        for (const select of sql.matchAll(/\bselect\b\s+(.+?)\s+\bfrom\b/gi)) {
+            const star = analyzeSelectClauseStar(select[1], qualifiers, dialect);
+            if (star.unrestricted) {
+                hasUnrestrictedStar = true;
+                return { hasUnrestrictedStar, starExcludedKeySets, clauses, qualifiers, qualifierValuesLower, dialect };
+            }
+            if (star.excludedKeySets.length > 0) {
+                starExcludedKeySets.push(...star.excludedKeySets);
+            }
+            clauses.push(indexClauseText(star.cleanedSelectClause, hasQualifiers));
+        }
     }
 
     const sqlLower = sql.toLowerCase();
 
-    for (const nameToCheck of columnNames) {
-        if (options.includeSelectClause) {
-            const selectClauseMatch = sqlLower.match(/\bselect\b\s+(.+?)\s+\bfrom\b/i);
-            if (selectClauseMatch) {
-                if (selectClauseHasStar(selectClauseMatch[1], options.qualifiers)) {
-                    return true;
-                }
-                if (containsColumnReference(selectClauseMatch[1], nameToCheck, options.qualifiers)) {
-                    return true;
-                }
+    const whereMatch = sqlLower.match(/\bwhere\b\s+(.+?)(?:\s+(?:order|group|having|limit)\s+by|\s+limit|\s*;|\s*$)/i);
+    if (whereMatch) {
+        clauses.push(indexClauseText(whereMatch[1], hasQualifiers));
+    }
+
+    const orderByMatch = sqlLower.match(/\border\s+by\b\s+(.+?)(?:\s+limit|\s*;|\s*$)/i);
+    if (orderByMatch) {
+        clauses.push(indexClauseText(orderByMatch[1], hasQualifiers));
+    }
+
+    const groupByMatch = sqlLower.match(/\bgroup\s+by\b\s+(.+?)(?:\s+(?:having|order|limit)|\s*;|\s*$)/i);
+    if (groupByMatch) {
+        clauses.push(indexClauseText(groupByMatch[1], hasQualifiers));
+    }
+
+    const havingMatch = sqlLower.match(/\bhaving\b\s+(.+?)(?:\s+(?:order|limit)|\s*;|\s*$)/i);
+    if (havingMatch) {
+        clauses.push(indexClauseText(havingMatch[1], hasQualifiers));
+    }
+
+    // Check JOIN ON clauses: find all "JOIN table ON condition" patterns
+    // The terminator is a lookahead so the next JOIN starts its own match.
+    const joinOnPattern = /\bjoin\b\s+[\w.$]+(?:\s+(?:as\s+)?\w+)?\s+\bon\b\s+(.+?)(?=\s+(?:join|where|group|having|order|limit)\b|\s*;|\s*$)/gi;
+    let joinMatch: RegExpExecArray | null;
+    while ((joinMatch = joinOnPattern.exec(sqlLower)) !== null) {
+        clauses.push(indexClauseText(joinMatch[1], hasQualifiers));
+    }
+
+    return { hasUnrestrictedStar, starExcludedKeySets, clauses, qualifiers, qualifierValuesLower, dialect };
+}
+
+function extractOutputColumnIdentifiers(selectClause: string, dialect: SqlDialect): Array<SqlIdentifier | undefined> {
+    const tokens = tokenizeSqlIdentifiers(selectClause, dialect);
+    const outputs: Array<SqlIdentifier | undefined> = [];
+    let current: SqlIdentifier | undefined;
+    let hasTokens = false;
+    for (const token of tokens) {
+        if (token.depth !== 0) { continue; }
+        if (!token.quoted && token.value === ',') {
+            if (hasTokens) {
+                outputs.push(current);
+            }
+            current = undefined;
+            hasTokens = false;
+            continue;
+        }
+        hasTokens = true;
+        current = token.quoted || /^[\p{L}_#$@]/u.test(token.value) ? token : undefined;
+    }
+    if (hasTokens) {
+        outputs.push(current);
+    }
+    return outputs;
+}
+
+function isColumnUsedInPreparedSql(
+    prepared: PreparedSqlUsage,
+    columnNames: string[],
+    outputIdentifier?: SqlIdentifier
+): boolean {
+    if (prepared.hasUnrestrictedStar) {
+        return true;
+    }
+
+    if (prepared.starExcludedKeySets.length > 0 && outputIdentifier) {
+        const outputKey = getSqlIdentifierKey(outputIdentifier, prepared.dialect);
+        for (const excluded of prepared.starExcludedKeySets) {
+            if (!excluded.has(outputKey)) {
+                return true;
             }
         }
+    }
 
-        // Check WHERE clause: extract text between WHERE and next clause keyword
-        const whereMatch = sqlLower.match(/\bwhere\b\s+(.+?)(?:\s+(?:order|group|having|limit)\s+by|\s+limit|\s*;|\s*$)/i);
-        if (whereMatch && containsColumnReference(whereMatch[1], nameToCheck, options.qualifiers)) {
-            return true;
-        }
-
-        // Check ORDER BY clause: extract text between ORDER BY and LIMIT/end
-        const orderByMatch = sqlLower.match(/\border\s+by\b\s+(.+?)(?:\s+limit|\s*;|\s*$)/i);
-        if (orderByMatch && containsColumnReference(orderByMatch[1], nameToCheck, options.qualifiers)) {
-            return true;
-        }
-
-        // Check GROUP BY clause: extract text between GROUP BY and HAVING/ORDER BY/LIMIT/end
-        const groupByMatch = sqlLower.match(/\bgroup\s+by\b\s+(.+?)(?:\s+(?:having|order|limit)|\s*;|\s*$)/i);
-        if (groupByMatch && containsColumnReference(groupByMatch[1], nameToCheck, options.qualifiers)) {
-            return true;
-        }
-
-        // Check HAVING clause: extract text between HAVING and ORDER BY/LIMIT/end
-        const havingMatch = sqlLower.match(/\bhaving\b\s+(.+?)(?:\s+(?:order|limit)|\s*;|\s*$)/i);
-        if (havingMatch && containsColumnReference(havingMatch[1], nameToCheck, options.qualifiers)) {
-            return true;
-        }
-
-        // Check JOIN ON clauses: find all "JOIN table ON condition" patterns
-        // and check if column appears in the ON condition
-        const joinOnPattern = /\bjoin\b\s+\w+(?:\s+\w+)?\s+\bon\b\s+(.+?)(?:\s+(?:join|where|group|having|order|limit)|\s*;|\s*$)/gi;
-        let joinMatch: RegExpExecArray | null;
-        while ((joinMatch = joinOnPattern.exec(sqlLower)) !== null) {
-            if (containsColumnReference(joinMatch[1], nameToCheck, options.qualifiers)) {
+    for (const nameToCheck of columnNames) {
+        for (const clause of prepared.clauses) {
+            if (clauseContainsColumn(clause, nameToCheck, prepared.qualifiers, prepared.qualifierValuesLower)) {
                 return true;
             }
         }
@@ -521,6 +688,8 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
     // it once; large CTE chains otherwise repeat this full scan per CTE.
     const fullNormalizedSql = stripSqlComments(sql).replace(/\s+/g, ' ').trim();
     let maskedNormalizedSql: string | undefined;
+    let maskedDownstreamFullSql: string | undefined;
+    let allQueryRelations: ReturnType<typeof getSqlRelationIdentifiers> | undefined;
     selectNodes.forEach(selectNode => {
         if (!selectNode.columns || selectNode.columns.length === 0) {return;}
 
@@ -533,34 +702,52 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
             return;
         }
 
-        // Scope SQL to the relevant CTE/subquery body, but keep downstream
-        // query text so CTE output columns selected later are not treated as dead.
-        let normalizedSql = fullNormalizedSql;
-        let downstreamSql = '';
-        let downstreamQualifiers: string[] | undefined;
-        if (selectNode.parentId) {
-            const parentNode = findNodeById(nodes, selectNode.parentId);
-            if (parentNode?.type === 'cte' && parentNode.label) {
-                const cteName = extractCteName(parentNode.label);
-                if (cteName) {
-                    maskedNormalizedSql ??= maskStringsAndComments(fullNormalizedSql);
-                    const cteScope = extractCteBodyScope(fullNormalizedSql, maskedNormalizedSql, cteName);
-                    if (cteScope) {
-                        normalizedSql = cteScope.bodySql;
-                        const cteQualifiers = collectCteReferenceQualifiers(cteScope.downstreamSql, cteName);
-                        if (cteQualifiers.length > 0) {
-                            downstreamSql = cteScope.downstreamSql;
-                            downstreamQualifiers = cteQualifiers;
-                        }
-                    }
-                }
-            }
+        // Without a known relation binding, an intermediate projection could
+        // be used by the surrounding query. Only diagnose scoped CTE outputs.
+        const parentNode = findNodeById(nodes, selectNode.parentId);
+        if (parentNode?.type !== 'cte' || !parentNode.label) { return; }
+        // Deeper SELECTs are scalar or nested subqueries inside the CTE body;
+        // their columns are consumed by the body, not exported by the CTE.
+        if (selectNode.depth !== undefined && selectNode.depth > (parentNode.depth ?? 0) + 1) { return; }
+
+        const cteName = extractCteName(parentNode.label);
+        maskedNormalizedSql ??= maskStringsAndComments(fullNormalizedSql);
+        const cteScope = extractCteBodyScope(fullNormalizedSql, maskedNormalizedSql, cteName, context.dialect);
+        if (!cteScope) { return; }
+        const normalizedSql = cteScope.bodySql;
+        maskedDownstreamFullSql ??= maskSqlCommentsPreservingPositions(fullNormalizedSql, {
+            maskStringLiterals: true,
+            backslashEscapes: dialectSupportsBackslashEscapes(context.dialect),
+            hashComments: dialectSupportsHashComments(context.dialect),
+            dollarQuotes: context.dialect !== 'MySQL' && context.dialect !== 'MariaDB',
+        });
+        const downstreamSql = maskedDownstreamFullSql.slice(cteScope.bodyEnd + 1).trim();
+        allQueryRelations ??= getSqlRelationIdentifiers(maskedDownstreamFullSql, context.dialect);
+        const downstreamQualifiers = collectCteReferenceQualifiers(allQueryRelations, cteScope.bodyEnd, cteName);
+        if (downstreamQualifiers.length === 0) { return; }
+
+        const preparedDownstream = prepareSqlUsage(downstreamSql, {
+            includeSelectClause: true,
+            qualifiers: downstreamQualifiers,
+            dialect: context.dialect,
+        });
+        if (preparedDownstream.hasUnrestrictedStar) { return; }
+        const preparedBody = prepareSqlUsage(normalizedSql);
+        const downstreamQualifiedPairs = new Set<string>();
+        for (const match of downstreamSql.toLowerCase().matchAll(QUALIFIED_PAIR_RE)) {
+            downstreamQualifiedPairs.add(`${match[1]}.${match[2]}`);
         }
 
         // Extract column names directly from SQL SELECT clause as fallback
         // This ensures we have the actual column names as they appear in SQL,
         // which may differ from AST-extracted names (handles aliases, expressions)
         const selectClauseMatch = normalizedSql.match(/select\s+(.+?)\s+from/i);
+        const cteSelectListMatch = preparedDownstream.starExcludedKeySets.length > 0
+            ? (selectClauseMatch ?? normalizedSql.match(/select\s+(.+?)$/i))
+            : null;
+        const cteOutputIdentifiers = cteSelectListMatch
+            ? extractOutputColumnIdentifiers(cteSelectListMatch[1], context.dialect)
+            : undefined;
         const sqlColumnNamesMap = new Map<string, string[]>(); // column name -> [all variations]
         if (selectClauseMatch) {
             const selectClause = selectClauseMatch[1];
@@ -603,8 +790,11 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
             });
         }
 
-        selectNode.columns.forEach(col => {
+        selectNode.columns.forEach((col, colIndex) => {
             const colName = col.name;
+            // '*' is not a column, and 'expr' is the placeholder for an unnamed
+            // expression, which downstream SQL can only reach by position.
+            if (colName === '*' || colName === 'expr') { return; }
             // Build list of all possible column name variations to check
             const colNamesToCheck = new Set<string>();
             colNamesToCheck.add(colName);
@@ -624,12 +814,23 @@ export function detectAdvancedIssues(context: ParserContext, nodes: FlowNode[], 
             });
             
             const colNames = Array.from(colNamesToCheck);
-            let isUsed = isColumnUsedInSql(normalizedSql, colNames);
+            const matchedOutput = cteOutputIdentifiers?.[colIndex];
+            const outputIdentifier: SqlIdentifier = matchedOutput && matchedOutput.value.toLowerCase() === colNameLower
+                ? matchedOutput
+                : { value: colName, quoted: false };
+            let isUsed = isColumnUsedInPreparedSql(preparedBody, colNames);
             if (!isUsed && downstreamSql) {
-                isUsed = isColumnUsedInSql(downstreamSql, colNames, {
-                    includeSelectClause: true,
-                    qualifiers: downstreamQualifiers
-                });
+                isUsed = isColumnUsedInPreparedSql(preparedDownstream, colNames, outputIdentifier);
+            }
+            // A qualified reference anywhere downstream is a use, including
+            // table-function arguments such as UNNEST(o.items).
+            if (!isUsed) {
+                isUsed = downstreamQualifiers.some(qualifier => colNames.some(name => {
+                    if (SIMPLE_IDENTIFIER_RE.test(qualifier.value) && SIMPLE_IDENTIFIER_RE.test(name)) {
+                        return downstreamQualifiedPairs.has(`${qualifier.value.toLowerCase()}.${name.toLowerCase()}`);
+                    }
+                    return new RegExp(`\\b${escapeRegex(qualifier.value)}\\s*\\.\\s*${escapeRegex(name)}\\b`, 'i').test(downstreamSql);
+                }));
             }
 
             // If column is not used in any clause, it's a dead column

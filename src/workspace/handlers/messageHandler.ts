@@ -6,6 +6,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { realpath } from 'fs/promises';
 import { SearchFilter, GraphMode, WorkspaceDependencyGraph } from '../types';
+import { getQualifiedKey } from '../identifiers';
 import { LineageBuilder } from '../lineage/lineageBuilder';
 import {
     LineageGraph,
@@ -256,13 +257,6 @@ export class MessageHandler {
         this.postMessage(attachWorkspaceRequestId(msg, requestId));
     }
 
-    private setPanelHtml(html: string): void {
-        if (this._disposed) {
-            return;
-        }
-        this._context.panel.webview.html = html;
-    }
-
     public async handleMessage(message: WorkspaceWebviewMessage): Promise<void> {
         if (this._disposed) {
             return;
@@ -398,10 +392,6 @@ export class MessageHandler {
                     break;
 
                 // ========== Visual Lineage Graph Commands ==========
-                case 'searchLineageTables':
-                    await this.handleSearchLineageTables(message.query, message.typeFilter, getWorkspaceRequestId(message));
-                    break;
-
                 case 'getLineageGraph':
                     await this.handleGetLineageGraph(
                         message.nodeId,
@@ -925,6 +915,21 @@ export class MessageHandler {
         }
     }
 
+    private resolveGraphLineageId(lineageGraph: LineageGraph, nodeId: string, label?: string, type?: string): string {
+        if (lineageGraph.nodes.has(nodeId)) { return nodeId; }
+
+        const graphNode = this._context.getCurrentGraph()?.nodes.find(node => node.id === nodeId);
+        const definition = graphNode?.definitions?.[0];
+        if (definition && graphNode?.type !== 'file') {
+            return `${definition.type}:${getQualifiedKey(definition.name, definition.schema, definition)}`;
+        }
+        const reference = graphNode?.type === 'external' ? graphNode.references?.[0] : undefined;
+        if (reference) {
+            return `external:${getQualifiedKey(reference.tableName, reference.schema, reference)}`;
+        }
+        return resolveRequestedLineageNodeId(lineageGraph, nodeId, label, type);
+    }
+
     private async handleGetUpstream(
         nodeId: string | undefined,
         depth: number = -1,
@@ -952,7 +957,7 @@ export class MessageHandler {
                 }
             }
         } else if (nodeId) {
-            nodeIds.add(nodeId);
+            nodeIds.add(this.resolveGraphLineageId(lineageGraph, nodeId));
         }
 
         if (nodeIds.size === 0) {
@@ -1020,7 +1025,7 @@ export class MessageHandler {
                 }
             }
         } else if (nodeId) {
-            nodeIds.add(nodeId);
+            nodeIds.add(this.resolveGraphLineageId(lineageGraph, nodeId));
         }
 
         if (nodeIds.size === 0) {
@@ -1063,57 +1068,6 @@ export class MessageHandler {
 
     // ========== Visual Lineage Graph Commands ==========
 
-    private async handleSearchLineageTables(query: string, typeFilter?: string, requestId?: number): Promise<void> {
-        const navigationVersion = this._navigationVersion;
-        await this._context.buildLineageGraph();
-        if (!this.isCurrentNavigation(navigationVersion)) { return; }
-
-        const lineageGraph = this._context.getLineageGraph();
-
-        if (!lineageGraph) {
-            this.postRequestMessage({
-                command: 'lineageSearchResults',
-                data: { results: [] }
-            }, requestId);
-            return;
-        }
-
-        const results: Array<{ id: string; name: string; type: string; filePath?: string }> = [];
-        const queryLower = query.toLowerCase();
-
-        for (const [id, node] of lineageGraph.nodes) {
-            // Skip columns and external tables in search
-            if (node.type === 'column' || node.type === 'external') {continue;}
-
-            // Apply type filter
-            if (typeFilter && typeFilter !== 'all' && node.type !== typeFilter) {continue;}
-
-            // Match by name
-            if (node.name.toLowerCase().includes(queryLower)) {
-                results.push({
-                    id: node.id,
-                    name: node.name,
-                    type: node.type,
-                    filePath: node.filePath
-                });
-            }
-        }
-
-        // Sort by relevance (exact matches first, then by name)
-        results.sort((a, b) => {
-            const aExact = a.name.toLowerCase() === queryLower;
-            const bExact = b.name.toLowerCase() === queryLower;
-            if (aExact && !bExact) {return -1;}
-            if (!aExact && bExact) {return 1;}
-            return a.name.localeCompare(b.name);
-        });
-
-        this.postRequestMessage({
-            command: 'lineageSearchResults',
-            data: { results: results.slice(0, 15) }
-        }, requestId);
-    }
-
     private async handleGetLineageGraph(
         nodeId: string,
         depth: number,
@@ -1143,12 +1097,7 @@ export class MessageHandler {
             return;
         }
 
-        const resolvedNodeId = resolveRequestedLineageNodeId(
-            lineageGraph,
-            nodeId,
-            nodeLabel,
-            nodeType
-        );
+        const resolvedNodeId = this.resolveGraphLineageId(lineageGraph, nodeId, nodeLabel, nodeType);
 
         // Generate HTML using the lineage view
         const html = this._context.getLineageView().generateLineageGraphView(

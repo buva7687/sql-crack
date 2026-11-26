@@ -272,7 +272,7 @@ export interface CalculateStackedCloudOffsetsOptions {
 export function calculateStackedCloudOffsets(
     options: CalculateStackedCloudOffsetsOptions
 ): CloudOffsetInfo[] {
-    const { expandableNodes, currentEdges, layoutSubflowNodesVertical } = options;
+    const { expandableNodes, layoutSubflowNodesVertical } = options;
     if (expandableNodes.length === 0) {
         return [];
     }

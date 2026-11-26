@@ -6,12 +6,10 @@ describe('renderer keyboard node navigation integration', () => {
     const nodeDispatcherSource = readFileSync(join(__dirname, '../../../src/webview/rendering/nodeDispatcher.ts'), 'utf8');
     const listenerSource = readFileSync(join(__dirname, '../../../src/webview/interaction/keyboardListeners.ts'), 'utf8');
 
-    it('handles Tab and Shift+Tab cycling on nodes and SVG container', () => {
-        expect(nodeDispatcherSource).toContain("if (key === 'Tab') {");
-        expect(nodeDispatcherSource).toContain("navigateToAdjacentNode(node, event.shiftKey ? 'prev' : 'next');");
-        expect(listenerSource).toContain("if (e.key === 'Tab') {");
-        expect(listenerSource).toContain('const orderedNodes = callbacks.getKeyboardNavigationNodes();');
-        expect(listenerSource).toContain("const target = getCycledNode(orderedNodes, seedId, e.shiftKey ? 'prev' : 'next');");
+    it('uses the browser Tab order for graph nodes without trapping focus', () => {
+        expect(nodeDispatcherSource).toContain("group.setAttribute('tabindex', '0');");
+        expect(nodeDispatcherSource).not.toContain("if (key === 'Tab')");
+        expect(listenerSource).not.toContain("if (e.key === 'Tab')");
     });
 
     it('maps arrow keys to edge-following and sibling navigation semantics', () => {

@@ -1,6 +1,6 @@
 // Line number extraction and assignment for nodes
 
-import { FlowEdge, FlowNode } from '../types';
+import { FlowEdge, FlowNode, SqlDialect } from '../types';
 import {
     escapeRegex,
     getDollarQuotedTokenEnd,
@@ -85,9 +85,10 @@ const TRANSPARENT_PAREN_BODY = /^\s*(?:SELECT|WITH|VALUES|\()/i;
 const SET_OPERATOR_BEFORE = /\b(?:UNION|INTERSECT|EXCEPT|MINUS)(?:\s+(?:ALL|DISTINCT))?\s*$/i;
 const CTE_BODY_BEFORE = /\bAS\s*(?:NOT\s+)?(?:MATERIALIZED\s*)?$/i;
 const JOIN_MODIFIER_BEFORE = /\b(?:LEFT|RIGHT|FULL|CROSS|NATURAL|OUTER|SEMI|ANTI|ASOF|POSITIONAL)\s+$/i;
-const TABLE_KEYWORD_CONTEXT = /\b(?:FROM|JOIN|INTO|USING|UPDATE|TABLE|ONLY|DELETE|MERGE|VIEW|EXISTS)\s+(?:(?:[\w$#]+|"[^"]*"|`[^`]*`|\[[^\]]*\])\s*\.\s*)*["`[]?$/i;
+const TABLE_KEYWORD_CONTEXT = /\b(FROM|JOIN|INTO|USING|UPDATE|TABLE|ONLY|DELETE|MERGE|VIEW|EXISTS)\s+(?:(?:TEMPORARY|TEMP|UNLOGGED)\s+)?(?:TABLE\s+)?(?:(?:[\w$#]+|"[^"]*"|`[^`]*`|\[(?:[^\]]|\]\])*\])\s*\.\s*)*["`[]?$/i;
+const TABLE_READ_KEYWORDS = new Set(['FROM', 'JOIN', 'USING', 'ONLY']);
 const CTE_DEFINITION_AFTER = /^["`\]]?\s*(?:\([^()]*\)\s*)?AS\s*(?:NOT\s+)?(?:MATERIALIZED\s*)?\(/i;
-const TABLE_COMMA_CONTEXT = /,\s*(?:(?:[\w$#]+|"[^"]*"|`[^`]*`|\[[^\]]*\])\s*\.\s*)*["`[]?$/i;
+const TABLE_COMMA_CONTEXT = /,\s*(?:(?:[\w$#]+|"[^"]*"|`[^`]*`|\[(?:[^\]]|\]\])*\])\s*\.\s*)*["`[]?$/i;
 const CLAUSE_KEYWORD = /\b(?:SELECT|FROM|WHERE|GROUP\s+BY|HAVING|ORDER\s+BY|LIMIT|QUALIFY|WINDOW|ON|USING|JOIN|SET|VALUES|RETURNING|UPDATE|DELETE|INTO|UNION|INTERSECT|EXCEPT|MINUS)\b/gi;
 /** Clauses whose comma-separated items are table references. */
 const TABLE_LIST_CLAUSES: ReadonlySet<string> = new Set(['FROM', 'JOIN', 'ON', 'USING', 'UPDATE', 'DELETE']);
@@ -195,8 +196,8 @@ function analyzeNesting(sql: string): NestingInfo {
     return { depth, group, closingParen, inCteBody, inQuotes };
 }
 
-export function assignLineNumbers(nodes: FlowNode[], sql: string, edges: FlowEdge[] = []): void {
-    const onLineByJoin = assignScopedLineNumbers(nodes, sql, false);
+export function assignLineNumbers(nodes: FlowNode[], sql: string, edges: FlowEdge[] = [], dialect?: SqlDialect): void {
+    const onLineByJoin = assignScopedLineNumbers(nodes, sql, false, dialect);
     const nodesById = new Map(nodes.map(node => [node.id, node]));
     const lastSourceByJoin = new Map<string, string>();
     for (const edge of edges) {
@@ -220,7 +221,7 @@ export function assignLineNumbers(nodes: FlowNode[], sql: string, edges: FlowEdg
     }
 }
 
-function assignScopedLineNumbers(nodes: FlowNode[], sql: string, childScope: boolean): Map<string, number> {
+function assignScopedLineNumbers(nodes: FlowNode[], sql: string, childScope: boolean, dialect?: SqlDialect): Map<string, number> {
     const keywordLines = extractKeywordLineNumbers(sql);
     const sqlLines = sql.split('\n');
     const commentStripped = maskSqlCommentsPreservingPositions(sql);
@@ -328,14 +329,29 @@ function assignScopedLineNumbers(nodes: FlowNode[], sql: string, childScope: boo
         return pick(occurrencesOf(...keywords), [isOuter], false)?.line;
     }
 
-    type TableOccurrence = SqlOccurrence & { keywordContext: boolean; commaContext: boolean };
+    type TableOccurrence = SqlOccurrence & { keyword?: string; commaContext: boolean; quoted: boolean };
     const tableOccurrences = new Map<string, TableOccurrence[]>();
-    function findTableLine(tableName: string): number | undefined {
+    function findTableOccurrence(tableName: string, preferRead: boolean): TableOccurrence | undefined {
         const key = tableName.toLowerCase();
         let candidates = tableOccurrences.get(key);
         if (!candidates) {
             candidates = [];
-            const pattern = new RegExp(`(?<![\\w$#])${escapeRegex(tableName)}(?![\\w$#])`, 'gi');
+            const escapeSegment = (segment: string): string => {
+                let escaped = escapeRegex(segment).replace(/"/g, '(?:"|"")');
+                if (dialect === 'TransactSQL') {
+                    escaped = escaped.replace(/\\\]/g, '(?:\\]|\\]\\])');
+                }
+                return escaped;
+            };
+            const spellings = [`(?<![\\w$#])${escapeRegex(tableName)}(?![\\w$#])`];
+            if (dialect === 'TransactSQL' && tableName.includes(']')) {
+                spellings.push(`(?<![\\w$#])${escapeRegex(tableName.replace(/\]/g, ']]'))}(?![\\w$#])`);
+            }
+            if (tableName.includes('.')) {
+                const multiPart = tableName.split('.').map(escapeSegment).join('["`\\]]?\\s*\\.\\s*["`[]?');
+                spellings.push(`(?:["\`[]|(?<![\\w$#]))${multiPart}(?:["\`\\]]|(?![\\w$#]))`);
+            }
+            const pattern = new RegExp(`(?:${spellings.join('|')})`, 'gi');
             let match: RegExpExecArray | null;
             while ((match = pattern.exec(commentStripped)) !== null) {
                 const after = commentStripped.slice(match.index + match[0].length, match.index + match[0].length + 160);
@@ -346,33 +362,69 @@ function assignScopedLineNumbers(nodes: FlowNode[], sql: string, childScope: boo
                 }
                 const before = textBefore(match.index, 160);
                 const occurrence = occurrenceAt(`table:${key}@${match.index}`, match.index);
-                // A whole quoted identifier ("orders", `orders`, [orders]) is a
-                // reference, not quoted text.
+                // A whole quoted identifier ("orders", `orders`, [orders]) or a
+                // qualified quoted target ("my schema"."my table") is a
+                // reference, not quoted text inside a string literal.
                 const opener = commentStripped[match.index - 1];
                 const closer = commentStripped[match.index + match[0].length];
-                if ((opener === '"' || opener === '`' || opener === '[')
-                    && closer === (opener === '[' ? ']' : opener)) {
+                const quoted = (opener === '"' || opener === '`' || opener === '[')
+                    && closer === (opener === '[' ? ']' : opener);
+                const matchStartsQuoted = match[0].startsWith('"') || match[0].startsWith('`') || match[0].startsWith('[');
+                const startsFreshQuotedRef = matchStartsQuoted && (match.index === 0 || !nesting.inQuotes[match.index - 1]);
+                if (quoted || startsFreshQuotedRef) {
                     occurrence.inQuotes = false;
                 }
                 candidates.push({
                     ...occurrence,
-                    keywordContext: TABLE_KEYWORD_CONTEXT.test(before),
+                    quoted,
+                    keyword: TABLE_KEYWORD_CONTEXT.exec(before)?.[1].toUpperCase(),
                     commaContext: TABLE_COMMA_CONTEXT.test(before) && inTableList(match.index),
                 });
             }
             tableOccurrences.set(key, candidates);
         }
         const predicates: OccurrencePredicate<typeof candidates[number]>[] = [
-            c => isOuter(c) && c.keywordContext,
+            c => isOuter(c) && Boolean(c.keyword),
             c => isOuter(c) && c.commaContext,
-            c => !c.inQuotes && !c.inCteBody && c.keywordContext,
-            c => !c.inQuotes && c.keywordContext,
+            c => !c.inQuotes && !c.inCteBody && Boolean(c.keyword),
+            c => !c.inQuotes && Boolean(c.keyword),
             c => !c.inQuotes && c.commaContext,
         ];
         // Only clause references count; anything else defers to the line
         // heuristic in the caller. Reuse an occurrence when every one is taken.
-        const inClause = candidates.filter(c => c.keywordContext || c.commaContext);
-        return (pick(inClause, predicates, true) ?? pick(inClause, predicates, false))?.line;
+        const inClause = candidates.filter(c =>
+            c.commaContext || (c.keyword && (!preferRead || TABLE_READ_KEYWORDS.has(c.keyword)))
+        );
+        return pick(inClause, predicates, true) ?? pick(inClause, predicates, false);
+    }
+
+    function applyRelationIdentity(node: FlowNode, occurrence: TableOccurrence, name = node.label, namePrefix = ''): void {
+        if (dialect !== 'PostgreSQL' || !node.relationIdentity || occurrence.inQuotes) { return; }
+        const { qualifiers, alias } = node.relationIdentity;
+        const nameEnd = occurrence.offset + name.length;
+        if (commentStripped.slice(occurrence.offset, nameEnd) !== name) { return; }
+        // PostgreSQL's FROM AST drops delimiter flags. Recover the spelling
+        // from the same scoped table occurrence used for source navigation.
+        const quotedWidth = occurrence.quoted ? 1 : 0;
+        const nameStart = occurrence.offset - quotedWidth;
+        let prefix = commentStripped.slice(Math.max(0, nameStart - 160), nameStart);
+        const canonicalQualifiers = qualifiers.slice();
+        for (let index = qualifiers.length - 1; index >= 0; index--) {
+            const raw = /(?:"((?:""|[^"])*)"|([\p{L}_][\p{L}\p{N}_$]*))\s*\.\s*$/u.exec(prefix);
+            const spelling = raw?.[1]?.replace(/""/g, '"') ?? raw?.[2];
+            if (!raw || spelling !== qualifiers[index]) { break; }
+            canonicalQualifiers[index] = raw[2] ? raw[2].toLowerCase() : spelling;
+            prefix = prefix.slice(0, raw.index);
+        }
+        const aliasStart = nameEnd + quotedWidth;
+        const aliasSource = commentStripped.slice(aliasStart, aliasStart + (alias?.length || 0) * 2 + 64);
+        const aliasToken = aliasSource.trimStart().replace(/^AS\s+/i, '');
+        const unquotedAlias = /^[\p{L}_][\p{L}\p{N}_$]*/u.exec(aliasToken)?.[0];
+        node.relationIdentity = {
+            name: namePrefix + (occurrence.quoted ? name : name.toLowerCase()),
+            qualifiers: canonicalQualifiers,
+            alias: alias && unquotedAlias === alias ? alias.toLowerCase() : alias,
+        };
     }
 
     function findCteDefinition(cteName: string): { line: number; open: number } | undefined {
@@ -403,15 +455,23 @@ function assignScopedLineNumbers(nodes: FlowNode[], sql: string, childScope: boo
 
     const childBodies = new Map<FlowNode, number>();
     const onLineByJoin = new Map<string, number>();
+    // Claim SELECT INTO source reads before its write target, even when both
+    // occurrences have the same name. Otherwise the read consumes INTO.
+    const hasTransactSqlSelectInto = dialect === 'TransactSQL' && keywordLines.has('INTO')
+        && nodes.some(node => node.type === 'table' && node.accessMode === 'write' && node.operationType === 'CREATE_TABLE');
     for (const node of nodes) {
         targetDepth = childScope ? Math.max(0, (node.depth ?? 1) - 1) : 0;
         switch (node.type) {
             case 'table': {
                 // RENAME targets are labeled "old → new"; locate the old name.
                 const tableName = node.label.split(' → ')[0].trim();
-                const clauseLine = tableName ? findTableLine(tableName) : undefined;
-                if (clauseLine !== undefined) {
-                    node.startLine = clauseLine;
+                const occurrence = tableName
+                    ? findTableOccurrence(tableName, (dialect === 'PostgreSQL' || hasTransactSqlSelectInto)
+                        && node.relationIdentity !== undefined && node.accessMode !== 'write')
+                    : undefined;
+                if (occurrence !== undefined) {
+                    node.startLine = occurrence.line;
+                    applyRelationIdentity(node, occurrence);
                     break;
                 }
 
@@ -455,7 +515,9 @@ function assignScopedLineNumbers(nodes: FlowNode[], sql: string, childScope: boo
                     }
                 }
 
-                node.startLine = foundLine || (fromLines.length > 0 ? fromLines[0] : firstCodeLine);
+                node.startLine = foundLine || (node.accessMode === 'write' && intoLines.length > 0
+                    ? intoLines[0]
+                    : (fromLines.length > 0 ? fromLines[0] : firstCodeLine));
                 break;
             }
             case 'join': {
@@ -472,6 +534,13 @@ function assignScopedLineNumbers(nodes: FlowNode[], sql: string, childScope: boo
                     const on = occurrencesOf('ON').find(o =>
                         o.offset > selected.offset && o.offset < (nextJoin?.offset ?? Infinity) && isOuter(o));
                     if (on) { onLineByJoin.set(node.id, on.line); }
+                }
+                // Joins inside a CTE or subquery body carry the joined
+                // relation in their label ("LEFT JOIN users").
+                const joined = /^(.*?\bJOIN\s+)(.+)$/i.exec(node.label);
+                if (joined && dialect === 'PostgreSQL' && node.relationIdentity) {
+                    const occurrence = findTableOccurrence(joined[2], true);
+                    if (occurrence) { applyRelationIdentity(node, occurrence, joined[2], joined[1].toUpperCase()); }
                 }
                 break;
             }
@@ -549,7 +618,7 @@ function assignScopedLineNumbers(nodes: FlowNode[], sql: string, childScope: boo
         if (!node.children?.length || close === undefined) { continue; }
         node.endLine = lineAt(close);
         const bodySql = sql.slice(open + 1, close);
-        assignScopedLineNumbers(node.children, bodySql, true);
+        assignScopedLineNumbers(node.children, bodySql, true, dialect);
         const lineOffset = lineAt(open + 1) - 1;
         const offsetChildren = (children: FlowNode[]): void => {
             for (const child of children) {

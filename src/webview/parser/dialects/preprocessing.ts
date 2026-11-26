@@ -1,5 +1,5 @@
 import type { SqlDialect } from '../../types';
-import { dialectSupportsHashComments, getDollarQuoteDelimiterAt, isPostgresJsonPathOperatorAt, maskSqlCommentsPreservingPositions } from '../../../shared';
+import { dialectSupportsHashComments, getDollarQuoteDelimiterAt, isPostgresJsonPathOperatorAt, maskSqlCommentsPreservingPositions, tokenizeSqlIdentifiers } from '../../../shared';
 import { preprocessJinjaTemplates } from './jinjaPreprocessor';
 
 interface TextRewrite {
@@ -183,42 +183,34 @@ export function preprocessPostgresSyntax(sql: string, dialect: SqlDialect): stri
  * a plain `OPENJSON(...)` call which the parser handles as a normal table-valued function.
  */
 function stripOpenJsonWithClauses(sql: string): string | null {
-    const masked = maskStringsAndComments(sql);
+    const masked = maskStringsAndComments(sql, { hashComments: false, bracketIdentifiers: true });
     const openjsonRegex = /\bOPENJSON\s*\(/gi;
+    const firstCall = openjsonRegex.exec(masked);
+    if (!firstCall) { return null; }
+
+    const closingParens = new Map<number, number>();
+    const openParens: number[] = [];
+    for (let i = firstCall.index; i < masked.length; i++) {
+        if (masked[i] === '(') {
+            openParens.push(i);
+        } else if (masked[i] === ')' && openParens.length > 0) {
+            closingParens.set(openParens.pop()!, i);
+        }
+    }
+
+    const withClause = /\s*WITH\s*\(/iy;
     const removals: Array<{ start: number; end: number }> = [];
-    let match: RegExpExecArray | null;
-
-    while ((match = openjsonRegex.exec(masked)) !== null) {
-        // Find position of the opening paren of OPENJSON(...)
-        const openParenPos = match.index + match[0].length - 1;
-        const closeParenPos = findMatchingParen(sql, openParenPos);
-        if (closeParenPos === -1) {
-            continue;
+    for (let match: RegExpExecArray | null = firstCall; match; match = openjsonRegex.exec(masked)) {
+        const close = closingParens.get(match.index + match[0].length - 1);
+        if (close === undefined) { continue; }
+        withClause.lastIndex = close + 1;
+        const clause = withClause.exec(masked);
+        if (!clause) { continue; }
+        const start = clause.index + clause[0].search(/\S/);
+        const end = closingParens.get(withClause.lastIndex - 1);
+        if (end !== undefined) {
+            removals.push({ start, end: end + 1 });
         }
-
-        // Skip whitespace after the closing paren
-        let pos = closeParenPos + 1;
-        while (pos < masked.length && /\s/.test(masked[pos])) {
-            pos++;
-        }
-
-        // Check if the next token is WITH followed by (
-        if (!/^WITH\s*\(/i.test(masked.slice(pos))) {
-            continue;
-        }
-
-        const withStart = pos;
-        pos += masked.slice(pos).match(/^WITH\s*/i)![0].length;
-        if (pos >= masked.length || masked[pos] !== '(') {
-            continue;
-        }
-
-        const withCloseParenPos = findMatchingParen(sql, pos);
-        if (withCloseParenPos === -1) {
-            continue;
-        }
-
-        removals.push({ start: withStart, end: withCloseParenPos + 1 });
     }
 
     if (removals.length === 0) {
@@ -238,6 +230,41 @@ function stripOpenJsonWithClauses(sql: string): string | null {
  *
  * Returns the transformed SQL or `null` if no rewriting was needed.
  */
+/**
+ * The parser accepts only a single bare identifier after SELECT ... INTO.
+ * Fold a schema-qualified target, and PostgreSQL's TEMP / UNLOGGED / TABLE
+ * modifiers, into one delimited identifier so the statement still parses and
+ * the written table keeps its full name.
+ */
+export function normalizeSelectIntoTargets(sql: string, dialect: SqlDialect): string | null {
+    if (dialect !== 'PostgreSQL' && dialect !== 'TransactSQL') {
+        return null;
+    }
+    const tsql = dialect === 'TransactSQL';
+    const masked = maskSqlCommentsPreservingPositions(sql, { maskStringLiterals: true, hashComments: false, backslashEscapes: false, dollarQuotes: !tsql });
+    const structural = maskSqlCommentsPreservingPositions(sql, { maskQuotedText: true, hashComments: false, backslashEscapes: false, dollarQuotes: !tsql });
+    const part = tsql ? String.raw`(?:\[(?:[^\]]|\]\])+\]|"(?:[^"]|"")+"|[A-Za-z_#][\w$#]*)` : String.raw`(?:"(?:[^"]|"")+"|[A-Za-z_][\w$]*)`;
+    const modifiers = tsql ? '()' : String.raw`((?:(?:TEMPORARY|TEMP|UNLOGGED)\s+)?(?:TABLE\s+)?)`;
+    const pattern = new RegExp(
+        String.raw`(?<!\b(?:INSERT|MERGE|IGNORE|OVERWRITE)\s+)\bINTO\s+${modifiers}(${part}(?:\s*\.\s*${part})*)(?=\s+FROM\b)`,
+        'gi'
+    );
+    let result = '';
+    let last = 0;
+    for (const match of masked.matchAll(pattern)) {
+        const [, modifier, target] = match;
+        if (!/^INTO\b/i.test(structural.slice(match.index))) { continue; }
+        const parts = tokenizeSqlIdentifiers(target, dialect).filter(token => token.quoted || token.value !== '.');
+        if (!modifier && parts.length === 1 && !target.includes(']]')) { continue; }
+        const name = parts.map(part => part.value).join('.');
+        const targetStart = match.index + match[0].length - target.length;
+        const modifierStart = targetStart - modifier.length;
+        result += sql.slice(last, modifierStart) + (tsql ? `[${name.replace(/\]/g, ']]')}]` : `"${name.replace(/"/g, '""')}"`);
+        last = match.index + match[0].length;
+    }
+    return last === 0 ? null : result + sql.slice(last);
+}
+
 export function preprocessTransactSqlSyntax(sql: string, dialect: SqlDialect): string | null {
     if (dialect !== 'TransactSQL') {
         return null;
@@ -1509,7 +1536,7 @@ export function withSqlDialectLexing<T>(dialect: SqlDialect, fn: () => T): T {
  */
 export function maskStringsAndComments(
     sql: string,
-    options: { hashComments?: boolean } = {}
+    options: { hashComments?: boolean; bracketIdentifiers?: boolean } = {}
 ): string {
     const hashComments = options.hashComments ?? defaultHashComments;
     const chars = sql.split('');
@@ -1593,17 +1620,16 @@ export function maskStringsAndComments(
             }
             continue;
         }
-        if (chars[i] === '"') {
-            chars[i] = ' ';
-            i++;
+        if (chars[i] === '"' || (options.bracketIdentifiers && chars[i] === '[')) {
+            const quote = chars[i] === '[' ? ']' : '"';
+            chars[i++] = ' ';
             while (i < chars.length) {
-                if (chars[i] === '"') {
-                    chars[i] = ' ';
-                    i++;
-                    break;
+                const atClosingQuote = chars[i] === quote;
+                chars[i++] = ' ';
+                if (atClosingQuote) {
+                    if (chars[i] !== quote) { break; }
+                    chars[i++] = ' ';
                 }
-                chars[i] = ' ';
-                i++;
             }
             continue;
         }
@@ -2726,16 +2752,22 @@ function findStatementTerminatorAtDepth0(masked: string, pos: number): number {
     return masked.length;
 }
 
-export function preprocessForParsing(sql: string, dialect: SqlDialect): { sql: string; hadJinja: boolean } {
-    return withSqlDialectLexing(dialect, () => preprocessForParsingForDialect(sql, dialect));
+export function preprocessForParsing(
+    sql: string, dialect: SqlDialect, options: { hoistNestedCtes?: boolean } = {}
+): { sql: string; hadJinja: boolean } {
+    return withSqlDialectLexing(dialect, () => preprocessForParsingForDialect(sql, dialect, options.hoistNestedCtes !== false));
 }
 
-function preprocessForParsingForDialect(sql: string, dialect: SqlDialect): { sql: string; hadJinja: boolean } {
+function preprocessForParsingForDialect(
+    sql: string, dialect: SqlDialect, hoistCtes: boolean
+): { sql: string; hadJinja: boolean } {
     const { rewritten, hadJinja } = preprocessJinjaTemplates(sql);
     let result = rewritten;
 
-    const hoisted = hoistNestedCtes(result);
-    if (hoisted !== null) { result = hoisted; }
+    if (hoistCtes) {
+        const hoisted = hoistNestedCtes(result);
+        if (hoisted !== null) { result = hoisted; }
+    }
 
     const postgres = preprocessPostgresSyntax(result, dialect);
     if (postgres !== null) { result = postgres; }

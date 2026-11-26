@@ -32,9 +32,9 @@ describe('Message Protocol Contracts', () => {
 
         it('WebviewMessage type covers all required commands', () => {
             const requiredCommands = [
-                'error', 'info', 'requestRefresh', 'persistUiState',
+                'requestRefresh', 'persistUiState',
                 'goToLine', 'traceInWorkspaceLineage', 'requestFullscreen',
-                'pinVisualization', 'changeViewLocation', 'getViewLocationOptions',
+                'pinVisualization', 'changeViewLocation',
                 'openPinnedTab', 'unpinTab', 'savePng', 'saveSvg', 'savePdf', 'saveMermaid',
             ];
             for (const cmd of requiredCommands) {

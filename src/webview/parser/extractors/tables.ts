@@ -1,23 +1,39 @@
 // Table extraction utilities
 
 import { isTableValuedFunction } from '../../../dialects';
-import type { SqlDialect } from '../../types';
+import type { FlowNode, SqlDialect } from '../../types';
+import { getAstString } from './columns';
 
 export function getTableName(item: any): string {
     if (typeof item === 'string') { return item; }
 
-    if (item.table) {
-        if (typeof item.table === 'object') {
-            return item.table.table || item.table.name || item.table.value || item.as || 'table';
-        }
-        return item.table;
-    }
+    return getAstString(item?.table) || getAstString(item?.name) || getNormalizedFromAlias(item) || 'table';
+}
 
-    return item.name || item.as || 'table';
+export function getCteNameKey(name: any, dialect: SqlDialect): string {
+    const value = getAstString(name) || '';
+    const preservesQuotedCase = dialect === 'PostgreSQL' || dialect === 'Redshift'
+        || dialect === 'Oracle' || dialect === 'Snowflake';
+    if (preservesQuotedCase && typeof name?.type === 'string' && /quote|backtick/i.test(name.type)) {
+        return value;
+    }
+    return dialect === 'Oracle' || dialect === 'Snowflake' ? value.toUpperCase() : value.toLowerCase();
+}
+
+export function getFromItemIdentity(item: any): NonNullable<FlowNode['relationIdentity']> {
+    // Keep qualifier components separate so quoted names containing dots stay
+    // distinct from qualified names. The parser may already have dropped quotes.
+    const schema = getAstString(item?.schema);
+    const database = getAstString(item?.db);
+    return {
+        qualifiers: [getAstString(item?.catalog) || (schema ? database : null), schema || database]
+            .filter((part): part is string => part !== null),
+        alias: getAstString(item?.as) || undefined,
+    };
 }
 
 export function getNormalizedFromAlias(item: any): string | null {
-    const rawAlias = typeof item?.as === 'string' ? item.as.trim() : '';
+    const rawAlias = getAstString(item?.as)?.trim() || '';
     if (!rawAlias) {
         return null;
     }

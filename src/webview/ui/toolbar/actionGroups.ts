@@ -1,7 +1,7 @@
 import { getHighContrastTextColor } from '../../constants';
 import { createExportDropdown } from '../exportDropdown';
 import { Z_INDEX } from '../../../shared/zIndex';
-import { applyOverflowMenuTheme, getOverflowPalette } from './overflowMenu';
+import { applyOverflowMenuTheme } from './overflowMenu';
 import type { ToolbarCallbacks } from '../toolbar';
 import { createToolbarButton } from './buttonFactory';
 import { attachMenuKeyboardNavigation } from '../menuKeyboard';

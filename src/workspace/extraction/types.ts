@@ -44,6 +44,9 @@ export interface ForeignKeyRef {
  */
 export interface ColumnReference {
     columnName: string;
+    nameQuoted?: boolean;
+    subqueryIndex?: number;     // Index into the owning query's subqueries
+    subqueryProjection?: number; // Output ordinal for scalar subqueries
     tableName?: string;         // Resolved table name (from alias or explicit)
     tableAlias?: string;        // Alias used in query
     schema?: string;
@@ -108,6 +111,7 @@ export interface TableReference {
     identifierCaseFolding?: 'lower' | 'upper' | 'preserve'; // Dialect folding for ordinary identifiers
     quotedIdentifiersCaseSensitive?: boolean; // Whether delimiters preserve case identity
     referenceType: ReferenceType;
+    alsoRead?: boolean;         // A write target that is also read by the statement
     filePath: string;
     lineNumber: number;
     context: string;            // SQL context (e.g., "FROM", "JOIN", "INSERT INTO")
@@ -143,6 +147,7 @@ export interface QueryAnalysis {
 
     // Output (what this query produces)
     outputColumns: ColumnInfo[];
+    implicitInsertTargetColumns?: boolean;
 
     // Input (what this query consumes)
     inputTables: TableReference[];
@@ -184,6 +189,9 @@ export type StatementType =
  */
 export interface Transformation {
     outputColumn: string;           // Name of output column
+    outputNameQuoted?: boolean;
+    projectionOrdinal?: number;     // A known position before any unresolved wildcard
+    outputTable?: string;           // Assignment-specific canonical target for a multi-table UPDATE
     outputAlias?: string;           // Alias if different from column name
     inputColumns: ColumnReference[]; // Source columns used
     operation: TransformationType;   // Type of transformation

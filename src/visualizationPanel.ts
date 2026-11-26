@@ -19,6 +19,24 @@ interface VisualizationOptions {
     sourceRange?: vscode.Range;
     /** Mutable character offsets backing sourceRange across document edits. */
     sourceOffsets?: SelectionOffsets;
+    /**
+     * Zero-based line in the source document where this SQL starts, for panels
+     * showing one statement cut from a larger file (pinned snapshots).
+     */
+    lineOffset?: number;
+}
+
+/** Limits for pinned snapshots kept in workspace state. */
+const MAX_PINNED_TABS = 50;
+const MAX_PINNED_TABS_BYTES = 4 * 1024 * 1024;
+
+/** Zero-based line in the source document where a panel's SQL starts. */
+function getSourceLineOffset(options: Pick<VisualizationOptions, 'sourceRange' | 'lineOffset'>): number {
+    return options.sourceRange?.start.line ?? normalizeLineOffset(options.lineOffset);
+}
+
+function normalizeLineOffset(value: unknown): number {
+    return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }
 
 export interface SelectionOffsets {
@@ -91,6 +109,8 @@ interface PinnedVisualization {
     dialect: string;
     timestamp: number;
     sourceDocumentUri?: string;
+    /** Zero-based line in the source document where the pinned SQL starts. */
+    lineOffset?: number;
 }
 
 export class VisualizationPanel {
@@ -106,7 +126,6 @@ export class VisualizationPanel {
     private _disposables: vscode.Disposable[] = [];
     private _currentSql: string = '';
     private _currentOptions: VisualizationOptions;
-    private _isStale: boolean = false;
     private _isPinned: boolean = false;
     private _pinId: string | undefined;
     private _sourceDocumentUri: vscode.Uri | undefined; // Track source document for navigation
@@ -225,9 +244,24 @@ export class VisualizationPanel {
         VisualizationPanel.currentPanel = newPanel;
     }
 
-    public static createPinnedPanel(extensionUri: vscode.Uri, sqlCode: string, options: VisualizationOptions, pinId?: string): string {
+    public static createPinnedPanel(extensionUri: vscode.Uri, sqlCode: string, options: VisualizationOptions, pinId?: string): string | null {
         const id = pinId || 'pin-' + randomUUID();
         const name = options.fileName.replace('.sql', '') || `Pinned Query`;
+        const existingPin = VisualizationPanel.getPinnedTabs().find(pin => pin.id === id);
+        const newPin: PinnedVisualization | undefined = existingPin ? undefined : {
+            id,
+            name,
+            sql: sqlCode,
+            dialect: options.dialect,
+            timestamp: Date.now(),
+            sourceDocumentUri: options.documentUri?.toString(),
+            lineOffset: normalizeLineOffset(options.lineOffset)
+        };
+        // Refuse a new pin that would push workspace state past its limits
+        // rather than dropping pins the user made earlier.
+        if (newPin && !VisualizationPanel.canStorePinnedTab(newPin)) {
+            return null;
+        }
 
         // Create panel as a new tab
         const panel = vscode.window.createWebviewPanel(
@@ -247,17 +281,20 @@ export class VisualizationPanel {
         pinnedPanel._sourceDocumentUri = options.documentUri;
         VisualizationPanel.pinnedPanels.set(id, pinnedPanel);
 
-        // Save to workspace state
-        VisualizationPanel.savePinnedTab({
-            id,
-            name,
-            sql: sqlCode,
-            dialect: options.dialect,
-            timestamp: Date.now(),
-            sourceDocumentUri: options.documentUri?.toString()
-        });
+        // Reopening a stored pin keeps its record (and "Pinned at" time) as is.
+        if (newPin) {
+            VisualizationPanel.savePinnedTab(newPin);
+        }
 
         return id;
+    }
+
+    private static canStorePinnedTab(pin: PinnedVisualization): boolean {
+        const pinnedTabs = VisualizationPanel.getPinnedTabs();
+        if (pinnedTabs.length >= MAX_PINNED_TABS) {
+            return false;
+        }
+        return Buffer.byteLength(JSON.stringify([...pinnedTabs, pin]), 'utf8') <= MAX_PINNED_TABS_BYTES;
     }
 
     private static savePinnedTab(pin: PinnedVisualization) {
@@ -316,7 +353,8 @@ export class VisualizationPanel {
             VisualizationPanel.createPinnedPanel(extensionUri, pin.sql, {
                 dialect: pin.dialect,
                 fileName: pin.name,
-                documentUri: restoredDocumentUri
+                documentUri: restoredDocumentUri,
+                lineOffset: normalizeLineOffset(pin.lineOffset)
             }, pin.id);
         }
     }
@@ -335,7 +373,6 @@ export class VisualizationPanel {
             VisualizationPanel.currentPanel._currentOptions = options;
             VisualizationPanel.currentPanel._rememberUiStateKey();
             VisualizationPanel.currentPanel._sourceDocumentUri = options.documentUri;
-            VisualizationPanel.currentPanel._isStale = false;
         }
     }
 
@@ -354,20 +391,11 @@ export class VisualizationPanel {
         }
     }
 
-    public static sendQueryIndex(queryIndex: number) {
+    public static markAsStale(refreshPending = true) {
         if (VisualizationPanel.currentPanel) {
             VisualizationPanel.currentPanel._postMessage({
-                command: 'switchToQuery',
-                queryIndex: queryIndex
-            });
-        }
-    }
-
-    public static markAsStale() {
-        if (VisualizationPanel.currentPanel) {
-            VisualizationPanel.currentPanel._isStale = true;
-            VisualizationPanel.currentPanel._postMessage({
-                command: 'markStale'
+                command: 'markStale',
+                refreshPending
             });
         }
     }
@@ -429,18 +457,6 @@ export class VisualizationPanel {
         }
     }
 
-    public static sendViewLocationOptions() {
-        if (VisualizationPanel.currentPanel) {
-            const config = vscode.workspace.getConfiguration('sqlCrack');
-            const location = config.get<ViewLocation>('viewLocation') || 'tab';
-            VisualizationPanel.currentPanel._postMessage({
-                command: 'viewLocationOptions',
-                currentLocation: location,
-                pinnedTabs: VisualizationPanel.getPinnedTabs()
-            });
-        }
-    }
-
     private constructor(
         panel: vscode.WebviewPanel,
         extensionUri: vscode.Uri,
@@ -487,12 +503,6 @@ export class VisualizationPanel {
         this._panel.webview.onDidReceiveMessage(
             (message: SqlFlowWebviewMessage) => {
                 switch (message.command) {
-                    case 'error':
-                        vscode.window.showErrorMessage(message.text);
-                        return;
-                    case 'info':
-                        vscode.window.showInformationMessage(message.text);
-                        return;
                     case 'requestRefresh':
                         this._handleRefreshRequest();
                         return;
@@ -519,9 +529,17 @@ export class VisualizationPanel {
                                 {
                                     dialect: message.dialect || this._currentOptions.dialect,
                                     fileName: message.name || this._currentOptions.fileName,
-                                    documentUri: this._sourceDocumentUri
+                                    documentUri: this._sourceDocumentUri,
+                                    // The page reports where the statement starts in
+                                    // the SQL it was given; add where that SQL starts
+                                    // in the source document.
+                                    lineOffset: normalizeLineOffset(message.lineOffset) + getSourceLineOffset(this._currentOptions)
                                 }
                             );
+                            if (!pinId) {
+                                vscode.window.showWarningMessage(`Cannot pin: the limit of ${MAX_PINNED_TABS} pinned tabs (or their total size) has been reached. Unpin a tab first.`);
+                                return;
+                            }
                             this._postMessage({
                                 command: 'pinCreated',
                                 pinId: pinId,
@@ -538,9 +556,6 @@ export class VisualizationPanel {
                         return;
                     case 'changeViewLocation':
                         this._changeViewLocation(message.location);
-                        return;
-                    case 'getViewLocationOptions':
-                        VisualizationPanel.sendViewLocationOptions();
                         return;
                     case 'openPinnedTab':
                         if (VisualizationPanel._context) {
@@ -595,8 +610,10 @@ export class VisualizationPanel {
                 dialect: this._currentOptions.dialect,
                 fileName: this._currentOptions.fileName,
             },
+            // Same key the page was built with, so the refresh is not mistaken
+            // for a different document and UI-state saves keep their key.
+            documentKey: this._currentOptions.documentUri?.toString() ?? this._currentOptions.fileName ?? null,
         });
-        this._isStale = false;
     }
 
     private async _changeViewLocation(location: ViewLocation) {
@@ -634,7 +651,7 @@ export class VisualizationPanel {
             return;
         }
         const safeLine = Math.max(1, Math.floor(line)); // 1-indexed, never below 1
-        const zeroBasedLine = safeLine - 1 + (this._currentOptions.sourceRange?.start.line ?? 0);
+        const zeroBasedLine = safeLine - 1 + getSourceLineOffset(this._currentOptions);
 
         // Try to use the source document URI if available (preferred method)
         const targetUri = this._sourceDocumentUri;
@@ -803,7 +820,6 @@ export class VisualizationPanel {
         this._currentOptions = options;
         this._rememberUiStateKey();
         this._sourceDocumentUri = options.documentUri;
-        this._isStale = false;
         const webview = this._panel.webview;
         this._panel.webview.html = this._getHtmlForWebview(webview, sqlCode, options);
     }
@@ -959,8 +975,8 @@ export class VisualizationPanel {
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <!-- CSP: Allow img-src for data: and blob: URLs to enable PNG export and clipboard copy -->
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; worker-src ${webview.cspSource} blob:; img-src data: blob:;">
+    <!-- CSP: img-src data:/blob: enables PNG export and clipboard copy; connect-src lets the page fetch its own parser worker script, which must be started from a blob URL -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}'; worker-src ${webview.cspSource} blob:; connect-src ${webview.cspSource}; img-src data: blob:;">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SQL Visualization</title>
     <style>

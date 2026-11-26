@@ -80,7 +80,6 @@ export function getLineageGraphScriptFragment(): string {
             const zoomFitBtn = document.getElementById('lineage-zoom-fit');
             const zoomResetBtn = document.getElementById('lineage-zoom-reset');
             const zoomLevel = document.getElementById('lineage-zoom-level');
-            const directionBtns = document.querySelectorAll('.direction-btn');
 
             lineageScale = 1;
             lineageOffsetX = 0;
@@ -196,6 +195,7 @@ export function getLineageGraphScriptFragment(): string {
                 }
             });
 
+            setupDirectionButtons();
             if (!svg || !graphContainer) return;
 
             requestAnimationFrame(() => {
@@ -377,23 +377,6 @@ export function getLineageGraphScriptFragment(): string {
                     e.target.closest('.lineage-edge')) {
                     clearLineageFocus(nodes);
                 }
-            });
-
-            directionBtns.forEach(btn => {
-                btn.addEventListener('click', () => {
-                    const direction = btn.getAttribute('data-direction');
-                    const nodeId = btn.getAttribute('data-node-id');
-                    if (direction && nodeId) {
-                        lineageCurrentDirection = direction;
-                        postWorkspaceMessage({
-                            command: 'getLineageGraph',
-                            nodeId: nodeId,
-                            direction: direction,
-                            depth: lineageDepth,
-                            expandedNodes: Array.from(lineageExpandedNodes)
-                        });
-                    }
-                });
             });
 
             lineageDocumentClickHandler = () => {

@@ -90,6 +90,7 @@ export function initCanvas(
 
     // Background rect
     const backgroundRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    backgroundRect.setAttribute('data-canvas-background', 'true');
     backgroundRect.setAttribute('width', '100%');
     backgroundRect.setAttribute('height', '100%');
     applyBackgroundFill(backgroundRect, isDark, gridStyle);

@@ -1,5 +1,6 @@
+import { astifySql, prepareSqlAst } from '../astUtils';
 import { Parser } from 'node-sql-parser';
-import type { FlowEdge, FlowNode, ParseResult, QueryStats, SqlDialect } from '../../types';
+import type { FlowEdge, FlowNode, ParseResult, QueryStats } from '../../types';
 import type { ParserContext } from '../context';
 import {
     findMatchingParen,
@@ -164,7 +165,7 @@ function parseSelectAst(querySql: string): any | null {
 
     for (const candidate of candidates) {
         try {
-            const ast = SELECT_PARSER.astify(candidate, { database: 'PostgreSQL' });
+            const ast = prepareSqlAst(astifySql(SELECT_PARSER, candidate, 'PostgreSQL'), candidate, 'Oracle');
             return Array.isArray(ast) ? ast[0] : ast;
         } catch {
             continue;

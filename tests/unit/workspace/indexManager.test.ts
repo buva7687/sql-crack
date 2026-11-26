@@ -108,7 +108,12 @@ describe('IndexManager', () => {
             dispose: jest.fn(),
             setDialect: jest.fn(),
             getDialect: jest.fn().mockReturnValue('MySQL'),
-            findSqlFiles: jest.fn().mockResolvedValue([])
+            findSqlFiles: jest.fn(async () => {
+                const count = await mockScanner.getFileCount();
+                const cached = mockContext.workspaceState.get<{ filesArray?: [string, FileAnalysis][] }>('sqlWorkspaceIndex');
+                return Array.from({ length: count }, (_, index) =>
+                    vscode.Uri.file(cached?.filesArray?.[index]?.[0] || `/enumerated-${index}.sql`));
+            })
         } as unknown as jest.Mocked<WorkspaceScanner>;
 
         // Make WorkspaceScanner constructor return our mock
@@ -1061,6 +1066,7 @@ describe('IndexManager', () => {
                 return uri.toString().startsWith(storagePrefix) ? disk.get(uri.toString())! : new Uint8Array();
             });
             const analysis = createMockAnalysis('/large-cache.sql', [{ name: 'cached_table' }]);
+            mockScanner.findSqlFiles.mockResolvedValue([vscode.Uri.file(analysis.filePath)]);
             analysis.parseError = 'x'.repeat(4 * 1024 * 1024);
             mockScanner.getFileCount.mockResolvedValue(1);
             mockScanner.analyzeWorkspace.mockResolvedValue([analysis]);
@@ -1082,7 +1088,7 @@ describe('IndexManager', () => {
 
         it('treats a corrupt disk cache as missing without installing a partial index', async () => {
             await mockContext.workspaceState.update('sqlWorkspaceIndex', {
-                version: 11, identity: JSON.stringify({ schema: 11, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                version: 12, identity: JSON.stringify({ schema: 12, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
                 disk: true, lastUpdated: Date.now(), fileCount: 1,
                 filesArray: [], fileHashesArray: [], definitionArray: [], referenceArray: [],
             });
@@ -1117,8 +1123,8 @@ describe('IndexManager', () => {
 
         it('rejects a cached index when dialect changes during filesystem validation', async () => {
             await mockContext.workspaceState.update('sqlWorkspaceIndex', {
-                version: 11,
-                identity: JSON.stringify({ schema: 11, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                version: 12,
+                identity: JSON.stringify({ schema: 12, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
                 lastUpdated: Date.now(),
                 fileCount: 1,
                 filesArray: [['/cached.sql', createMockAnalysis('/cached.sql', [{ name: 'old_table' }])]],
@@ -1149,8 +1155,8 @@ describe('IndexManager', () => {
             // extensions) or the cache is rejected as belonging to a different
             // scope/dialect/config.
             const cachedIndex = {
-                version: 11, // Must match INDEX_VERSION
-                identity: JSON.stringify({ schema: 11, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                version: 12, // Must match INDEX_VERSION
+                identity: JSON.stringify({ schema: 12, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
                 lastUpdated: Date.now(),
                 fileCount: 1,
                 filesArray: [['/cached.sql', createMockAnalysis('/cached.sql', [{ name: 'cached_table' }])]],
@@ -1183,8 +1189,8 @@ describe('IndexManager', () => {
                 skippedReason: 'tooLarge',
             };
             await mockContext.workspaceState.update('sqlWorkspaceIndex', {
-                version: 11,
-                identity: JSON.stringify({ schema: 11, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                version: 12,
+                identity: JSON.stringify({ schema: 12, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
                 lastUpdated: Date.now(),
                 fileCount: 1,
                 filesArray: [['/large.sql', oversizedAnalysis]],
@@ -1214,8 +1220,8 @@ describe('IndexManager', () => {
                 readError: 'Provider unavailable',
             };
             await mockContext.workspaceState.update('sqlWorkspaceIndex', {
-                version: 11,
-                identity: JSON.stringify({ schema: 11, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                version: 12,
+                identity: JSON.stringify({ schema: 12, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
                 lastUpdated: Date.now(),
                 fileCount: 1,
                 filesArray: [['/preserved.sql', preservedAnalysis]],
@@ -1244,8 +1250,8 @@ describe('IndexManager', () => {
                 readError: 'Provider unavailable',
             };
             await mockContext.workspaceState.update('sqlWorkspaceIndex', {
-                version: 11,
-                identity: JSON.stringify({ schema: 11, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                version: 12,
+                identity: JSON.stringify({ schema: 12, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
                 lastUpdated: Date.now(),
                 fileCount: 1,
                 filesArray: [['/deleted.sql', preservedAnalysis]],
@@ -1267,8 +1273,8 @@ describe('IndexManager', () => {
 
         it('should ignore cache when a cached file changed while the extension was offline', async () => {
             const cachedIndex = {
-                version: 11,
-                identity: JSON.stringify({ schema: 11, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                version: 12,
+                identity: JSON.stringify({ schema: 12, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
                 lastUpdated: Date.now(),
                 fileCount: 1,
                 filesArray: [['/cached.sql', createMockAnalysis('/cached.sql', [{ name: 'cached_table' }])]],
@@ -1309,8 +1315,8 @@ describe('IndexManager', () => {
                 contentHash: cachedHash
             };
             const cachedIndex = {
-                version: 11,
-                identity: JSON.stringify({ schema: 11, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                version: 12,
+                identity: JSON.stringify({ schema: 12, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
                 lastUpdated: Date.now(),
                 fileCount: 1,
                 filesArray: [['/cached.sql', cachedAnalysis]],
@@ -1344,8 +1350,8 @@ describe('IndexManager', () => {
 
         it('should ignore cache when the workspace file count changed while offline', async () => {
             const cachedIndex = {
-                version: 11,
-                identity: JSON.stringify({ schema: 11, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                version: 12,
+                identity: JSON.stringify({ schema: 12, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
                 lastUpdated: Date.now(),
                 fileCount: 1,
                 filesArray: [['/cached.sql', createMockAnalysis('/cached.sql', [{ name: 'cached_table' }])]],
@@ -1376,8 +1382,8 @@ describe('IndexManager', () => {
                 contentHash
             };
             const cachedIndex = {
-                version: 11,
-                identity: JSON.stringify({ schema: 11, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                version: 12,
+                identity: JSON.stringify({ schema: 12, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
                 lastUpdated: Date.now(),
                 fileCount: 1,
                 filesArray: [['/cached.sql', cachedAnalysis]],
@@ -1411,8 +1417,8 @@ describe('IndexManager', () => {
                 return [filePath, createMockAnalysis(filePath)];
             });
             await mockContext.workspaceState.update('sqlWorkspaceIndex', {
-                version: 11,
-                identity: JSON.stringify({ schema: 11, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                version: 12,
+                identity: JSON.stringify({ schema: 12, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
                 lastUpdated: Date.now(),
                 fileCount,
                 filesArray,
@@ -1464,8 +1470,8 @@ describe('IndexManager', () => {
             // Same schema version but an identity that does not match this manager
             // (e.g. a cache built for a different dialect). It must not be reused.
             const foreignCache = {
-                version: 11,
-                identity: JSON.stringify({ schema: 11, scope: '<workspace>', dialect: 'PostgreSQL', extensions: [] }),
+                version: 12,
+                identity: JSON.stringify({ schema: 12, scope: '<workspace>', dialect: 'PostgreSQL', extensions: [] }),
                 lastUpdated: Date.now(),
                 fileCount: 1,
                 filesArray: [],
@@ -1565,7 +1571,7 @@ describe('IndexManager', () => {
             // Caches persisted before identity tracking have no identity field and
             // must be rebuilt rather than served against an unknown scope/dialect.
             const legacyCache = {
-                version: 11,
+                version: 12,
                 lastUpdated: Date.now(),
                 fileCount: 1,
                 filesArray: [],
@@ -1585,7 +1591,7 @@ describe('IndexManager', () => {
 
         it('should ignore expired cache', async () => {
             const expiredCache = {
-                version: 11,
+                version: 12,
                 lastUpdated: Date.now() - (25 * 60 * 60 * 1000), // 25 hours ago (default TTL is 24h)
                 fileCount: 1,
                 filesArray: [],
@@ -1610,7 +1616,7 @@ describe('IndexManager', () => {
             });
 
             const cache = {
-                version: 11,
+                version: 12,
                 lastUpdated: Date.now(),
                 fileCount: 1,
                 filesArray: [],
@@ -1649,8 +1655,8 @@ describe('IndexManager', () => {
 
     describe('cache state distinction', () => {
         const validCache = () => ({
-            version: 11,
-            identity: JSON.stringify({ schema: 11, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+            version: 12,
+            identity: JSON.stringify({ schema: 12, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
             lastUpdated: Date.now(),
             fileCount: 1,
             filesArray: [['/cached.sql', createMockAnalysis('/cached.sql', [{ name: 'cached_table' }])]],
@@ -1692,7 +1698,7 @@ describe('IndexManager', () => {
         it('reports identity-mismatch for a different dialect/scope/config', async () => {
             await mockContext.workspaceState.update('sqlWorkspaceIndex', {
                 ...validCache(),
-                identity: JSON.stringify({ schema: 11, scope: '<workspace>', dialect: 'PostgreSQL', extensions: [] }),
+                identity: JSON.stringify({ schema: 12, scope: '<workspace>', dialect: 'PostgreSQL', extensions: [] }),
             });
             mockScanner.getFileCount.mockResolvedValue(100);
 
@@ -1729,8 +1735,8 @@ describe('IndexManager', () => {
         it('persists an oversized marker and reports oversized on next load', async () => {
             // Manually store an oversized marker (as persistIndex would on overflow).
             await mockContext.workspaceState.update('sqlWorkspaceIndex', {
-                version: 11,
-                identity: JSON.stringify({ schema: 11, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                version: 12,
+                identity: JSON.stringify({ schema: 12, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
                 oversized: true,
                 lastUpdated: Date.now(),
                 fileCount: 9999,
@@ -1751,8 +1757,8 @@ describe('IndexManager', () => {
 
         it('reports an expired oversized marker as oversized rather than stale', async () => {
             await mockContext.workspaceState.update('sqlWorkspaceIndex', {
-                version: 11,
-                identity: JSON.stringify({ schema: 11, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
+                version: 12,
+                identity: JSON.stringify({ schema: 12, scope: '<workspace>', dialect: 'MySQL', extensions: [] }),
                 oversized: true,
                 lastUpdated: Date.now() - (25 * 60 * 60 * 1000),
                 fileCount: 9999,

@@ -5,12 +5,9 @@
 import {
     parseAsync,
     parseBatchAsync,
-    validateAsync,
     isWorkerSupported,
     terminateWorker,
-    parseWithFallback,
     cancelPendingParse,
-    getWorkerStatus,
     isCancelledBatchParseResult,
     configureParseTimeout,
     configureCustomFunctions,
@@ -45,22 +42,22 @@ describe('parserClient', () => {
         it('applies and resets custom functions when workers are disabled', async () => {
             configureCustomFunctions(['MY_SUM'], ['MY_RANK']);
             const aggregateSql = 'SELECT MY_SUM(amount) AS total FROM orders';
-            const first = await parseWithFallback(aggregateSql, 'PostgreSQL', false);
+            const first = await parseAsync(aggregateSql, 'PostgreSQL');
             expect(first.nodes.some(node => node.type === 'aggregate')).toBe(true);
             expect(first.stats.aggregations).toBe(1);
             expect(first.stats.functionsUsed).toEqual(expect.arrayContaining([expect.objectContaining({name: 'MY_SUM', category: 'aggregate'})]));
             const windowSql = 'SELECT MY_RANK(amount) OVER (PARTITION BY customer_id ORDER BY amount) AS position FROM orders';
-            const window = await parseWithFallback(windowSql, 'MySQL', false);
+            const window = await parseAsync(windowSql, 'MySQL');
             expect(window.nodes.some(node => node.type === 'window')).toBe(true);
             expect(window.stats.windowFunctions).toBe(1);
             expect(window.stats.functionsUsed).toEqual(expect.arrayContaining([expect.objectContaining({name: 'MY_RANK', category: 'window'})]));
             // PostgreSQL's parser grammar rejects generic functions with OVER.
             // Configuration must not turn that into a successful-looking result.
-            const unsupported = await parseWithFallback(windowSql, 'PostgreSQL', false, {allowDialectFallback: false});
+            const unsupported = await parseAsync(windowSql, 'PostgreSQL', { allowDialectFallback: false });
             expect(unsupported.partial).toBe(true);
             expect(unsupported.hints.length).toBeGreaterThan(0);
             configureCustomFunctions();
-            const reset = await parseWithFallback(aggregateSql, 'PostgreSQL', false);
+            const reset = await parseAsync(aggregateSql, 'PostgreSQL');
             expect(reset.nodes.some(node => node.type === 'aggregate')).toBe(false);
         });
 
@@ -302,66 +299,20 @@ describe('parserClient', () => {
         });
     });
 
-    describe('validateAsync', () => {
-        it('defers validation to a macrotask so UI can paint loading states', async () => {
-            jest.useFakeTimers();
-            try {
-                let resolved = false;
-                const pending = validateAsync('SELECT 1').then(() => {
-                    resolved = true;
-                });
-
-                await Promise.resolve();
-                expect(resolved).toBe(false);
-
-                jest.runOnlyPendingTimers();
-                await pending;
-                expect(resolved).toBe(true);
-            } finally {
-                jest.useRealTimers();
-            }
+    describe('batch validation', () => {
+        it('reports the configured byte limit through the production batch parser', async () => {
+            const limits = { maxSqlSizeBytes: 64, maxQueryCount: 100 };
+            const oversized = await parseBatchAsync(testSql, 'MySQL', limits);
+            expect(oversized.validationError?.type).toBe('size_limit');
+            const withinLimit = await parseBatchAsync(testSql, 'MySQL', { ...limits, maxSqlSizeBytes: 1000 });
+            expect(withinLimit.validationError).toBeUndefined();
         });
 
-        it('should validate normal SQL without errors', async () => {
-            const error = await validateAsync(testSql);
-
-            expect(error).toBeNull();
-        });
-
-        it('should detect oversized SQL', async () => {
-            const hugeSql = 'SELECT * FROM users;'.repeat(10000); // Very large
-
-            const error = await validateAsync(hugeSql, 1000); // 1KB limit
-
-            expect(error).toBeDefined();
-            expect(error?.type).toBe('size_limit');
-        });
-
-        it('should detect too many statements', async () => {
-            const manyStatements = 'SELECT 1;'.repeat(100);
-
-            const error = await validateAsync(manyStatements, undefined, 50);
-
-            expect(error).toBeDefined();
-            expect(error?.type).toBe('query_count_limit');
-        });
-
-        it('should allow custom limits', async () => {
-            const largeSql = testSql.repeat(100);
-
-            // Should pass with higher limit
-            const error1 = await validateAsync(largeSql, 1000000);
-            expect(error1).toBeNull();
-
-            // Should fail with lower limit
-            const error2 = await validateAsync(largeSql, 100);
-            expect(error2).toBeDefined();
-        });
-
-        it('should handle empty SQL', async () => {
-            const error = await validateAsync('');
-
-            expect(error).toBeDefined();
+        it('reports the configured statement limit through the production batch parser', async () => {
+            const result = await parseBatchAsync('SELECT 1; SELECT 2; SELECT 3;', 'MySQL', {
+                maxSqlSizeBytes: 1000, maxQueryCount: 2,
+            });
+            expect(result.validationError?.type).toBe('query_count_limit');
         });
     });
 
@@ -773,32 +724,6 @@ describe('parserClient', () => {
         });
     });
 
-    describe('parseWithFallback', () => {
-        it('should parse SQL successfully', async () => {
-            const result = await parseWithFallback(testSql, 'MySQL', true);
-
-            expect(result).toBeDefined();
-            expect(result.nodes).toBeInstanceOf(Array);
-        });
-
-        it('should work with useWorker=false', async () => {
-            // Worker implementation deferred, should still work
-            const result = await parseWithFallback(testSql, 'MySQL', false);
-
-            expect(result).toBeDefined();
-            expect(result.nodes.length).toBeGreaterThan(0);
-        });
-
-        it('should handle errors gracefully', async () => {
-            const invalidSql = 'INVALID SQL HERE';
-
-            const result = await parseWithFallback(invalidSql, 'MySQL', true);
-
-            // Should not throw, should return some result
-            expect(result).toBeDefined();
-        });
-    });
-
     describe('cancelPendingParse', () => {
         it('should cancel without error', () => {
             expect(() => cancelPendingParse()).not.toThrow();
@@ -821,45 +746,6 @@ describe('parserClient', () => {
 
                 const result = await pending;
                 expect(result.error).toBe('Parse cancelled');
-            } finally {
-                jest.useRealTimers();
-            }
-        });
-    });
-
-    describe('getWorkerStatus', () => {
-        it('should return worker status with deferred implementation when unsupported', () => {
-            const status = getWorkerStatus();
-
-            expect(status).toHaveProperty('supported');
-            expect(status).toHaveProperty('active');
-            expect(status).toHaveProperty('pendingRequests');
-            expect(status).toHaveProperty('implementation');
-            expect(status.supported).toBe(false);
-            expect(status.active).toBe(false);
-            expect(status.pendingRequests).toBe(0);
-            expect(status.implementation).toBe('deferred');
-        });
-
-        it('should reflect deferred implementation when worker support is unavailable', () => {
-            terminateWorker();
-
-            const status = getWorkerStatus();
-            expect(status.active).toBe(false);
-            expect(status.implementation).toBe('deferred');
-        });
-
-        it('tracks queued parse requests while waiting on the macrotask boundary', async () => {
-            jest.useFakeTimers();
-            try {
-                const pending = parseAsync('SELECT 1', 'MySQL');
-
-                expect(getWorkerStatus().pendingRequests).toBeGreaterThanOrEqual(1);
-
-                jest.runOnlyPendingTimers();
-                await pending;
-
-                expect(getWorkerStatus().pendingRequests).toBe(0);
             } finally {
                 jest.useRealTimers();
             }

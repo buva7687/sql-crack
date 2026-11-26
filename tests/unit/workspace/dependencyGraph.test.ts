@@ -109,6 +109,23 @@ function createIndex(files: FileAnalysis[]): WorkspaceIndex {
 }
 
 describe('workspace dependency graph layout and cycle detection', () => {
+    it.each(['files', 'tables'] as const)('preserves surviving node identities on refresh in %s mode', mode => {
+        const files = ['accounts', 'orders', 'payments'].map(name => {
+            const filePath = `/repo/${name}.sql`;
+            return createFileAnalysis(filePath, createDefinition(filePath, name), []);
+        });
+        const nodeIdsByFile = (analyses: FileAnalysis[]) => new Map(
+            buildDependencyGraph(createIndex(analyses), mode).nodes.map(node => [node.filePath, node.id])
+        );
+
+        const before = nodeIdsByFile(files);
+        const after = nodeIdsByFile([files[2], files[1]]);
+
+        expect(after.get(files[1].filePath)).toBe(before.get(files[1].filePath));
+        expect(after.get(files[2].filePath)).toBe(before.get(files[2].filePath));
+        expect([...after.values()]).not.toContain(before.get(files[0].filePath));
+    });
+
     it('counts fallback-parsed files separately from fatal parse errors', () => {
         const filePath = '/repo/partial.sql';
         const analysis = createFileAnalysis(filePath, createDefinition(filePath, 'orders'), []);
@@ -255,12 +272,6 @@ describe('workspace dependency graph layout and cycle detection', () => {
         const graph = buildDependencyGraph(createIndex([analysis]), 'tables');
         const labels = new Map(graph.nodes.map(node => [node.id, node.label]));
 
-        expect(graph.edges).toEqual(expect.arrayContaining([
-            expect.objectContaining({
-                source: expect.stringMatching(/^table_/),
-                target: expect.stringMatching(/^table_/),
-            }),
-        ]));
         expect(graph.edges.some(edge =>
             labels.get(edge.source) === 'derived_view' && labels.get(edge.target) === 'base_table'
         )).toBe(true);

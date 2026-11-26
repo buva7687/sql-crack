@@ -28,8 +28,6 @@ export interface EventListenerCallbacks {
     selectNode: (nodeId: string | null) => void;
     clearFocusMode: () => void;
     fitView: () => void;
-    getKeyboardNavigationNodes: () => FlowNode[];
-    moveKeyboardFocusToNode: (node: FlowNode) => void;
     toggleColumnFlows: (enabled?: boolean) => void;
     hideContextMenu: () => void;
     clearSearch: () => void;

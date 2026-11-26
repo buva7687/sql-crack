@@ -6,6 +6,7 @@ import {
     TransformationType,
     ColumnReference
 } from './types';
+import { readColumnIdentifier } from './astIdentifiers';
 import { logger } from '../../logger';
 import { unwrapIdentifierValue } from '../../shared';
 import type {
@@ -85,6 +86,7 @@ export class TransformExtractor {
 
         return {
             outputColumn,
+            outputNameQuoted: readColumnIdentifier(alias || (expr.type === 'column_ref' ? expr : undefined))?.nameQuoted,
             outputAlias: alias || undefined,
             inputColumns,
             operation,
@@ -122,10 +124,12 @@ export class TransformExtractor {
         // Direct column reference
         if (expr.type === 'column_ref') {
             const colRef = expr as AstColumnRef;
-            const columnName = this.extractColumnName(colRef);
+            const identifier = readColumnIdentifier(colRef.column);
+            const columnName = identifier?.name || this.extractColumnName(colRef);
             if (columnName) {
                 columns.push({
                     columnName,
+                    ...(identifier ? { nameQuoted: identifier.nameQuoted } : {}),
                     tableName: this.resolveTableName(colRef.table, tableAliases),
                     tableAlias: colRef.table || undefined,
                     usedIn: 'select',

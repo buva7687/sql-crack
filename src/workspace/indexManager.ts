@@ -15,13 +15,14 @@ import {
     SqlDialect,
     WorkspaceCacheState,
 } from './types';
-import { WorkspaceScanner } from './scanner';
+import { DEFAULT_WORKSPACE_SQL_FILE_SIZE, WorkspaceScanner } from './scanner';
 import { DiskIndexCache } from './diskIndexCache';
 import { normalizeFileExtensions } from '../shared/fileExtensions';
+import { normalizeAdvancedLimit } from '../shared/limits';
 import { getQualifiedKey, IdentifierQualification, normalizeIdentifier } from './identifiers';
 import { logger } from '../logger';
 
-const INDEX_VERSION = 11; // Invalidate analyses that dropped explicit wildcard-adjacent projections
+const INDEX_VERSION = 12; // Rebuild analyses with scoped CTEs and statement-level column mappings
 const DEFAULT_AUTO_INDEX_THRESHOLD = 50;
 const DEFAULT_CACHE_TTL_HOURS = 24;
 const DEFAULT_MAX_CACHE_BYTES = 4 * 1024 * 1024; // 4MB safety limit for workspaceState
@@ -123,7 +124,8 @@ export class IndexManager {
             hasValidIndex: false,
         });
 
-        const fileCount = await this.scanner.getFileCount();
+        const currentFiles = await this.scanner.findSqlFiles();
+        const fileCount = currentFiles.length;
         if (this._disposed) {
             return disposedResult(fileCount);
         }
@@ -132,7 +134,7 @@ export class IndexManager {
         // Try to load cached index. loadCachedIndex() records the precise reason
         // (valid / missing / stale / version- or identity-mismatch / oversized /
         // disabled) so callers don't have to infer it from a bare null.
-        this.index = await this.loadCachedIndex(fileCount);
+        this.index = await this.loadCachedIndex(currentFiles);
         const cacheState = this._lastCacheState;
         if (this._disposed) {
             return disposedResult(fileCount);
@@ -330,6 +332,8 @@ export class IndexManager {
         }
 
         const analysis = await this.scanner.analyzeFile(uri);
+        // The configured extensions can change while a queued parse is in flight.
+        if (!this.index || this._disposed || !this.shouldIndexFile(uri)) {return;}
         this._deletedDuringBuild.delete(uri.fsPath);
         const oldHash = this.index.fileHashes.get(uri.fsPath);
         const oldAnalysis = this.index.files.get(uri.fsPath);
@@ -364,11 +368,15 @@ export class IndexManager {
             return;
         }
 
-        // Check if file actually changed (hash comparison)
-        // A successful read must also replace a preserved error marker, even
-        // when the recovered content is byte-identical to the previous version.
-        if (oldHash === analysis.contentHash && oldAnalysis && !oldAnalysis.readError) {
-            // No change detected - skip update
+        // Byte-identical content can recover from a timeout or fallback.
+        // Keep an existing successful analysis on a transient parser failure.
+        const recoveredParse = oldAnalysis?.parseError && !analysis.parseError;
+        const improvedWarnings = !analysis.parseError
+            && (oldAnalysis?.parseWarnings?.length ?? 0) > (analysis.parseWarnings?.length ?? 0);
+        const sameSkip = oldAnalysis?.skippedReason === analysis.skippedReason
+            && (!analysis.skippedReason || oldAnalysis?.fileSize === analysis.fileSize);
+        if (oldHash === analysis.contentHash && oldAnalysis && !oldAnalysis.readError
+            && !recoveredParse && !improvedWarnings && sameSkip) {
             return;
         }
 
@@ -895,6 +903,11 @@ export class IndexManager {
      * do not re-index generated/dependency folders.
      */
     private shouldIndexFile(uri: vscode.Uri): boolean {
+        const fileName = path.basename(uri.fsPath).toLowerCase();
+        const extensions = normalizeFileExtensions(vscode.workspace.getConfiguration('sqlCrack').get('additionalFileExtensions'));
+        if (!fileName.endsWith('.sql') && !extensions.some(extension => fileName.endsWith('.' + extension))) {
+            return false;
+        }
         // Match the scanner's findFiles exclude, which applies relative to the
         // workspace folder. Testing the absolute path ignored every change in
         // a workspace located under e.g. ~/build/<repo>.
@@ -1104,10 +1117,10 @@ export class IndexManager {
         return this._lastCacheState;
     }
 
-    private async loadCachedIndex(currentFileCount: number): Promise<WorkspaceIndex | null> {
+    private async loadCachedIndex(currentFiles: vscode.Uri[]): Promise<WorkspaceIndex | null> {
         // Check advanced settings
         const config = vscode.workspace.getConfiguration('sqlCrack.advanced');
-        const cacheTTLHours = config.get<number>('cacheTTLHours', DEFAULT_CACHE_TTL_HOURS);
+        const cacheTTLHours = normalizeAdvancedLimit(config.get<number>('cacheTTLHours', DEFAULT_CACHE_TTL_HOURS), DEFAULT_CACHE_TTL_HOURS, 0, 168);
 
         // If TTL is 0, caching is disabled
         if (cacheTTLHours === 0) {
@@ -1173,7 +1186,7 @@ export class IndexManager {
             }
         }
 
-        if (!(await this.isCachedIndexCurrent(cached, currentFileCount))) {
+        if (!(await this.isCachedIndexCurrent(cached, currentFiles))) {
             logger.debug('[IndexManager] Cached index filesystem snapshot changed - rebuilding index');
             this._lastCacheState = 'stale';
             return null;
@@ -1222,13 +1235,18 @@ export class IndexManager {
         return restored;
     }
 
-    private async isCachedIndexCurrent(cached: SerializedWorkspaceIndex, currentFileCount: number): Promise<boolean> {
-        if (cached.fileCount !== currentFileCount) {
+    private async isCachedIndexCurrent(cached: SerializedWorkspaceIndex, currentFiles: vscode.Uri[]): Promise<boolean> {
+        if (cached.fileCount !== currentFiles.length) {
             return false;
         }
 
         const cachedFiles = cached.filesArray || [];
         if (cachedFiles.length !== cached.fileCount) {
+            return false;
+        }
+        const currentPaths = new Map(currentFiles.map(uri => [uri.fsPath, uri]));
+        const cachedPaths = new Set(cachedFiles.map(([filePath]) => filePath));
+        if (currentPaths.size !== cachedPaths.size || ![...cachedPaths].every(filePath => currentPaths.has(filePath))) {
             return false;
         }
 
@@ -1247,13 +1265,18 @@ export class IndexManager {
                 const cachedHash = cachedHashes.get(filePath) || analysis.contentHash;
 
                 try {
-                    const uri = vscode.Uri.file(filePath);
+                    const uri = currentPaths.get(filePath)!;
                     const stat = await vscode.workspace.fs.stat(uri);
                     if (analysis.skippedReason === 'tooLarge') {
-                        if (analysis.fileSize !== stat.size || analysis.lastModified !== stat.mtime) {
+                        if (stat.size <= DEFAULT_WORKSPACE_SQL_FILE_SIZE
+                            || analysis.fileSize !== stat.size || analysis.lastModified !== stat.mtime) {
                             validationFailed = true;
                         }
                         continue;
+                    }
+                    if (stat.size > DEFAULT_WORKSPACE_SQL_FILE_SIZE) {
+                        validationFailed = true;
+                        return;
                     }
                     // Preserved read-error entries retain the last-known-good
                     // hash and can be verified like any other cached analysis.
@@ -1440,7 +1463,7 @@ export class IndexManager {
         if (!this.index) {return true;}
 
         const config = vscode.workspace.getConfiguration('sqlCrack.advanced');
-        const cacheTTLHours = config.get<number>('cacheTTLHours', DEFAULT_CACHE_TTL_HOURS);
+        const cacheTTLHours = normalizeAdvancedLimit(config.get<number>('cacheTTLHours', DEFAULT_CACHE_TTL_HOURS), DEFAULT_CACHE_TTL_HOURS, 0, 168);
 
         // If TTL is 0, always consider stale (caching disabled)
         if (cacheTTLHours === 0) {return true;}

@@ -33,7 +33,12 @@ export function toggleSqlPreviewPanel(options: SqlPreviewPanelOptions, show?: bo
 
 export function updateSqlPreviewPanelContent(options: SqlPreviewPanelOptions): void {
     const { panel, currentSql, isDarkTheme, formatSql, highlightSql, onToggleVisible } = options;
-    if (!panel || !currentSql) {
+    if (!panel) {
+        return;
+    }
+    if (!currentSql.trim()) {
+        panel.replaceChildren();
+        onToggleVisible(false);
         return;
     }
 

@@ -20,7 +20,7 @@ describe('parser worker wiring prep', () => {
     it('adds worker support detection and a worker-backed parser path in parser client', () => {
         expect(parserClientSource).toContain('isWorkerSupported(): boolean');
         expect(parserClientSource).toContain("typeof Worker !== 'undefined'");
-        expect(parserClientSource).toContain('new Worker(workerUri)');
+        expect(parserClientSource).toContain('new Worker(resolveWorkerScriptUrl(workerUri))');
         expect(parserClientSource).toContain('cancelPendingParse(): void');
     });
 
@@ -28,13 +28,12 @@ describe('parser worker wiring prep', () => {
         expect(panelSource).toContain("worker-src ${webview.cspSource} blob:;");
     });
 
-    it('adds a parser worker entry wrapper around parseSql / parseSqlBatch / validateSql', () => {
+    it('routes single and batch parse messages through the worker', () => {
         expect(workerSource).toContain("type: 'parse'");
         expect(workerSource).toContain("type: 'parseBatch'");
-        expect(workerSource).toContain("type: 'validate'");
+        expect(workerSource).not.toContain("type: 'validate'");
         expect(workerSource).toContain('parseSql(');
         expect(workerSource).toContain('parseSqlBatch(');
-        expect(workerSource).toContain('validateSql(');
     });
 
     it('injects parser worker URI via asWebviewUri (window.parserWorkerUri)', () => {
@@ -50,7 +49,7 @@ describe('parser worker wiring prep', () => {
 
     it('instantiates worker from injected URI in parserClient worker manager path', () => {
         expect(parserClientSource).toContain('getParserWorkerUri()');
-        expect(parserClientSource).toContain('new Worker(workerUri)');
+        expect(parserClientSource).toContain('new Worker(resolveWorkerScriptUrl(workerUri))');
         expect(parserClientSource).toContain('queueWorkerRequest<ParseResult>');
         expect(parserClientSource).toContain('queueWorkerRequest<BatchParseResult>');
     });

@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-11-24
+
+### Fixed
+- Honor BigQuery `* EXCEPT` and Snowflake `* EXCLUDE` (including quote-sensitive Snowflake aliases and declared CTE column lists) in SQL Flow wildcard lineage, `UNION` column-count checks, and dead-column hints, while leaving BigQuery `* REPLACE` unexpanded.
+- Navigate schema-qualified and quoted SQL Flow `SELECT INTO` write targets to their `INTO` line instead of `FROM` or earlier string literals.
+- Keep quoted CTE bindings and `CROSS`/`NATURAL` join detection intact when queries reference keyword-named or prefixed columns such as `b.offset`, `src.select`, or `$select`.
+- Resolve recursive self-references for later CTEs in `WITH RECURSIVE` clauses and parenthesized Snowflake `UNION` branches, and avoid repeated tokenization during dead-column detection on large CTE chains.
+- Stop listing a later `WITH RECURSIVE` CTE, or a Snowflake / SQLite CTE with a parenthesized recursive `UNION` branch, as an external table in the Workspace graph.
+- Resolve quoted SQL Flow column qualifiers to their source tables and keep case-distinct aliases attached to separate self-join instances.
+- Navigate Workspace SELECT INTO definitions to their statement after leading comments.
+- Parse SQL Server escaped bracket identifiers such as `[weird]]name]` in write targets, source tables and columns without inventing partial-graph reads.
+- Keep quoted CTE bindings separate from physical relations, expand unquoted qualified stars regardless of case, and preserve quoted alias identities in wildcard lineage.
+- Stop reporting columns selected through a quoted alias star as dead columns.
+- Show CROSS and NATURAL joins correctly while preserving explicitly quoted keyword aliases.
+- Exclude CTE references from Tables Used and repeated physical-table access hints.
+- Keep qualified physical relations separate from same-named CTEs and respect declaration order in nonrecursive WITH clauses. Recursive CTEs written without the RECURSIVE keyword still resolve their self-reference in Snowflake, SQLite, SQL Server, and Oracle.
+- Expand known CTE wildcard projections before mapping UNION outputs. Preserve explicit lineage where column positions are known.
+- Show table writes for parsed PostgreSQL and SQL Server SELECT INTO statements, display Athena UNNEST aliases correctly, and preserve hash comments in formatted MySQL-family SQL.
+- Stop recommending removal of intermediate columns used through qualified stars, later UNION branches, derived-table projections, consecutive JOIN conditions, or scalar subqueries inside a CTE.
+- Keep editor cursor follow working on a stale SQL Flow panel when auto-refresh is off.
+- Parse SELECT INTO with a schema-qualified target, and PostgreSQL TEMP, UNLOGGED, or TABLE modifiers, and show the written table.
+- Stop flagging CTE columns used only as table-function arguments, and unnamed expressions, as dead columns.
+- Treat an unquoted case change of a joined relation inside a PostgreSQL CTE as unchanged in Compare.
+- Format `#` as SQL in the SQL preview unless the dialect uses hash comments.
+- Stop listing a recursive CTE written without the RECURSIVE keyword as an external table in the Workspace graph for Snowflake, SQLite, and Oracle.
+- Avoid repeated prefix scans in dense statement batches and repeated scans during OPENJSON error recovery.
+- Keep edges and minimap markers aligned when changing layouts or moving nodes in SQL Flow. Fit to View restores the full graph after zooming into a node.
+- Keep cursor and column-lineage highlights as offscreen nodes come back into view. Resolve editor cursor motion against the new statement ranges when a refresh finishes.
+- Clear stale clause and lineage overlays when SQL Flow changes queries or encounters an error. Clear SQL Preview when its source is empty.
+- Detect nested graph changes and distinguish quoted relation names in Compare. Allow Tab and Shift+Tab to leave the graph.
+- Save the displayed export preview, preserve transparent backgrounds, and include expanded CTE and subquery diagrams in export bounds.
+- Run SQL Flow parsing in its background worker again. The worker never started inside VS Code, so every parse ran on the panel's own thread, where a slow query froze the panel and the parse timeout could not stop it.
+- Keep saving a pinned SQL Flow tab's layout, zoom and toggles after you refresh it.
+- Jump to the correct source line when you click a node in a pinned tab made from a later statement in a file or from a selection. Pins created before this version still jump relative to the top of the file.
+- Keep a pinned tab's "Pinned" time when you reopen it.
+- Accept `sqlCrack.defaultDialect` values in any letter case, plus common names such as `postgres` and `mssql`; an unrecognised value now falls back to MySQL instead of failing every parse.
+- Clamp `sqlCrack.autoRefreshDelay` (100–5000 ms) and `sqlCrack.advanced.cacheTTLHours` (0–168) to their documented ranges when settings.json holds a value outside them.
+- Show Problems diagnostics only for editor documents, not for the copies VS Code opens in diff and source-control views.
+
+### Changed
+- Limit pinned SQL Flow tabs to 50 per workspace (4 MB of SQL in total). Pinning past the limit shows a message instead of growing workspace storage without bound.
+
+### Removed
+- Unused internal code: unreferenced renderer and layout helpers, message handlers nothing sent to, and the obsolete `.vsixignore` file. `noUnusedLocals` is now enforced for source files.
+
 ## [1.0.1] - 2026-11-16
 
 ### Fixed

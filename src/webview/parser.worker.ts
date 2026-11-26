@@ -2,7 +2,6 @@ import { setCustomFunctions } from '../dialects';
 import {
     parseSql,
     parseSqlBatch,
-    validateSql,
     setParseTimeout,
     DEFAULT_VALIDATION_LIMITS,
     type ParseOptions,
@@ -12,7 +11,6 @@ import type {
     ParseResult,
     BatchParseResult,
     SqlDialect,
-    ValidationError,
     ValidationLimits,
 } from './types';
 
@@ -41,22 +39,12 @@ type ParserWorkerRequest =
             customAggregateFunctions?: string[];
             customWindowFunctions?: string[];
         };
-    }
-    | {
-        type: 'validate';
-        requestId: number;
-        payload: {
-            sql: string;
-            maxSizeBytes?: number;
-            maxQueryCount?: number;
-        };
     };
 
 type ParserWorkerResponse =
     | { type: 'started'; requestId: number }
     | { type: 'parse'; requestId: number; result: ParseResult }
     | { type: 'parseBatch'; requestId: number; result: BatchParseResult }
-    | { type: 'validate'; requestId: number; result: ValidationError | null }
     | { type: 'error'; requestId: number; error: string };
 
 function toErrorMessage(error: unknown): string {
@@ -108,20 +96,6 @@ addEventListener('message', (event: MessageEvent<ParserWorkerRequest>) => {
                     message.payload.limits ?? DEFAULT_VALIDATION_LIMITS,
                     message.payload.options ?? {}
                 ),
-            });
-            return;
-        }
-
-        if (message.type === 'validate') {
-            const limits: ValidationLimits = {
-                maxSqlSizeBytes: message.payload.maxSizeBytes ?? DEFAULT_VALIDATION_LIMITS.maxSqlSizeBytes,
-                maxQueryCount: message.payload.maxQueryCount ?? DEFAULT_VALIDATION_LIMITS.maxQueryCount,
-            };
-
-            postWorkerMessage({
-                type: 'validate',
-                requestId: message.requestId,
-                result: validateSql(message.payload.sql, limits),
             });
             return;
         }

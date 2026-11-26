@@ -65,10 +65,9 @@ describe('SchemaExtractor.extractDefinitions', () => {
         expect(definitions[199]).toEqual(expect.objectContaining({
             type: 'view', name: 'view_199', statementIndex: 199, lineNumber: 499,
         }));
-        // Whole-file header scans happen once per (type, text) view. The only
-        // per-definition regex is the quote-flag probe over that definition's
-        // own SQL; the old lookups built ~5 whole-file regexes per definition.
-        expect(headerRegexSpy.mock.calls.length).toBeLessThan(definitions.length / 2 + 20);
+        // The full-file header lookup and per-definition quote checks reuse
+        // their respective patterns for each object type.
+        expect(headerRegexSpy.mock.calls.length).toBeLessThan(10);
     });
 
     it('extracts thousands of definitions from one file in linear time', () => {

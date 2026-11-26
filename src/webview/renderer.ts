@@ -3,16 +3,15 @@ import {
     FlowNode,
     FlowEdge,
     ColumnFlow,
-    LineagePathStep,
     ParseResult,
     QueryStats,
     OptimizationHint,
     ColumnLineage,
-    SqlDialect,
     ViewState,
     CloudViewState,
     FocusMode,
     LayoutType,
+    SqlDialect,
 } from './types';
 
 // Import color utilities
@@ -20,12 +19,10 @@ import {
     getNodeColor,
     getHighContrastTextColor,
     getTransformationColor,
-    NODE_COLORS,
     UI_COLORS,
     EDGE_COLORS,
     BADGE_COLORS,
     CONDITION_COLORS,
-    STATUS_COLORS,
     getColorblindMode,
     setColorblindMode as setGlobalColorblindMode,
     getEdgeDashPattern,
@@ -41,7 +38,6 @@ import {
     isLegendBarVisible,
     getLegendBarHeight,
     createCommandBar,
-    showCommandBar,
     hideCommandBar,
     toggleCommandBar,
     isCommandBarVisible,
@@ -98,10 +94,8 @@ import {
     updateCloudAndArrowFeature,
 } from './rendering/cloudPositioning';
 import {
-    layoutSubflowNodes as layoutSubflowNodesFeature,
     layoutSubflowNodesVertical as layoutSubflowNodesVerticalFeature,
     renderCloudSubflow as renderCloudSubflowFeature,
-    renderSubflow as renderSubflowFeature,
 } from './rendering/cloudRenderer';
 import {
     applyClusteringFeature,
@@ -139,7 +133,6 @@ import {
     COLUMN_LINEAGE_BANNER_TEXT,
     COLUMN_LINEAGE_UNAVAILABLE_BANNER_TEXT,
     shouldEnableColumnLineage,
-    shouldShowTraceColumnsAction,
 } from './columnLineageUx';
 import { extractSqlSnippet } from './sqlSnippet';
 import { shouldShowMinimap } from './minimapVisibility';
@@ -147,10 +140,8 @@ import {
     centerOnNodeFeature,
     ensureNodeVisibleFeature,
     fitViewFeature,
+    measureGraphBounds,
     getConnectedNodesFeature,
-    getKeyboardNavigationNodesFeature,
-    isNodeInViewportFeature,
-    navigateToAdjacentNodeFeature,
     navigateToConnectedNodeFeature,
     navigateToSiblingNodeFeature,
     zoomToNodeFeature,
@@ -184,7 +175,6 @@ import {
     clearLineageHighlightsFeature,
     ensureColumnLineagePanelScrollbarStylesFeature,
     hideColumnLineagePanelFeature,
-    highlightColumnSourcesFeature,
     highlightLineageNodesFeature,
     showColumnLineagePanelFeature,
     showLineagePathFeature,
@@ -583,7 +573,7 @@ function captureLayoutHistorySnapshot(): LayoutHistorySnapshot {
         focusModeEnabled: state.focusModeEnabled,
         focusMode: state.focusMode,
         layoutType: state.layoutType || 'vertical',
-        nodePositions: currentNodes.map(node => ({ id: node.id, x: node.x, y: node.y })),
+        nodePositions: renderNodes.map(node => ({ id: node.id, x: node.x, y: node.y })),
         cloudOffsets: Array.from(cloudOffsets.entries()).map(([nodeId, offset]) => ({
             nodeId,
             offsetX: offset.offsetX,
@@ -595,7 +585,7 @@ function captureLayoutHistorySnapshot(): LayoutHistorySnapshot {
 function applyNodePositionsToDom(): void {
     if (!mainGroup) { return; }
 
-    currentNodes.forEach(node => {
+    renderNodes.forEach(node => {
         const nodeGroup = renderedNodeElementsById.get(node.id);
         if (!nodeGroup) { return; }
         const rect = renderedNodeRectsById.get(node.id);
@@ -612,7 +602,6 @@ function applyEdgePositionsToDom(): void {
     if (!mainGroup) { return; }
 
     const layoutType = state.layoutType || 'vertical';
-    const currentNodeMap = new Map(currentNodes.map(node => [node.id, node]));
     const edgeElements = renderedEdgeElementsById.size > 0
         ? Array.from(renderedEdgeElementsById.values())
         : Array.from(mainGroup.querySelectorAll('.edge:not(.column-flow-edge)')) as SVGPathElement[];
@@ -621,8 +610,8 @@ function applyEdgePositionsToDom(): void {
         const targetId = edgeEl.getAttribute('data-target');
         if (!sourceId || !targetId) { return; }
 
-        const sourceNode = renderNodeMap.get(sourceId) || currentNodeMap.get(sourceId);
-        const targetNode = renderNodeMap.get(targetId) || currentNodeMap.get(targetId);
+        const sourceNode = renderNodeMap.get(sourceId);
+        const targetNode = renderNodeMap.get(targetId);
         if (!sourceNode || !targetNode) { return; }
 
         edgeEl.setAttribute('d', calculateEdgePath(sourceNode, targetNode, layoutType));
@@ -950,7 +939,7 @@ function restoreLayoutHistorySnapshot(snapshot: LayoutHistorySnapshot): void {
     state.selectedNodeId = snapshot.selectedNodeId;
 
     const positionMap = new Map(snapshot.nodePositions.map(position => [position.id, position]));
-    currentNodes.forEach(node => {
+    renderNodes.forEach(node => {
         const position = positionMap.get(node.id);
         if (!position) { return; }
         node.x = position.x;
@@ -964,8 +953,9 @@ function restoreLayoutHistorySnapshot(snapshot: LayoutHistorySnapshot): void {
 
     applyNodePositionsToDom();
     applyEdgePositionsToDom();
-    currentNodes.forEach(node => updateCloudAndArrow(node));
+    renderNodes.forEach(node => updateCloudAndArrow(node));
     updateTransform();
+    updateMinimap();
     selectNode(snapshot.selectedNodeId, { skipNavigation: true });
 
     if (snapshot.focusModeEnabled && snapshot.selectedNodeId) {
@@ -1270,15 +1260,16 @@ export function initRenderer(container: HTMLElement): void {
             updateNodeEdges,
             updateTransform,
             updateZoomIndicator,
-            recordLayoutHistorySnapshot,
+            recordLayoutHistorySnapshot: () => {
+                recordLayoutHistorySnapshot();
+                updateMinimap();
+            },
             // Wheel zoom, pan, and drags change persisted view state without a
             // layout change; index.ts marks its UI state dirty on this event.
             onViewStateChanged: () => document.dispatchEvent(new CustomEvent('view-state-changed')),
             selectNode,
             clearFocusMode,
             fitView,
-            getKeyboardNavigationNodes,
-            moveKeyboardFocusToNode,
             toggleColumnFlows,
             hideContextMenu,
             clearSearch,
@@ -1480,9 +1471,13 @@ function restoreViewportPresentation(): void {
     if (state.focusModeEnabled && state.selectedNodeId) {
         applyFocusMode(state.selectedNodeId);
     }
+    if (state.showColumnFlows && columnLineageRuntime.selectedColumnLineage) {
+        highlightLineageNodes(columnLineageRuntime.selectedColumnLineage);
+    }
     if (state.searchTerm) {
         refreshSearchHighlightsFeature({ state, mainGroup, selectedNodeId: state.selectedNodeId, highlightColor: EDGE_COLORS.highlight });
     }
+    applyCursorHighlight();
 }
 
 /**
@@ -1534,8 +1529,9 @@ export function isVirtualizationEnabled(): boolean {
  * If cloud is to the left of node, arrow starts from right side of cloud.
  */
 function updateCloudAndArrow(node: FlowNode): void {
+    const rect = renderedNodeRectsById.get(node.id);
     updateCloudAndArrowFeature({
-        node,
+        node: rect ? { ...node, x: Number(rect.getAttribute('x')), y: Number(rect.getAttribute('y')) } : node,
         cloudElements,
         ensureCloudOffset,
         layoutSubflowNodesVertical,
@@ -1593,7 +1589,10 @@ function applyClustering(nodes: FlowNode[], edges: FlowEdge[]): { nodes: FlowNod
     });
 }
 
+let currentSqlDialect: SqlDialect | undefined;
+
 interface RenderOptions {
+    dialect?: SqlDialect;
     preserveInteractionState?: boolean;
 }
 
@@ -1690,8 +1689,12 @@ export function render(result: ParseResult, options?: RenderOptions): void {
     if (!mainGroup) { return; }
     stopZeroGravityMode({ silent: true });
     const shouldResetCloudState = result.sql !== currentSql || result.nodes !== currentNodes;
-    const preserveInteractionState = options?.preserveInteractionState === true
-        || (!shouldResetCloudState && currentNodes.length > 0);
+    const preserveInteractionState = !result.error && result.nodes.length > 0
+        && (options?.preserveInteractionState === true || (!shouldResetCloudState && currentNodes.length > 0));
+    const clausePanel = document.getElementById('sql-clause-panel');
+    if (clausePanel) {
+        clausePanel.style.display = 'none';
+    }
     const preservedRenderState = preserveInteractionState ? capturePreservedRenderState() : null;
 
     if (!preserveInteractionState) {
@@ -1723,6 +1726,7 @@ export function render(result: ParseResult, options?: RenderOptions): void {
     currentHints = result.hints;
     hintsShowAll = false;
     currentSql = result.sql;
+    currentSqlDialect = options?.dialect ?? currentSqlDialect;
     currentColumnLineage = result.columnLineage || [];
     currentTableUsage = result.tableUsage || new Map();
 
@@ -1817,7 +1821,7 @@ export function render(result: ParseResult, options?: RenderOptions): void {
     // create hundreds of off-screen DOM nodes only to prune them a frame later.
     // Re-rendering the same graph (theme or grid/accent setting changes) keeps
     // its positions, which already carry this layout and any dragged nodes;
-    // switchLayout() lays out currentNodes itself. Rebuilt cluster nodes keep
+    // switchLayout() lays out the projected graph itself. Rebuilt cluster nodes keep
     // their positions too; expanding or collapsing changes the projection
     // and still applies the selected layout.
     const initialLayout = state.layoutType || 'vertical';
@@ -1952,7 +1956,6 @@ function renderNode(node: FlowNode, parent: SVGGElement): void {
         updateTooltipPosition,
         hideTooltip,
         selectNode,
-        navigateToAdjacentNode,
         navigateToConnectedNode,
         navigateToSiblingNode,
         announceFocusedNode,
@@ -2067,11 +2070,6 @@ function renderCteNode(node: FlowNode, group: SVGGElement, isExpanded: boolean, 
     renderCteNodeVisual(node, group, isExpanded, hasChildren, getContainerNodeRendererDeps());
 }
 
-// Layout children nodes using dagre for subflow visualization
-function layoutSubflowNodes(children: FlowNode[], edges: FlowEdge[]): { width: number; height: number } {
-    return layoutSubflowNodesFeature(children, edges);
-}
-
 // Layout children nodes VERTICALLY (top to bottom) for cloud visualization
 function layoutSubflowNodesVertical(children: FlowNode[], edges: FlowEdge[]): { width: number; height: number } {
     return layoutSubflowNodesVerticalFeature(children, edges);
@@ -2104,32 +2102,6 @@ function renderCloudSubflow(
     });
 }
 
-// Render the subflow (children and edges) inside a container node
-function renderSubflow(
-    parentNode: FlowNode,
-    children: FlowNode[],
-    childEdges: FlowEdge[],
-    group: SVGGElement,
-    offsetX: number,
-    offsetY: number,
-    containerWidth: number,
-    containerHeight: number
-): void {
-    renderSubflowFeature({
-        childEdges,
-        children,
-        containerHeight,
-        containerWidth,
-        getNodeIcon,
-        group,
-        isDarkTheme: state.isDarkTheme,
-        offsetX,
-        offsetY,
-        parentNode,
-        truncate,
-    });
-}
-
 function renderWindowNode(node: FlowNode, group: SVGGElement): void {
     renderWindowNodeVisual(node, group, getNodeVisualRendererDeps());
 }
@@ -2140,30 +2112,6 @@ function renderAggregateNode(node: FlowNode, group: SVGGElement): void {
 
 function renderCaseNode(node: FlowNode, group: SVGGElement): void {
     renderCaseNodeVisual(node, group, getNodeVisualRendererDeps());
-}
-
-function toggleNodeExpansion(node: FlowNode): void {
-    node.expanded = !node.expanded;
-
-    // Recalculate height
-    if (node.expanded && node.children) {
-        node.height = 70 + node.children.length * 30;
-    } else {
-        node.height = 50;
-    }
-
-    // Re-render (this is a simple approach; a more efficient one would update in place)
-    const currentResult: ParseResult = {
-        nodes: currentNodes,
-        edges: currentEdges,
-        stats: currentStats!,
-        hints: currentHints,
-        sql: currentSql,
-        columnLineage: currentColumnLineage,
-        columnFlows: currentColumnFlows,
-        tableUsage: currentTableUsage
-    };
-    render(currentResult);
 }
 
 function renderEdge(edge: FlowEdge, parent: SVGGElement): void {
@@ -2357,23 +2305,10 @@ function pulseNodeInCloud(subNodeId: string, parentNodeId: string): void {
  * @param direction - 'upstream' (ArrowUp) or 'downstream' (ArrowDown)
  * @returns true if navigation occurred, false if no connected node found
  */
-function getKeyboardNavigationNodes(): FlowNode[] {
-    return getKeyboardNavigationNodesFeature({
-        nodes: renderNodes,
-        edges: renderEdges,
-        state,
-    });
-}
-
-function focusNodeGroup(nodeId: string): void {
-    const nodeGroup = mainGroup?.querySelector(`[data-id="${nodeId}"]`) as SVGGElement | null;
-    nodeGroup?.focus();
-}
-
 function moveKeyboardFocusToNode(targetNode: FlowNode): void {
     selectNode(targetNode.id, { skipNavigation: true });
     ensureNodeVisible(targetNode);
-    focusNodeGroup(targetNode.id);
+    renderedNodeElementsById.get(targetNode.id)?.focus();
 }
 
 function navigateToConnectedNode(direction: 'upstream' | 'downstream', fromNodeId?: string): boolean {
@@ -2395,23 +2330,6 @@ function navigateToConnectedNode(direction: 'upstream' | 'downstream', fromNodeI
     });
 }
 
-/**
- * Navigate to adjacent node in the visual order (for accessibility)
- * Uses Y position primarily, then X position for nodes at same level
- */
-function navigateToAdjacentNode(currentNode: FlowNode, direction: 'next' | 'prev'): void {
-    navigateToAdjacentNodeFeature({
-        currentNode,
-        direction,
-        nodes: renderNodes,
-        edges: renderEdges,
-        state,
-        onMoveToNode: (node) => {
-            moveKeyboardFocusToNode(node);
-        },
-    });
-}
-
 function navigateToSiblingNode(currentNode: FlowNode, direction: 'next' | 'prev'): boolean {
     return navigateToSiblingNodeFeature({
         currentNode,
@@ -2423,18 +2341,6 @@ function navigateToSiblingNode(currentNode: FlowNode, direction: 'next' | 'prev'
         onMoveToNode: (node) => {
             moveKeyboardFocusToNode(node);
         },
-    });
-}
-
-/**
- * Check if a node is visible within the current viewport
- */
-function isNodeInViewport(node: FlowNode, margin: number = 50): boolean {
-    return isNodeInViewportFeature({
-        node,
-        margin,
-        svg,
-        state,
     });
 }
 
@@ -2581,6 +2487,10 @@ function updateHintsPanel(): void {
 const MINIMAP_FIT_RESERVE = 182;
 
 function fitView(): void {
+    if (state.zoomedNodeId !== null) {
+        clearFocusMode();
+        restoreViewportPresentation();
+    }
     const minimapNodeCount = renderNodes.length > 0 ? renderNodes.length : currentNodes.length;
     fitViewFeature({
         svg,
@@ -2863,13 +2773,6 @@ function clearSearch(): void {
     });
 }
 
-export function getSearchResultCount(): { current: number; total: number } {
-    return {
-        current: state.currentSearchIndex + 1,
-        total: state.searchResults.length
-    };
-}
-
 export function nextSearchResult(): void {
     navigateSearch(1);
 }
@@ -2886,7 +2789,7 @@ function getExportFeatureContext() {
         getCurrentNodes: () => currentNodes,
         getCurrentEdges: () => currentEdges,
         isDarkTheme: () => state.isDarkTheme,
-        calculateBounds,
+        calculateBounds: () => calculateBounds(cloudOffsets),
         virtualization: {
             isEnabled: () => virtualizationEnabled && shouldVirtualize(renderNodes.length),
             setEnabled: setVirtualizationEnabled,
@@ -2918,33 +2821,13 @@ export function copyToClipboard(): void {
     copyToClipboardFeature(getExportFeatureContext());
 }
 
-function calculateBounds(): { minX: number; minY: number; width: number; height: number } {
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+function calculateBounds(expandedClouds?: typeof cloudOffsets): { minX: number; minY: number; width: number; height: number } {
     const nodesForBounds = renderNodes.length > 0 ? renderNodes : currentNodes;
-    for (const node of nodesForBounds) {
-        minX = Math.min(minX, node.x);
-        minY = Math.min(minY, node.y);
-        maxX = Math.max(maxX, node.x + node.width);
-        maxY = Math.max(maxY, node.y + node.height);
-    }
-
+    const { minX, minY, maxX, maxY } = measureGraphBounds(nodesForBounds, expandedClouds);
     if (!Number.isFinite(minX) || !Number.isFinite(minY) || !Number.isFinite(maxX) || !Number.isFinite(maxY)) {
-        return {
-            minX: 0,
-            minY: 0,
-            width: 400,
-            height: 300,
-        };
+        return { minX: 0, minY: 0, width: 400, height: 300 };
     }
-
-    const width = maxX - minX;
-    const height = maxY - minY;
-    return {
-        minX,
-        minY,
-        width: width > 0 ? width : 400,
-        height: height > 0 ? height : 300,
-    };
+    return { minX, minY, width: maxX - minX || 400, height: maxY - minY || 300 };
 }
 
 // Helper functions
@@ -3000,15 +2883,6 @@ function truncate(str: string, maxLen: number): string {
     return truncateCodePoints(str, maxLen);
 }
 
-function lightenColor(hex: string, percent: number): string {
-    const num = parseInt(hex.replace('#', ''), 16);
-    const amt = Math.round(2.55 * percent);
-    const R = Math.min(255, (num >> 16) + amt);
-    const G = Math.min(255, ((num >> 8) & 0x00FF) + amt);
-    const B = Math.min(255, (num & 0x0000FF) + amt);
-    return `#${(1 << 24 | R << 16 | G << 8 | B).toString(16).slice(1)}`;
-}
-
 function notifyRendererStateChanged(): void {
     document.dispatchEvent(new CustomEvent('layout-state-changed'));
 }
@@ -3016,22 +2890,6 @@ function notifyRendererStateChanged(): void {
 // ============================================================
 // FEATURE: Color Legend
 // ============================================================
-
-const NODE_TYPE_INFO: Record<string, { color: string; icon: string; description: string }> = {
-    table: { color: NODE_COLORS.table, icon: '⊞', description: 'Source table' },
-    filter: { color: NODE_COLORS.filter, icon: '⧩', description: 'WHERE/HAVING filter' },
-    join: { color: NODE_COLORS.join, icon: '⋈', description: 'JOIN operation' },
-    aggregate: { color: NODE_COLORS.aggregate, icon: 'Σ', description: 'GROUP BY aggregation' },
-    operation: { color: NODE_COLORS.operation, icon: '⚙', description: 'Operation step' },
-    sort: { color: NODE_COLORS.sort, icon: '↕', description: 'ORDER BY sorting' },
-    limit: { color: NODE_COLORS.limit, icon: '⊟', description: 'LIMIT clause' },
-    select: { color: NODE_COLORS.select, icon: '▤', description: 'Column projection' },
-    result: { color: NODE_COLORS.result, icon: '◉', description: 'Query output' },
-    cte: { color: NODE_COLORS.cte, icon: '↻', description: 'Common Table Expression' },
-    union: { color: NODE_COLORS.union, icon: '∪', description: 'Set operation' },
-    subquery: { color: NODE_COLORS.subquery, icon: '⊂', description: 'Subquery/Derived table' },
-    window: { color: NODE_COLORS.window, icon: '▦', description: 'Window function' },
-};
 
 /** @deprecated Legend content is now managed by the bottom legend bar module */
 function updateLegendPanel(): void {
@@ -3164,63 +3022,28 @@ export function switchLayout(
             const bottomUp = window.flowDirection === 'bottom-up';
             switch (layoutType) {
                 case 'horizontal':
-                    layoutGraphHorizontal(currentNodes, currentEdges, bottomUp);
+                    layoutGraphHorizontal(renderNodes, renderEdges, bottomUp);
                     break;
                 case 'compact':
-                    layoutGraphCompact(currentNodes, currentEdges, bottomUp);
+                    layoutGraphCompact(renderNodes, renderEdges, bottomUp);
                     break;
                 case 'force':
-                    layoutGraphForce(currentNodes, currentEdges);
+                    layoutGraphForce(renderNodes, renderEdges);
                     break;
                 case 'radial':
-                    layoutGraphRadial(currentNodes, currentEdges);
+                    layoutGraphRadial(renderNodes, renderEdges);
                     break;
                 case 'vertical':
                 default:
-                    layoutGraph(currentNodes, currentEdges, bottomUp);
+                    layoutGraph(renderNodes, renderEdges, bottomUp);
                     break;
             }
 
-            const currentNodeMap = new Map(currentNodes.map(node => [node.id, node]));
-
-            // Update node positions in DOM
-            currentNodes.forEach(node => {
-                const nodeGroup = renderedNodeElementsById.get(node.id);
-                if (nodeGroup) {
-                    const rect = nodeGroup.querySelector('.node-rect') as SVGRectElement;
-                    if (rect) {
-                        const origX = parseFloat(rect.getAttribute('x') || '0');
-                        const origY = parseFloat(rect.getAttribute('y') || '0');
-                        const deltaX = node.x - origX;
-                        const deltaY = node.y - origY;
-                        nodeGroup.setAttribute('transform', `translate(${deltaX}, ${deltaY})`);
-                    }
-                }
-            });
-
-            // Show all edges first
-            const allEdges = mainGroup!.querySelectorAll('.edge');
-            allEdges.forEach(edgeEl => {
-                (edgeEl as SVGPathElement).style.display = '';
-            });
-
-            // Update edge paths
-            const edgeElements = mainGroup!.querySelectorAll('.edge:not(.column-flow-edge)');
-            edgeElements.forEach(edgeEl => {
-                const sourceId = edgeEl.getAttribute('data-source');
-                const targetId = edgeEl.getAttribute('data-target');
-                if (sourceId && targetId) {
-                    const sourceNode = currentNodeMap.get(sourceId);
-                    const targetNode = currentNodeMap.get(targetId);
-                    if (sourceNode && targetNode) {
-                        const path = calculateEdgePath(sourceNode, targetNode, layoutType);
-                        edgeEl.setAttribute('d', path);
-                        (edgeEl as SVGPathElement).style.display = '';
-                    } else {
-                        (edgeEl as SVGPathElement).style.display = 'none';
-                    }
-                }
-            });
+            applyNodePositionsToDom();
+            applyEdgePositionsToDom();
+            // Expanded clouds are children of their node groups and move with them.
+            restoreViewportPresentation();
+            updateMinimap();
 
             // Update layout selector if present
             const layoutSelect = document.getElementById('layout-select') as HTMLSelectElement;
@@ -3336,23 +3159,6 @@ function getConnectedNodes(nodeId: string): Set<string> {
 // FEATURE: Column Flow Highlighting
 // ============================================================
 
-export function highlightColumnSources(columnName: string): void {
-    highlightColumnSourcesFeature({
-        columnName,
-        currentColumnLineage,
-        currentNodes,
-        currentEdges,
-        mainGroup,
-        state,
-        edgeColors: {
-            default: EDGE_COLORS.default,
-            defaultLight: EDGE_COLORS.defaultLight,
-            focus: EDGE_COLORS.focus,
-            columnLineage: EDGE_COLORS.columnLineage,
-        },
-    });
-}
-
 // ============================================================
 // FEATURE: SQL Preview Panel
 // ============================================================
@@ -3362,7 +3168,7 @@ export function toggleSqlPreview(show?: boolean): void {
         panel: sqlPreviewPanel,
         currentSql,
         isDarkTheme: state.isDarkTheme,
-        formatSql,
+        formatSql: getFormattedSql,
         highlightSql,
         onToggleVisible: (nextShow) => {
             toggleSqlPreview(nextShow);
@@ -3390,7 +3196,7 @@ function updateSqlPreview(): void {
         panel: sqlPreviewPanel,
         currentSql,
         isDarkTheme: state.isDarkTheme,
-        formatSql,
+        formatSql: getFormattedSql,
         highlightSql,
         onToggleVisible: (nextShow) => {
             toggleSqlPreview(nextShow);
@@ -3452,7 +3258,7 @@ export function toggleExpandAll(): void {
 }
 
 export function getFormattedSql(): string {
-    return formatSql(currentSql);
+    return formatSql(currentSql, { dialect: currentSqlDialect });
 }
 
 // ============================================================
@@ -3614,14 +3420,10 @@ function applyTheme(dark: boolean): void {
         updateLoadingOverlayTheme(loadingOverlay, dark);
     }
     const clausePanel = document.getElementById('sql-clause-panel');
-    const clauseEdge = currentEdges.find(edge => edge.id === activeEdgeSelectionId);
-    if (clausePanel?.style.display === 'block' && clauseEdge) {
-        const restoreCloseFocus = clausePanel.contains(document.activeElement);
-        showSqlClausePanel(clauseEdge);
-        if (restoreCloseFocus) {
-            clausePanel.querySelector<HTMLButtonElement>('.clause-panel-close-btn')?.focus();
-        }
-    }
+    const clauseEdge = clausePanel?.style.display === 'block'
+        ? currentEdges.find(edge => edge.id === activeEdgeSelectionId)
+        : undefined;
+    const restoreCloseFocus = clausePanel?.contains(document.activeElement);
     ensureHintsPanelScrollbarStyles();
     ensureStatsPanelScrollbarStyles();
     if (columnLineageRuntime.columnLineagePanel) {
@@ -3662,6 +3464,13 @@ function applyTheme(dark: boolean): void {
             },
             { preserveInteractionState: true }
         );
+    }
+    if (clauseEdge) {
+        activeEdgeSelectionId = clauseEdge.id;
+        showSqlClausePanel(clauseEdge);
+        if (restoreCloseFocus) {
+            clausePanel?.querySelector<HTMLButtonElement>('.clause-panel-close-btn')?.focus();
+        }
     }
 }
 
@@ -4064,7 +3873,7 @@ let highlightedLineNodeId: string | null = null;
 export function highlightNodeAtLine(line: number): void {
     // Clear previous highlight
     if (highlightedLineNodeId) {
-        const prevGroup = document.querySelector(`g[data-id="${highlightedLineNodeId}"]`);
+        const prevGroup = renderedNodeElementsById.get(highlightedLineNodeId);
         if (prevGroup) {
             prevGroup.classList.remove('cursor-highlighted');
             const rect = prevGroup.querySelector('.node-rect') as SVGRectElement;
@@ -4083,23 +3892,19 @@ export function highlightNodeAtLine(line: number): void {
         highlightedLineNodeId = null;
     }
 
-    // Find node that contains this line
-    const node = findNodeAtLine(currentNodes, line);
-    if (!node) {return;}
+    highlightedLineNodeId = findNodeAtLine(currentNodes, line)?.id ?? null;
+    applyCursorHighlight();
+}
 
-    // Highlight the node
-    const group = document.querySelector(`g[data-id="${node.id}"]`);
-    if (group) {
-        group.classList.add('cursor-highlighted');
-        const rect = group.querySelector('.node-rect') as SVGRectElement;
-        if (rect) {
-            rect.setAttribute('stroke', EDGE_COLORS.highlight);
-            rect.setAttribute('stroke-width', '3');
-        }
-        highlightedLineNodeId = node.id;
-
-        // Optionally zoom to the node
-        // zoomToNode(node);
+function applyCursorHighlight(): void {
+    if (!highlightedLineNodeId) { return; }
+    const group = renderedNodeElementsById.get(highlightedLineNodeId);
+    if (!group) { return; }
+    group.classList.add('cursor-highlighted');
+    const rect = renderedNodeRectsById.get(highlightedLineNodeId);
+    if (rect) {
+        rect.setAttribute('stroke', EDGE_COLORS.highlight);
+        rect.setAttribute('stroke-width', '3');
     }
 }
 

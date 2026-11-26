@@ -62,8 +62,6 @@ function createCallbacks(): EventListenerCallbacks {
         selectNode: jest.fn(),
         clearFocusMode: jest.fn(),
         fitView: jest.fn(),
-        getKeyboardNavigationNodes: jest.fn(() => []),
-        moveKeyboardFocusToNode: jest.fn(),
         toggleColumnFlows: jest.fn(),
         hideContextMenu: jest.fn(),
         clearSearch: jest.fn(),

@@ -1,9 +1,5 @@
 import { FlowEdge, FlowNode } from '../types';
-import { calculateQueryDepth, getQueryComplexityInfo } from '../rendering/computations';
-
-export function calculateQueryDepthFeature(nodes: FlowNode[], edges: FlowEdge[]): number {
-    return calculateQueryDepth(nodes, edges);
-}
+import { getQueryComplexityInfo } from '../rendering/computations';
 
 export function getQueryComplexityInfoFeature(nodes: FlowNode[], edges: FlowEdge[]): {
     nodeCount: number;

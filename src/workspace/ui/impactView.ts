@@ -277,7 +277,8 @@ export class ImpactView {
             label: name,
             title: 'View'
         }));
-        const files = unique(impacts.map(i => i.filePath).filter(Boolean) as string[]).map(filePath => {
+        const affectedFiles = report.affectedFiles ?? unique(impacts.map(i => i.filePath).filter(Boolean));
+        const files = affectedFiles.map(filePath => {
             const fileName = this.getFileName(filePath);
             return {
                 label: fileName,

@@ -176,8 +176,8 @@ export function getVisualLineageSearchScriptFragment(): string {
                 });
 
                 visibleItems.sort((a, b) => {
-                    const nameA = a.getAttribute('data-name') || '';
-                    const nameB = b.getAttribute('data-name') || '';
+                    const nameA = (a.getAttribute('data-name') || '').toLowerCase();
+                    const nameB = (b.getAttribute('data-name') || '').toLowerCase();
                     const typeA = a.getAttribute('data-type') || '';
                     const typeB = b.getAttribute('data-type') || '';
                     const totalA = Number(a.getAttribute('data-total') || '0');
@@ -261,9 +261,11 @@ export function getVisualLineageSearchScriptFragment(): string {
                     scheduleLineageFilter(true);
                     searchInput.blur();
                 } else if (e.key === 'Enter') {
-                    // Select the first visible item
-                    const firstVisible = tablesGrid?.querySelector('.lineage-table-item:not([style*="display: none"])');
+                    scheduleLineageFilter(true);
+                    if (!tablesGrid || tablesGrid.style.display === 'none') { return; }
+                    const firstVisible = tablesGrid.querySelector('.lineage-table-item:not([style*="display: none"])');
                     if (firstVisible) {
+                        e.preventDefault();
                         firstVisible.click();
                     }
                 }

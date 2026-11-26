@@ -27,20 +27,6 @@ export {
     BatchTabsCallbacks
 } from './batchTabs';
 
-export {
-    pinCurrentVisualization,
-    unpinTab,
-    switchToTab,
-    findPinnedTab,
-    updateTabsUI,
-    getPinnedTabs,
-    getActiveTabId,
-    setActiveTabId,
-    disposePinnedTabs,
-    PinnedTab,
-    PinnedTabsCallbacks
-} from './pinnedTabs';
-
 export { createLegendBar, toggleLegendBar, isLegendBarVisible, getLegendBarHeight, disposeLegendBar } from './legendBar';
 export type { LegendBarCallbacks } from './legendBar';
 

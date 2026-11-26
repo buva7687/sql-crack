@@ -260,10 +260,6 @@ describe('renderer.ts Source Structure', () => {
             expect(rendererSource).toMatch(/function updateCloudAndArrow/);
         });
 
-        it('should have renderSubflow function', () => {
-            expect(rendererSource).toMatch(/function renderSubflow/);
-        });
-
         it('should have layoutSubflowNodesVertical function', () => {
             expect(rendererSource).toMatch(/function layoutSubflowNodesVertical/);
         });

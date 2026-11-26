@@ -88,7 +88,7 @@ export function escapeForInlineScriptValue(value: unknown): string {
  * `'\'` is a complete one-character literal.
  */
 const BACKSLASH_ESCAPE_DIALECTS: ReadonlySet<string> = new Set([
-    'MySQL', 'MariaDB', 'BigQuery', 'Snowflake', 'Hive', 'Redshift',
+    'MySQL', 'MariaDB', 'BigQuery', 'Snowflake', 'Hive', 'Redshift', 'Databricks',
 ]);
 
 /** Whether `\` escapes the next character inside quoted strings in `dialect`. */
@@ -156,6 +156,10 @@ export function isHashTempTableIdentifierAt(sql: string, offset: number): boolea
 }
 
 export interface StripSqlCommentsOptions {
+    /** Also mask quoted tokens when producing a position-preserving structural view. */
+    maskQuotedText?: boolean;
+    /** Mask value literals while retaining delimited identifiers. */
+    maskStringLiterals?: boolean;
     /** Set false for MySQL-family SQL, where $$ can be a statement delimiter. */
     dollarQuotes?: boolean;
     /** Set false where an inner block-comment opener is plain text. */
@@ -266,11 +270,13 @@ export function maskSqlCommentsPreservingPositions(
 
         const dollarQuotedEnd = options.dollarQuotes === false ? null : getDollarQuotedTokenEnd(sql, i);
         if (dollarQuotedEnd !== null) {
+            if (options.maskQuotedText || options.maskStringLiterals) { maskRange(i, dollarQuotedEnd); }
             i = dollarQuotedEnd;
             continue;
         }
 
         if (ch === "'" || ch === '"' || ch === '`' || ch === '[') {
+            const start = i;
             const closingQuote = ch === '[' ? ']' : ch;
             const escapesAllowed = ch !== '['
                 && quotedStringAllowsBackslashEscapes(sql, i, options.backslashEscapes !== false);
@@ -290,6 +296,7 @@ export function maskSqlCommentsPreservingPositions(
                 }
                 i++;
             }
+            if (options.maskQuotedText || options.maskStringLiterals && ch === "'") { maskRange(start, i); }
             continue;
         }
 

@@ -103,7 +103,6 @@ export class LineageGraphRenderer {
     private readonly MAX_VISIBLE_COLUMNS = 20;
     private readonly NODE_SEP = 44;
     private readonly RANK_SEP = 90;
-    private readonly EDGE_SEP = 20;
     private readonly MAX_RENDERED_NODES = 300;
 
     constructor(lineageGraph: LineageGraph, flowAnalyzer?: FlowAnalyzer) {

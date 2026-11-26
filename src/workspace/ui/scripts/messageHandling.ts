@@ -196,13 +196,6 @@ export function getMessageHandlingScriptFragment(): string {
                         }
                     }
                     break;
-                case 'lineageSearchResults':
-                    if (!isLatestWorkspaceResponse(message)) break;
-                    if (currentViewMode !== 'lineage') break;
-                    if (message.data?.results) {
-                        showLineageSearchResults(message.data.results);
-                    }
-                    break;
                 case 'lineageGraphResult':
                     if (!isLatestWorkspaceResponse(message)) break;
                     if (currentViewMode !== 'lineage') break;

@@ -21,13 +21,17 @@ describe('extension.ts', () => {
             expect(normalizeDialect('Snowflake')).toBe('Snowflake');
         });
 
-        it('handles case-sensitive input', () => {
-            expect(normalizeDialect('sql server')).toBe('sql server');
-            expect(normalizeDialect('pl/sql')).toBe('pl/sql');
+        it('matches known dialects and aliases case-insensitively', () => {
+            expect(normalizeDialect('sql server')).toBe('TransactSQL');
+            expect(normalizeDialect('pl/sql')).toBe('Oracle');
+            expect(normalizeDialect('postgres')).toBe('PostgreSQL');
+            expect(normalizeDialect(' bigquery ')).toBe('BigQuery');
         });
 
-        it('handles empty string', () => {
-            expect(normalizeDialect('')).toBe('');
+        it('falls back to MySQL for empty or unknown values', () => {
+            expect(normalizeDialect('')).toBe('MySQL');
+            expect(normalizeDialect('NotADialect')).toBe('MySQL');
+            expect(normalizeDialect(undefined as unknown as string)).toBe('MySQL');
         });
     });
 });
